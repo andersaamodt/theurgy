@@ -1,0 +1,6 @@
+/target/
+/.theurgy-state/
+*.log
+*.tmp
+.DS_Store
+
