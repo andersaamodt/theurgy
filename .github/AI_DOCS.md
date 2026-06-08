@@ -6,6 +6,7 @@
 - Read `.github/PUSH_READY_CHECKLIST.md` before adding paths or generated output.
 - Read `docs/architecture.md` before changing runtime boundaries.
 - Read `docs/platform-quarantine.md` before adding Apple, macOS, native desktop, signing, bundle, or platform-adapter machinery.
+- Keep app verification, notarization, store review, TestFlight, App Store, Google Play, and special app-publish keys in Theurgy rather than pure wizardry or wizardry-apps.
 - Read `docs/databases.md` before introducing database-backed behavior.
 
 ## Canonical Position

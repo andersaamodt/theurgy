@@ -20,9 +20,16 @@ Apple-specific machinery belongs in Theurgy adapters, not in pure wizardry:
 - launch lifecycle hooks
 - menu bar and Dock behavior
 - code signing and notarization support
+- app verification, app-store policing, review gates, and publish-key workflows
 - Xcode-shaped project output when unavoidable
 
 Theurgy may generate or manage these files, but the durable project truth should remain a plain Theurgy manifest plus ordinary source files.
+
+## App Publishing
+
+App publishing machinery belongs in Theurgy when it touches store review, platform verification, notarization, signing credentials, App Store Connect, TestFlight, Google Play, or equivalent platform-policing systems.
+
+Wizardry-facing repositories may keep thin compatibility wrappers at old paths so existing CI and menus keep working, but the implementation should live in Theurgy. The wrapper boundary is the compromise: it preserves ordinary spell/script ergonomics while preventing platform-store assumptions from becoming part of the pure Wizardry Apps implementation layer.
 
 ## Free And Open Preference
 
@@ -35,5 +42,4 @@ When a platform gives a closed or proprietary default path, Theurgy should stand
 
 ## Wizardry Boundary
 
-Wizardry spells that need this machinery should call Theurgy spells by name after `ensure-theurgy` has established the install. They should not embed Apple, Cargo, native bundle, or web-runtime details directly.
-
+Wizardry or wizardry-apps spells that need this machinery should cross the boundary through `invoke-theurgy`, then call Theurgy spells by name. They should not embed Apple, Cargo, native bundle, Rust runtime, app verification, app-store policing, publish-key, or web-runtime details directly.

@@ -85,6 +85,7 @@ That includes:
 
 - macOS bundle structure
 - code signing and notarization workflows
+- app verification, app-store review/policing workflows, and special publish keys
 - Swift, SwiftUI, Xcode-shaped project output, and Apple lifecycle conventions
 - GTK, platform windowing, desktop IPC, and app lifecycle adapters
 - Rust build products, lockfiles, and toolchain metadata
@@ -95,13 +96,14 @@ That includes:
 This does not mean Theurgy should celebrate institutional complexity. It means Theurgy should contain it. The rule is:
 
 - keep wizardry pure when possible
+- keep wizardry-apps pure script-first and free of direct Rust, Cargo, Swift, signing, notarization, app verification/policing, special app-publish keys, and Apple-specific implementation machinery
 - put unavoidable platform-specific or enterprise-specific machinery in Theurgy
 - wrap that machinery with spells
 - keep source files and manifests plain
 - prefer free/open alternatives wherever they can meet the quality bar
 - document every compromise and every workaround
 
-Apple-specific code is a good example. A professional macOS app may need SwiftUI, bundle metadata, signing, launch behavior, menu behavior, and lifecycle hooks. Those details should not pollute wizardry itself. Theurgy can own the Apple adapter and keep it behind a narrow, documented boundary, while the app's durable project truth remains file-first and portable where possible.
+Apple-specific code is a good example. A professional macOS app may need SwiftUI, bundle metadata, signing, launch behavior, menu behavior, lifecycle hooks, verification, notarization, review gates, and publishing keys. Those details should not pollute wizardry or wizardry-apps. Theurgy can own the Apple adapter and keep it behind a narrow, documented boundary, while the app's durable project truth remains file-first and portable where possible.
 
 ## Wizardry Compromises
 
@@ -116,6 +118,7 @@ Theurgy exists because complex native desktop apps and enterprise-level websites
 - **Generated native code**: desktop support may emit SwiftUI, GTK, or other platform-native sources. Minimize this by making generated output reproducible and keeping the source manifest authoritative.
 - **Platform-specific adapters**: native desktop quality requires platform-owned behavior for windows, menus, IPC, and app lifecycle. Minimize this by keeping adapters thin over one shared runtime model.
 - **Apple-language and closed-platform accommodation**: professional macOS support may require Swift, SwiftUI, app bundle metadata, signing, notarization, and other Apple-specific conventions. Minimize this by quarantining Apple-specific code under Theurgy adapters and never moving that machinery into pure wizardry.
+- **App verification and publish-key accommodation**: professional app distribution may require signing keys, notarization credentials, store review gates, app verification metadata, and platform policing workflows. Minimize this by keeping credentials out of repos, keeping publishing flows explicit, and quarantining those platform-specific release surfaces in Theurgy.
 - **Longer edit-run loop**: compiled code can be slower to iterate on than editing a spell. Minimize this by keeping prototyping in wizardry and using Theurgy only when integration/performance pressure justifies it.
 - **Optional databases**: some enterprise cases need transactions, query acceleration, replication, or high-frequency user/session writes. Minimize this by making files the default source of truth and treating databases as optional indexes or transaction layers.
 - **Derived indexes and caches**: enterprise websites need fast lookup and rendering paths. Minimize this by deriving them deterministically from source files and making rebuild behavior explicit.
@@ -153,6 +156,8 @@ Website support in Forge should mean repo and project management, not deployment
 - `src/` contains the Rust runtime and scaffold engine.
 - `docs/` contains architecture decisions.
 - `docs/platform-quarantine.md` defines where Apple and platform-specific machinery belongs.
+- `docs/app-publish-secrets.md` documents protected app publishing credentials now quarantined in Theurgy.
+- `tools/release/` contains quarantined app verification, signing, notarization, TestFlight, App Store, and Play Store release adapters.
 - `.github/` contains AI-facing standards.
 - `spells/` contains user-facing spells.
 - `install` installs Theurgy at `~/theurgy` and exposes spell wrappers.
