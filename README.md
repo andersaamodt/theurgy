@@ -2,7 +2,41 @@
 
 theurgy is enterprise-level wizardry.
 
-It keeps wizardry's file-first, inspectable, hacker-friendly posture, but moves the parts that become slow or fragile at high complexity into integrated Rust runtimes. The goal is not to deprecate wizardry. The goal is to keep wizardry excellent at prototyping, proof-of-concept work, shell orchestration, and transparent tools while giving complex native desktop applications and high-performance websites a lower-level execution path.
+It applies the wizardry ethos to professional-quality native desktop applications and enterprise-level websites. It does not replace wizardry. It protects wizardry by keeping wizardry pure, shell-first, minimal, file-first, and excellent for prototyping, proof-of-concept work, transparent UNIX workflows, and small-to-medium tools.
+
+Theurgy exists for the places where that purity runs into hard performance and integration pressure: complex native desktop apps and scalable, reliable, fast websites. In those places, Theurgy makes the minimum necessary compromises against minimalism and toward institutional software practice, then standardizes those compromises so they stay inspectable, reusable, and as free/open as possible.
+
+## What Theurgy Is For
+
+Use Theurgy when the work needs at least one of these:
+
+- a complex native desktop app with many moving parts
+- a resident runtime instead of repeated shell process fan-out
+- fast state hydration, indexing, routing, IPC, or event dispatch
+- platform-native desktop behavior that cannot be cleanly faked in shell
+- a professional app surface where startup, lifecycle, and responsiveness matter
+- an enterprise-level website with high traffic, low latency, reliable routing, or derived indexes
+- optional transaction/query layers that plain files cannot satisfy cleanly
+
+A Rust-backed native desktop app can be solid in a way that an app backed by many shell scripts cannot quite be. Rust gives Theurgy one integrated runtime for state, actions, IPC, rendering preparation, and platform adapters, while spells remain the user-facing way into the system.
+
+For websites, Theurgy should grow a Rust-based web runtime: file-first where possible, static-first where possible, but able to handle high-performance routing, rendering, indexing, caching, and optional database-backed transaction layers when enterprise-level reliability requires them.
+
+## What Wizardry Is Still For
+
+Use ordinary wizardry when the work is:
+
+- a prototype
+- a proof of concept
+- a menu-driven UNIX workflow
+- a small or medium app that does not suffer from process fan-out
+- a shell orchestration task
+- a file transformation pipeline
+- an installer, repair tool, audit, probe, or admin spell
+- a website that can remain simple, static, shell-built, and Headquarters-managed
+- any workflow where POSIX sh keeps the system more understandable than a compiled runtime
+
+Default to wizardry. Escalate to Theurgy only when integration, responsiveness, scale, or platform quality actually justifies the compromise.
 
 ## What Exists Now
 
@@ -26,11 +60,40 @@ spells/inspect-theurgy-project sample-desktop
 ## Design Commitments
 
 - Wizardry remains the human-facing spell/menu layer where it fits.
-- Theurgy replaces script fan-out with Rust when startup, parallelism, IPC, rendering, or state hydration need one integrated runtime.
+- Theurgy replaces shell fan-out with Rust only when startup, parallelism, IPC, rendering, routing, or state hydration need one integrated runtime.
+- Spells remain the normal user-facing interface.
 - Plain files remain the durable source of truth by default.
-- Databases are optional acceleration and transaction tools, not the default authority.
+- Databases are optional acceleration, transaction, and replication tools, not the default authority.
+- Free software and open formats are preferred over proprietary frameworks, commercial enclosures, and closed platform assumptions.
+- Institutional cruft is quarantined, named, documented, and minimized.
 - Generated blank projects are AGPL-3.0-or-later plus the Wizardry Addendum.
 - Theurgy itself is OWL 3.1, matching the Wizardry project family.
+
+## Institutional Cruft Quarantine
+
+Theurgy should be the quarantine layer for the parts of professional app development that do not belong in pure wizardry.
+
+That includes:
+
+- macOS bundle structure
+- code signing and notarization workflows
+- Swift, SwiftUI, Xcode-shaped project output, and Apple lifecycle conventions
+- GTK, platform windowing, desktop IPC, and app lifecycle adapters
+- Rust build products, lockfiles, and toolchain metadata
+- web server runtimes, caches, indexes, and schema migrations
+- optional database layers
+- generated native source trees
+
+This does not mean Theurgy should celebrate institutional complexity. It means Theurgy should contain it. The rule is:
+
+- keep wizardry pure when possible
+- put unavoidable platform-specific or enterprise-specific machinery in Theurgy
+- wrap that machinery with spells
+- keep source files and manifests plain
+- prefer free/open alternatives wherever they can meet the quality bar
+- document every compromise and every workaround
+
+Apple-specific code is a good example. A professional macOS app may need SwiftUI, bundle metadata, signing, launch behavior, menu behavior, and lifecycle hooks. Those details should not pollute wizardry itself. Theurgy can own the Apple adapter and keep it behind a narrow, documented boundary, while the app's durable project truth remains file-first and portable where possible.
 
 ## Wizardry Compromises
 
@@ -44,6 +107,7 @@ Theurgy exists because complex native desktop apps and enterprise-level websites
 - **Stronger schemas and typed contracts**: enterprise support needs manifests, structured snapshots, and typed actions rather than loose shell text flows. Minimize this by keeping formats plain text, stable, and hand-editable.
 - **Generated native code**: desktop support may emit SwiftUI, GTK, or other platform-native sources. Minimize this by making generated output reproducible and keeping the source manifest authoritative.
 - **Platform-specific adapters**: native desktop quality requires platform-owned behavior for windows, menus, IPC, and app lifecycle. Minimize this by keeping adapters thin over one shared runtime model.
+- **Apple-language and closed-platform accommodation**: professional macOS support may require Swift, SwiftUI, app bundle metadata, signing, notarization, and other Apple-specific conventions. Minimize this by quarantining Apple-specific code under Theurgy adapters and never moving that machinery into pure wizardry.
 - **Longer edit-run loop**: compiled code can be slower to iterate on than editing a spell. Minimize this by keeping prototyping in wizardry and using Theurgy only when integration/performance pressure justifies it.
 - **Optional databases**: some enterprise cases need transactions, query acceleration, replication, or high-frequency user/session writes. Minimize this by making files the default source of truth and treating databases as optional indexes or transaction layers.
 - **Derived indexes and caches**: enterprise websites need fast lookup and rendering paths. Minimize this by deriving them deterministically from source files and making rebuild behavior explicit.
@@ -51,11 +115,30 @@ Theurgy exists because complex native desktop apps and enterprise-level websites
 - **Dependency risk**: enterprise-quality Rust and web work can tempt framework and crate sprawl. Minimize this by preferring small free software dependencies, documenting every dependency class, and avoiding proprietary or commercial-enclosure assumptions.
 - **Less direct shell composability**: typed runtime actions are safer and faster but less free-form than piping spells together. Minimize this by exposing meaningful spell entrypoints and preserving CLI parity for GUI behavior.
 
+## Forge And Project Types
+
+Theurgy should not become a generic new App Forge app type.
+
+Forge project types answer what is being made:
+
+- cross-platform app
+- native desktop app
+- native mobile app
+- game project
+- website project
+
+Theurgy answers what runtime tier backs the project. It is an orthogonal dimension. In Forge, Theurgy should appear only where it is justified:
+
+- native desktop app with runtime `theurgy`
+- website project with runtime `theurgy`
+
+Website support in Forge should mean repo and project management, not deployment. Headquarters should remain the deployment controller for Headquarters-managed sites. Forge can create, import, inspect, and manage the source repo; Headquarters can publish, monitor, and operate the live site.
+
 ## Tracks
 
 **Native desktop apps** use Rust for the control plane, state model, command dispatch, and platform adapters. Native UI generation can target SwiftUI, GTK, or other platform-owned frontends without routing every action through a chain of shell scripts.
 
-**Enterprise web apps** use Rust for routing, content indexing, static rendering, API handlers, and deployment artifacts. The web track is intentionally boring where boring is good: HTTP, files, caches, indexes, and free software components.
+**Enterprise web apps** use Rust for routing, content indexing, static rendering, API handlers, cache invalidation, and deployment artifacts. The web track should remain boring where boring is good: HTTP, files, caches, indexes, and free software components.
 
 ## Repository Map
 
