@@ -57,6 +57,14 @@ spells/conjure-enterprise-website sample-website
 spells/inspect-theurgy-project sample-desktop
 ```
 
+Install locally:
+
+```sh
+./install
+```
+
+The install path is `${THEURGY_HOME:-$HOME/theurgy}`. The installer also writes user-local wrappers so wizardry spells can call Theurgy spells by name, such as `assay-theurgy` or `conjure-native-desktop`.
+
 ## Design Commitments
 
 - Wizardry remains the human-facing spell/menu layer where it fits.
@@ -144,8 +152,11 @@ Website support in Forge should mean repo and project management, not deployment
 
 - `src/` contains the Rust runtime and scaffold engine.
 - `docs/` contains architecture decisions.
+- `docs/platform-quarantine.md` defines where Apple and platform-specific machinery belongs.
 - `.github/` contains AI-facing standards.
 - `spells/` contains user-facing spells.
+- `install` installs Theurgy at `~/theurgy` and exposes spell wrappers.
+- `uninstall` removes the installed wrappers and `~/theurgy` install.
 
 ## Storage
 
