@@ -158,6 +158,7 @@ Website support in Forge should mean repo and project management, not deployment
 - `docs/platform-quarantine.md` defines where Apple and platform-specific machinery belongs.
 - `docs/app-publish-secrets.md` documents protected app publishing credentials now quarantined in Theurgy.
 - `tools/release/` contains quarantined app verification, signing, notarization, TestFlight, App Store, and Play Store release adapters.
+- `.tests/release/` preserves adversarial coverage for quarantined app-publishing release adapters.
 - `.github/` contains AI-facing standards.
 - `spells/` contains user-facing spells.
 - `install` installs Theurgy at `~/theurgy` and exposes spell wrappers.
