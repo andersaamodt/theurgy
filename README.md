@@ -1,10 +1,10 @@
 # Theurgy
 
-theurgy is enterprise-level wizardry: the wizardry ethos applied to professional native desktop apps and enterprise-level websites.
+Theurgy is enterprise-level wizardry: the wizardry ethos applied to professional native desktop apps and enterprise-level websites.
 
 It exists where pure shell-first wizardry starts to lose against integration pressure: many moving parts, fast state hydration, typed IPC, durable queues, platform lifecycle behavior, derived indexes, high-traffic routing, and operational reliability. Default to wizardry. Escalate to theurgy only when integration, responsiveness, scale, or platform quality justifies the compromise.
 
-theurgy is not a Rust project in spirit. It is an opinionated knowledge library and minimalist practice set for building non-commercial open source software at professional quality. Right now, Rust is the simplest strong default for this layer: lower-level than most web/app frameworks, free software, fast, memory-safe, widely tooled, and less institutionally compromised than options such as Google's Go. To keep the system integrated, theurgy currently ships one implementation language: Rust. That can evolve as the state of the art evolves.
+Theurgy is not a Rust project in spirit. It is an opinionated knowledge library and minimalist practice set for building non-commercial open source software at professional quality. Right now, Rust is the simplest strong default for this layer: lower-level than most web/app frameworks, free software, fast, memory-safe, widely tooled, and less institutionally compromised than options such as Google's Go. To keep the system integrated, theurgy currently ships one implementation language: Rust. That can evolve as the state of the art evolves.
 
 ## What It Does
 
@@ -71,7 +71,7 @@ Theurgy is the quarantine layer for the parts of professional app development th
 - optional database layers
 - generated native source trees
 
-theurgy should contain institutional complexity without normalizing it. Keep wizardry pure where possible. Keep wizardry-apps script-first and free of direct Rust, Cargo, Swift, signing, notarization, app verification/policing, special app-publish keys, and Apple-specific implementation machinery. Put unavoidable platform-specific or enterprise-specific machinery in theurgy, wrap it with spells, keep source files plain, prefer free/open alternatives, and document the compromise.
+Theurgy should contain institutional complexity without normalizing it. Keep wizardry pure where possible. Keep wizardry-apps script-first and free of direct Rust, Cargo, Swift, signing, notarization, app verification/policing, special app-publish keys, and Apple-specific implementation machinery. Put unavoidable platform-specific or enterprise-specific machinery in theurgy, wrap it with spells, keep source files plain, prefer free/open alternatives, and document the compromise.
 
 Apple-specific code is the obvious example. Professional macOS apps may need SwiftUI, bundle metadata, signing, launch behavior, lifecycle hooks, verification, notarization, review gates, and publishing keys. The Apple adapter belongs in theurgy behind a narrow boundary; the app's durable project truth should remain file-first and portable where possible.
 
@@ -100,7 +100,7 @@ Theurgy makes these compromises against pure shell-first wizardry. Keep this tab
 
 ## Forge And Project Types
 
-theurgy should not become a generic new App Forge app type. Forge project types answer what is being made:
+Theurgy should not become a generic new App Forge app type. Forge project types answer what is being made:
 
 - cross-platform app
 - native desktop app
@@ -108,7 +108,7 @@ theurgy should not become a generic new App Forge app type. Forge project types 
 - game project
 - website project
 
-theurgy answers what runtime tier backs the project. In Forge, it should appear only where justified:
+Theurgy answers what runtime tier backs the project. In Forge, it should appear only where justified:
 
 - native desktop app with runtime `theurgy`
 - website project with runtime `theurgy`
@@ -136,4 +136,4 @@ Website support in Forge should mean repo and project management, not deployment
 
 ## Storage
 
-theurgy project source belongs in the project checkout. Runtime state, caches, logs, and build products belong outside the checkout or in ignored paths. Generated project skeletons include local ignore rules for `target/`, `.theurgy-state/`, and logs.
+Theurgy project source belongs in the project checkout. Runtime state, caches, logs, and build products belong outside the checkout or in ignored paths. Generated project skeletons include local ignore rules for `target/`, `.theurgy-state/`, and logs.
