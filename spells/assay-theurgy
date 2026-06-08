@@ -1,8 +1,7 @@
 #!/bin/sh
-# Report Theurgy runtime health and core posture.
+# Report theurgy runtime health and core posture.
 
 set -eu
 
 repo_dir=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd -P)
 exec cargo run --quiet --manifest-path "$repo_dir/Cargo.toml" --bin theurgy-runtime -- assay
-

@@ -1,6 +1,6 @@
 # App Publish Secrets
 
-App publishing credentials are quarantined in Theurgy because they touch app verification, store review, platform policing, notarization, and special publish keys.
+App publishing credentials are quarantined in theurgy because they touch app verification, store review, platform policing, notarization, and special publish keys.
 
 All signing credentials must be stored as GitHub encrypted secrets in protected environments.
 Tag-triggered release jobs are configured to fail when required signing secrets are missing.

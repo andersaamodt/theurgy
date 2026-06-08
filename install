@@ -1,13 +1,13 @@
 #!/bin/sh
-# Install Theurgy at ~/theurgy and expose its spells by name.
+# Install theurgy at ~/theurgy and expose its spells by name.
 
 case "${1-}" in
 --help|--usage|-h)
   cat <<'USAGE'
 Usage: install
 
-Installs Theurgy to ${THEURGY_HOME:-$HOME/theurgy} and writes user-local
-wrappers for Theurgy spells.
+Installs theurgy to ${THEURGY_HOME:-$HOME/theurgy} and writes user-local
+wrappers for theurgy spells.
 USAGE
   exit 0
   ;;
@@ -57,7 +57,6 @@ WRAPPER
   mv "$tmp_file" "$bin_dir/$name"
 done
 
-printf 'Installed Theurgy\n'
+printf 'Installed theurgy\n'
 printf 'Home: %s\n' "$theurgy_home"
 printf 'Wrappers: %s\n' "$bin_dir"
-

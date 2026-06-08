@@ -1,12 +1,12 @@
 #!/bin/sh
-# Show the file-first manifest summary for a Theurgy project.
+# Show the file-first manifest summary for a theurgy project.
 
 case "${1-}" in
 --help|--usage|-h)
   cat <<'USAGE'
 Usage: inspect-theurgy-project [PATH]
 
-Inspect a Theurgy project. If PATH is omitted, the current directory is used.
+Inspect a theurgy project. If PATH is omitted, the current directory is used.
 USAGE
   exit 0
   ;;
@@ -16,4 +16,3 @@ set -eu
 
 repo_dir=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd -P)
 exec cargo run --quiet --manifest-path "$repo_dir/Cargo.toml" --bin theurgy-runtime -- inspect "$@"
-

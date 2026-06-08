@@ -1,12 +1,12 @@
 #!/bin/sh
-# Remove user-local Theurgy wrappers and the ~/theurgy install link/checkout.
+# Remove user-local theurgy wrappers and the ~/theurgy install link/checkout.
 
 case "${1-}" in
 --help|--usage|-h)
   cat <<'USAGE'
 Usage: uninstall
 
-Removes user-local Theurgy spell wrappers and ${THEURGY_HOME:-$HOME/theurgy}.
+Removes user-local theurgy spell wrappers and ${THEURGY_HOME:-$HOME/theurgy}.
 USAGE
   exit 0
   ;;
@@ -36,5 +36,4 @@ elif [ -d "$theurgy_home/.git" ]; then
   rm -rf "$theurgy_home"
 fi
 
-printf 'Removed Theurgy\n'
-
+printf 'Removed theurgy\n'

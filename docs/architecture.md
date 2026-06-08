@@ -31,4 +31,3 @@ Theurgy can ingest wizardry-style HTML and site files, but it should not force t
 - compatible with static rendering
 - expressive enough for component reuse
 - deterministic enough for reproducible output
-

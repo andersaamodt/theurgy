@@ -26,4 +26,3 @@ Use a database only when the app needs at least one of these:
 - Keep export/import paths so data can return to plain files.
 - Treat databases as the transaction/index layer, not as an excuse to hide application truth.
 - Do not introduce a network database as the first answer to ordinary website scale.
-
