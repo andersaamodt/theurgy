@@ -5,5 +5,8 @@ edition = "2021"
 license = "LicenseRef-OWL-3.1"
 description = "Enterprise-level Wizardry for high-performance native apps and websites."
 
-[dependencies]
+[[bin]]
+name = "theurgy-runtime"
+path = "src/main.rs"
 
+[dependencies]

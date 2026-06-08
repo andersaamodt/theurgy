@@ -1,6 +1,8 @@
 # Theurgy Ethos
 
 - Keep wizardry as the transparent prototyping and orchestration layer.
+- Expose user workflows as well-named spells, not a catch-all command with subcommands.
+- Minimize arguments; default paths should follow the project name when that is clear.
 - Move repeated, latency-sensitive, or graph-shaped work into integrated Rust.
 - Do not paper over performance problems with one-off exceptions.
 - Keep the user-facing workflow convenient without hiding source files, Git history, or state paths.
@@ -10,4 +12,3 @@
 - Avoid proprietary framework lock-in and commercial platform assumptions.
 - Keep bridges explicit: shell, Rust, native UI, and web handlers must have readable contracts.
 - Preserve CLI parity for meaningful GUI features.
-

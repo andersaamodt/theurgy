@@ -8,7 +8,7 @@ It keeps wizardry's file-first, inspectable, hacker-friendly posture, but moves 
 
 This first repository version includes:
 
-- a Rust `theurgy` CLI
+- well-named spells backed by a Rust runtime
 - project scaffolding for native desktop apps and enterprise web apps
 - file-first project manifests
 - generated app licensing that follows the Wizardry Apps split
@@ -17,10 +17,10 @@ This first repository version includes:
 Run:
 
 ```sh
-cargo run -- doctor
-cargo run -- new desktop sample-desktop /tmp/sample-desktop
-cargo run -- new website sample-website /tmp/sample-website
-cargo run -- inspect /tmp/sample-desktop
+spells/assay-theurgy
+spells/conjure-native-desktop sample-desktop
+spells/conjure-enterprise-website sample-website
+spells/inspect-theurgy-project sample-desktop
 ```
 
 ## Design Commitments
@@ -40,11 +40,11 @@ cargo run -- inspect /tmp/sample-desktop
 
 ## Repository Map
 
-- `src/` contains the Rust CLI and scaffold engine.
+- `src/` contains the Rust runtime and scaffold engine.
 - `docs/` contains architecture decisions.
 - `.github/` contains AI-facing standards.
+- `spells/` contains user-facing spells.
 
 ## Storage
 
 Theurgy project source belongs in the project checkout. Runtime state, caches, logs, and build products belong outside the checkout or in ignored paths. Generated project skeletons include local ignore rules for `target/`, `.theurgy-state/`, and logs.
-

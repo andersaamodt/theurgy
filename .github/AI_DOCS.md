@@ -18,6 +18,5 @@
 ## Validation
 - Run `cargo fmt --check`.
 - Run `cargo test`.
-- Run `cargo run -- doctor`.
-- Run at least one scaffold command into a temporary directory and inspect it.
-
+- Run `spells/assay-theurgy`.
+- Run at least one conjure spell into a temporary directory and inspect it with `spells/inspect-theurgy-project`.

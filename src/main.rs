@@ -37,14 +37,6 @@ enum ProjectKind {
 }
 
 impl ProjectKind {
-    fn parse(value: &str) -> Option<Self> {
-        match value {
-            "desktop" => Some(Self::Desktop),
-            "website" | "web" => Some(Self::Website),
-            _ => None,
-        }
-    }
-
     fn as_str(self) -> &'static str {
         match self {
             Self::Desktop => "desktop",
@@ -55,7 +47,7 @@ impl ProjectKind {
 
 fn main() {
     if let Err(error) = run(env::args().collect()) {
-        eprintln!("theurgy: {error}");
+        eprintln!("theurgy-runtime: {error}");
         std::process::exit(1);
     }
 }
@@ -66,8 +58,9 @@ fn run(args: Vec<String>) -> Result<()> {
             print_usage();
             Ok(())
         }
-        Some("doctor") => doctor(),
-        Some("new") => command_new(&args[2..]),
+        Some("assay") => assay(),
+        Some("conjure-native-desktop") => command_conjure(ProjectKind::Desktop, &args[2..]),
+        Some("conjure-enterprise-website") => command_conjure(ProjectKind::Website, &args[2..]),
         Some("inspect") => command_inspect(&args[2..]),
         Some(other) => Err(TheurgyError::new(format!("unknown command: {other}")).into()),
     }
@@ -75,11 +68,11 @@ fn run(args: Vec<String>) -> Result<()> {
 
 fn print_usage() {
     println!(
-        "Usage:\n  theurgy doctor\n  theurgy new desktop NAME PATH\n  theurgy new website NAME PATH\n  theurgy inspect PATH"
+        "Internal runtime. Use spells/assay-theurgy, spells/conjure-native-desktop, spells/conjure-enterprise-website, or spells/inspect-theurgy-project."
     );
 }
 
-fn doctor() -> Result<()> {
+fn assay() -> Result<()> {
     println!("theurgy=ok");
     println!("runtime=rust");
     println!("wizardry_relation=extension-not-replacement");
@@ -88,15 +81,15 @@ fn doctor() -> Result<()> {
     Ok(())
 }
 
-fn command_new(args: &[String]) -> Result<()> {
-    if args.len() != 3 {
-        return Err(TheurgyError::new("usage: theurgy new desktop|website NAME PATH").into());
+fn command_conjure(kind: ProjectKind, args: &[String]) -> Result<()> {
+    if args.is_empty() || args.len() > 2 {
+        return Err(TheurgyError::new("usage: spell NAME [PATH]").into());
     }
-
-    let kind = ProjectKind::parse(&args[0])
-        .ok_or_else(|| TheurgyError::new("project kind must be desktop or website"))?;
-    let name = validate_name(&args[1])?;
-    let path = PathBuf::from(&args[2]);
+    let name = validate_name(&args[0])?;
+    let path = args
+        .get(1)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(name));
 
     create_project(kind, name, &path)?;
     println!("created={} path={}", kind.as_str(), path.display());
@@ -104,10 +97,13 @@ fn command_new(args: &[String]) -> Result<()> {
 }
 
 fn command_inspect(args: &[String]) -> Result<()> {
-    if args.len() != 1 {
-        return Err(TheurgyError::new("usage: theurgy inspect PATH").into());
+    if args.len() > 1 {
+        return Err(TheurgyError::new("usage: inspect-theurgy-project [PATH]").into());
     }
-    let path = PathBuf::from(&args[0]);
+    let path = args
+        .first()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
     let manifest_path = path.join("theurgy.project.toml");
     let manifest = fs::read_to_string(&manifest_path).map_err(|error| {
         TheurgyError::new(format!(
@@ -337,5 +333,17 @@ mod tests {
     fn generated_paths_are_plain_files() {
         let path = Path::new("theurgy.project.toml");
         assert_eq!(path.file_name(), Some(OsStr::new("theurgy.project.toml")));
+    }
+
+    #[test]
+    fn conjure_defaults_path_to_name() {
+        let cwd = env::current_dir().unwrap();
+        let root = test_root("default-path");
+        fs::create_dir_all(&root).unwrap();
+        env::set_current_dir(&root).unwrap();
+        command_conjure(ProjectKind::Desktop, &[String::from("default-app")]).unwrap();
+        assert!(root.join("default-app/theurgy.project.toml").exists());
+        env::set_current_dir(cwd).unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
 }

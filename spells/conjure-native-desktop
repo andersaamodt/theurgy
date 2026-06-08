@@ -1,0 +1,19 @@
+#!/bin/sh
+# Create a native desktop Theurgy project.
+
+case "${1-}" in
+--help|--usage|-h)
+  cat <<'USAGE'
+Usage: conjure-native-desktop NAME [PATH]
+
+Create a native desktop project. If PATH is omitted, NAME is used.
+USAGE
+  exit 0
+  ;;
+esac
+
+set -eu
+
+repo_dir=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd -P)
+exec cargo run --quiet --manifest-path "$repo_dir/Cargo.toml" --bin theurgy-runtime -- conjure-native-desktop "$@"
+

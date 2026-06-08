@@ -13,7 +13,7 @@ The native desktop track is for complex apps where wizardry script fan-out becom
 
 ## Initial Scaffold
 
-`theurgy new desktop NAME PATH` creates:
+`spells/conjure-native-desktop NAME [PATH]` creates:
 
 - `theurgy.project.toml`
 - `src/app.theurgy`
@@ -22,5 +22,4 @@ The native desktop track is for complex apps where wizardry script fan-out becom
 - `LICENSE`
 - `WIZARDRY_ADDENDUM.md`
 
-The generated desktop project is intentionally small, but it starts with the right boundaries: Rust runtime, file-first metadata, ignored local state, and sellable copyleft licensing.
-
+If `PATH` is omitted, the spell uses `NAME`. The generated desktop project is intentionally small, but it starts with the right boundaries: Rust runtime, file-first metadata, ignored local state, and sellable copyleft licensing.

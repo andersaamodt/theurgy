@@ -13,7 +13,7 @@ The enterprise web track is for websites that need professional performance with
 
 ## Initial Scaffold
 
-`theurgy new website NAME PATH` creates:
+`spells/conjure-enterprise-website NAME [PATH]` creates:
 
 - `theurgy.project.toml`
 - `content/pages/index.html`
@@ -22,5 +22,4 @@ The enterprise web track is for websites that need professional performance with
 - `LICENSE`
 - `WIZARDRY_ADDENDUM.md`
 
-The scaffold is not tied to Svelte or another commercial-adjacent framework. Component syntax can evolve, but the runtime commitment is free software, inspectable files, and reproducible rendering.
-
+If `PATH` is omitted, the spell uses `NAME`. The scaffold is not tied to Svelte or another commercial-adjacent framework. Component syntax can evolve, but the runtime commitment is free software, inspectable files, and reproducible rendering.
