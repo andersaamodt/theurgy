@@ -41,6 +41,7 @@ Install locally:
 
 ```sh
 ./install
+./install --uninstall
 ```
 
 The install path is `${THEURGY_HOME:-$HOME/theurgy}`. The installer writes user-local wrappers so wizardry spells can call theurgy spells by name, such as `assay-theurgy` or `conjure-native-desktop`.
@@ -131,8 +132,7 @@ Website support in Forge should mean repo and project management, not deployment
 - `.tests/release/` preserves adversarial coverage for quarantined app-publishing release adapters.
 - `.github/` contains AI-facing standards.
 - `spells/` contains user-facing spells.
-- `install` installs theurgy at `~/theurgy` and exposes spell wrappers.
-- `uninstall` removes the installed wrappers and `~/theurgy` install.
+- `install` installs theurgy at `~/theurgy`, exposes spell wrappers, and removes them again with `--uninstall`.
 
 ## Storage
 

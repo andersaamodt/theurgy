@@ -4,10 +4,13 @@
 case "${1-}" in
 --help|--usage|-h)
   cat <<'USAGE'
-Usage: install
+Usage: install [--uninstall]
 
 Installs theurgy to ${THEURGY_HOME:-$HOME/theurgy} and writes user-local
 wrappers for theurgy spells.
+
+Use --uninstall to remove theurgy wrappers and the ${THEURGY_HOME:-$HOME/theurgy}
+install link/checkout.
 USAGE
   exit 0
   ;;
@@ -24,6 +27,38 @@ elif [ -d "$HOME/.local/bin" ]; then
   bin_dir=$HOME/.local/bin
 else
   bin_dir=$HOME/.local/bin
+fi
+
+uninstall_mode=0
+case "${1-}" in
+  --uninstall)
+    uninstall_mode=1
+    ;;
+  "")
+    ;;
+  *)
+    printf '%s\n' "install: unknown option '$1'" >&2
+    exit 2
+    ;;
+esac
+
+if [ "$uninstall_mode" -eq 1 ]; then
+  if [ -d "$theurgy_home/spells" ]; then
+    for spell in "$theurgy_home"/spells/*; do
+      [ -f "$spell" ] || continue
+      name=$(basename "$spell")
+      rm -f "$bin_dir/$name"
+    done
+  fi
+
+  if [ -L "$theurgy_home" ]; then
+    rm -f "$theurgy_home"
+  elif [ -d "$theurgy_home/.git" ]; then
+    rm -rf "$theurgy_home"
+  fi
+
+  printf 'Removed theurgy\n'
+  exit 0
 fi
 
 mkdir -p "$(dirname "$theurgy_home")" "$bin_dir"
