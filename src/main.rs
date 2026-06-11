@@ -77,6 +77,7 @@ fn run(args: Vec<String>) -> Result<()> {
         }
         Some("validate-operation-history") => command_validate_operation_history(&args[2..]),
         Some("validate-runtime-manifest") => command_validate_runtime_manifest(&args[2..]),
+        Some("validate-generated-runtime") => command_validate_generated_runtime(&args[2..]),
         Some("validate-surface-ir") => command_validate_surface_ir(&args[2..]),
         Some("project-surface") => command_project_surface(&args[2..]),
         Some("compile-native") => command_compile_native(&args[2..]),
@@ -257,6 +258,20 @@ fn command_validate_runtime_manifest(args: &[String]) -> Result<()> {
     if let Some(path) = summary.mobile_surface_ir {
         println!("mobile_surface_ir={path}");
     }
+    Ok(())
+}
+
+fn command_validate_generated_runtime(args: &[String]) -> Result<()> {
+    if args.len() != 1 {
+        return Err(TheurgyError::new("usage: validate-generated-runtime PATH").into());
+    }
+    let value = read_json(Path::new(&args[0]))?;
+    let summary = validate_generated_runtime(&value)?;
+    println!("status=ok");
+    println!("schema=theurgy-generated-runtime/v1");
+    println!("app={}", summary.app_id);
+    println!("target={}", summary.target);
+    println!("actions={}", summary.actions);
     Ok(())
 }
 
@@ -688,6 +703,13 @@ struct RuntimeManifestSummary {
 }
 
 #[derive(Debug, Eq, PartialEq)]
+struct GeneratedRuntimeSummary {
+    app_id: String,
+    target: String,
+    actions: usize,
+}
+
+#[derive(Debug, Eq, PartialEq)]
 struct SurfaceSummary {
     schema: String,
     product: String,
@@ -718,6 +740,106 @@ fn read_json(path: &Path) -> Result<String> {
 fn validate_runtime_manifest(text: &str) -> Result<RuntimeManifestSummary> {
     let value = parse_json(text)?;
     validate_runtime_manifest_value(&value)
+}
+
+fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
+    let value = parse_json(text)?;
+    expect_value_string(&value, "version", "theurgy-generated-runtime/v1")?;
+    let app_id = value_string(&value, "app")
+        .filter(|id| valid_slug(id))
+        .ok_or_else(|| TheurgyError::new("generated runtime app must be a lowercase slug"))?;
+    let target = value_string(&value, "target")
+        .filter(|target| matches!(target.as_str(), "macos" | "linux" | "ios" | "android"))
+        .ok_or_else(|| {
+            TheurgyError::new("generated runtime target must be macos, linux, ios, or android")
+        })?;
+    value_string(&value, "protocol")
+        .filter(|protocol| !protocol.is_empty())
+        .ok_or_else(|| TheurgyError::new("generated runtime protocol required"))?;
+    for key in ["stateCommand", "actionCommand"] {
+        if value_string_array(&value, key)?.is_empty() {
+            return Err(
+                TheurgyError::new(format!("generated runtime {key} must be non-empty")).into(),
+            );
+        }
+    }
+    for key in [
+        "statusCommand",
+        "historyCommand",
+        "daemonCommand",
+        "productTargets",
+        "productActions",
+        "productCapabilities",
+        "productPermissions",
+        "productDomainObjects",
+        "productPersistenceRoots",
+        "productBackgroundJobs",
+        "productReleaseTargets",
+        "productAuditKeys",
+        "surfaceActions",
+        "surfaceRoles",
+    ] {
+        optional_string_array(&value, key, &format!("generated runtime {key}"))?;
+    }
+    let product_actions = value_string_array(&value, "productActions")?;
+    if product_actions.is_empty() {
+        return Err(TheurgyError::new("generated runtime productActions required").into());
+    }
+    let surface_actions = value_string_array(&value, "surfaceActions")?;
+    for action_id in &surface_actions {
+        if !product_actions
+            .iter()
+            .any(|product_action| product_action == action_id)
+        {
+            return Err(TheurgyError::new(format!(
+                "generated runtime surface action not declared in productActions: {action_id}"
+            ))
+            .into());
+        }
+    }
+    let contracts = value_array(&value, "productActionContracts")?;
+    if contracts.len() != product_actions.len() {
+        return Err(TheurgyError::new(
+            "generated runtime productActionContracts must match productActions length",
+        )
+        .into());
+    }
+    let mut contract_ids = Vec::new();
+    for contract in contracts {
+        contract_ids.push(validate_generated_action_contract(contract)?);
+    }
+    if contract_ids != product_actions {
+        return Err(TheurgyError::new(
+            "generated runtime productActionContracts order must match productActions",
+        )
+        .into());
+    }
+    value_string(&value, "surface")
+        .filter(|surface| !surface.is_empty())
+        .ok_or_else(|| TheurgyError::new("generated runtime surface required"))?;
+    let surface_schema = value_string(&value, "surfaceSchema")
+        .ok_or_else(|| TheurgyError::new("generated runtime surfaceSchema required"))?;
+    if !matches!(
+        surface_schema.as_str(),
+        "theurgy-desktop-surface-ir/v1" | "theurgy-mobile-surface-ir/v1"
+    ) {
+        return Err(TheurgyError::new("generated runtime surfaceSchema invalid").into());
+    }
+    let surface_target = value_string(&value, "surfaceTarget")
+        .ok_or_else(|| TheurgyError::new("generated runtime surfaceTarget required"))?;
+    let expected_surface_target = if matches!(target.as_str(), "macos" | "linux") {
+        "desktop"
+    } else {
+        "mobile"
+    };
+    if surface_target != target && surface_target != expected_surface_target {
+        return Err(TheurgyError::new("generated runtime surfaceTarget invalid for target").into());
+    }
+    Ok(GeneratedRuntimeSummary {
+        app_id,
+        target,
+        actions: product_actions.len(),
+    })
 }
 
 fn runtime_contract_from_manifest(text: &str) -> Result<RuntimeContract> {
@@ -1001,6 +1123,38 @@ fn validate_action_contract(action: &Value) -> Result<ActionContract> {
         output_keys: object_keys(output),
         failure_keys: object_keys(failure),
     })
+}
+
+fn validate_generated_action_contract(contract: &Value) -> Result<String> {
+    let id = value_string(contract, "id")
+        .filter(|id| valid_action_id(id))
+        .ok_or_else(|| TheurgyError::new("generated runtime action contract id invalid"))?;
+    value_string(contract, "label")
+        .filter(|label| !label.is_empty())
+        .ok_or_else(|| TheurgyError::new("generated runtime action contract label required"))?;
+    let effect = value_string(contract, "effect")
+        .ok_or_else(|| TheurgyError::new("generated runtime action contract effect invalid"))?;
+    if !matches!(
+        effect.as_str(),
+        "read" | "write" | "background" | "external" | "release"
+    ) {
+        return Err(TheurgyError::new("generated runtime action contract effect invalid").into());
+    }
+    for key in ["safe", "mutating", "longRunning", "privileged"] {
+        value_bool(contract, key).ok_or_else(|| {
+            TheurgyError::new(format!(
+                "generated runtime action contract {key} boolean required"
+            ))
+        })?;
+    }
+    for key in ["inputKeys", "outputKeys", "failureKeys"] {
+        value_string_array(contract, key).map_err(|_| {
+            TheurgyError::new(format!(
+                "generated runtime action contract {key} must be a string array"
+            ))
+        })?;
+    }
+    Ok(id)
 }
 
 fn validate_operation_record(operation: &Value) -> Result<String> {
@@ -2592,6 +2746,26 @@ mod tests {
     }
 
     #[test]
+    fn generated_runtime_schema_declares_action_contracts() {
+        let schema: Value =
+            serde_json::from_str(include_str!("../schemas/theurgy-generated-runtime-v1.json"))
+                .unwrap();
+        assert_eq!(
+            schema
+                .pointer("/properties/productActionContracts/items/$ref")
+                .and_then(Value::as_str),
+            Some("#/$defs/actionContract")
+        );
+        let required = schema
+            .pointer("/$defs/actionContract/required")
+            .and_then(Value::as_array)
+            .unwrap();
+        for key in ["id", "label", "effect", "safe", "mutating", "longRunning"] {
+            assert!(required.iter().any(|value| value.as_str() == Some(key)));
+        }
+    }
+
+    #[test]
     fn runtime_manifest_validation_requires_string_arrays() {
         let manifest = sample_runtime_manifest().replace(
             "\"stateCommand\": [\"custom-core\", \"state\"]",
@@ -2745,6 +2919,10 @@ mod tests {
         assert!(root.join("theurgy-runtime.json").exists());
         let runtime = fs::read_to_string(root.join("theurgy-runtime.json")).unwrap();
         let runtime_json: Value = serde_json::from_str(&runtime).unwrap();
+        let generated = validate_generated_runtime(&runtime).unwrap();
+        assert_eq!(generated.app_id, "deployments");
+        assert_eq!(generated.target, "linux");
+        assert_eq!(generated.actions, 2);
         assert_eq!(
             runtime_json.get("stateCommand").unwrap(),
             &serde_json::json!(["deployments-core", "runtime-state"])
@@ -2809,6 +2987,20 @@ mod tests {
         assert!(main_c.contains("json-glib/json-glib.h"));
         let meson = fs::read_to_string(root.join("meson.build")).unwrap();
         assert!(meson.contains("json-glib-1.0"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn generated_runtime_validation_rejects_action_contract_drift() {
+        let root = test_root("generated-runtime-drift");
+        compile_native(&sample_product(), "linux", &root).unwrap();
+        let runtime = fs::read_to_string(root.join("theurgy-runtime.json"))
+            .unwrap()
+            .replace("\"id\": \"publish_changes\"", "\"id\": \"not_declared\"");
+        let error = validate_generated_runtime(&runtime)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("productActionContracts order must match productActions"));
         fs::remove_dir_all(root).unwrap();
     }
 

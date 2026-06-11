@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wizardry.app/schemas/theurgy-generated-runtime-v1.json",
+  "title": "Theurgy Generated Runtime Metadata v1",
+  "type": "object",
+  "required": [
+    "version",
+    "app",
+    "target",
+    "protocol",
+    "stateCommand",
+    "actionCommand",
+    "productTargets",
+    "productActions",
+    "productActionContracts",
+    "surface",
+    "surfaceSchema",
+    "surfaceTarget",
+    "surfaceActions",
+    "surfaceRoles"
+  ],
+  "properties": {
+    "version": { "const": "theurgy-generated-runtime/v1" },
+    "app": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "target": { "enum": ["macos", "linux", "ios", "android"] },
+    "protocol": { "type": "string", "minLength": 1 },
+    "stateCommand": { "$ref": "#/$defs/command" },
+    "statusCommand": { "$ref": "#/$defs/command" },
+    "actionCommand": { "$ref": "#/$defs/command" },
+    "historyCommand": { "$ref": "#/$defs/command" },
+    "daemonCommand": { "$ref": "#/$defs/command" },
+    "productTargets": { "$ref": "#/$defs/stringList" },
+    "productActions": { "$ref": "#/$defs/actionIdList" },
+    "productActionContracts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/actionContract" },
+      "minItems": 1
+    },
+    "productCapabilities": { "$ref": "#/$defs/stringList" },
+    "productPermissions": { "$ref": "#/$defs/stringList" },
+    "productDomainObjects": { "$ref": "#/$defs/stringList" },
+    "productPersistenceRoots": { "$ref": "#/$defs/stringList" },
+    "productBackgroundJobs": { "$ref": "#/$defs/stringList" },
+    "productReleaseTargets": { "$ref": "#/$defs/stringList" },
+    "productAuditKeys": { "$ref": "#/$defs/stringList" },
+    "surface": { "type": "string", "minLength": 1 },
+    "surfaceSchema": {
+      "enum": ["theurgy-desktop-surface-ir/v1", "theurgy-mobile-surface-ir/v1"]
+    },
+    "surfaceTarget": { "type": "string", "minLength": 1 },
+    "surfaceActions": { "$ref": "#/$defs/actionIdList" },
+    "surfaceRoles": { "$ref": "#/$defs/stringList" }
+  },
+  "$defs": {
+    "command": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1
+    },
+    "stringList": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "actionIdList": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" }
+    },
+    "actionContract": {
+      "type": "object",
+      "required": [
+        "id",
+        "label",
+        "effect",
+        "safe",
+        "mutating",
+        "longRunning",
+        "privileged",
+        "inputKeys",
+        "outputKeys",
+        "failureKeys"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
+        "label": { "type": "string", "minLength": 1 },
+        "effect": { "enum": ["read", "write", "background", "external", "release"] },
+        "safe": { "type": "boolean" },
+        "mutating": { "type": "boolean" },
+        "longRunning": { "type": "boolean" },
+        "privileged": { "type": "boolean" },
+        "inputKeys": { "$ref": "#/$defs/stringList" },
+        "outputKeys": { "$ref": "#/$defs/stringList" },
+        "failureKeys": { "$ref": "#/$defs/stringList" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
