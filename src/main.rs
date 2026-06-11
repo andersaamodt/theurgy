@@ -790,7 +790,7 @@ fn compile_native_with_contract(
     fs::create_dir_all(out_dir)?;
     write_or_replace(
         &out_dir.join("theurgy-surface.json"),
-        &format!("{surface}\n"),
+        &format!("{}\n", surface.trim_end()),
     )?;
     write_or_replace(
         &out_dir.join("theurgy-runtime.json"),
