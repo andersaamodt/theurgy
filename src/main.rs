@@ -78,6 +78,9 @@ fn run(args: Vec<String>) -> Result<()> {
         Some("compile-native") => command_compile_native(&args[2..]),
         Some("compile-app") => command_compile_app(&args[2..]),
         Some("inspect-app") => command_inspect_app(&args[2..]),
+        Some("run-state") => command_run_state(&args[2..]),
+        Some("run-status") => command_run_status(&args[2..]),
+        Some("run-history") => command_run_history(&args[2..]),
         Some("run-action") => command_run_action(&args[2..]),
         Some(other) => Err(TheurgyError::new(format!("unknown command: {other}")).into()),
     }
@@ -352,6 +355,63 @@ fn command_inspect_app(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+fn command_run_state(args: &[String]) -> Result<()> {
+    let manifest_path = parse_manifest_only_args(args, "usage: run-state --manifest PATH")?;
+    let output = run_state_output(&manifest_path)?;
+    print!("{output}");
+    Ok(())
+}
+
+fn command_run_status(args: &[String]) -> Result<()> {
+    let manifest_path = parse_manifest_only_args(args, "usage: run-status --manifest PATH")?;
+    let output = run_status_output(&manifest_path)?;
+    print!("{output}");
+    Ok(())
+}
+
+fn command_run_history(args: &[String]) -> Result<()> {
+    if args.is_empty() {
+        return Err(TheurgyError::new("usage: run-history SUBJECT [LIMIT] --manifest PATH").into());
+    }
+    let subject = &args[0];
+    if subject.is_empty() {
+        return Err(TheurgyError::new("run-history SUBJECT required").into());
+    }
+    let mut limit: Option<String> = None;
+    let mut manifest_path: Option<PathBuf> = None;
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--manifest" => {
+                let raw = args
+                    .get(index + 1)
+                    .ok_or_else(|| TheurgyError::new("run-history --manifest requires PATH"))?;
+                manifest_path = Some(PathBuf::from(raw));
+                index += 2;
+            }
+            other if limit.is_none() => {
+                if other.is_empty() || !other.bytes().all(|byte| byte.is_ascii_digit()) {
+                    return Err(
+                        TheurgyError::new("run-history LIMIT must be a positive integer").into(),
+                    );
+                }
+                limit = Some(other.to_string());
+                index += 1;
+            }
+            other => {
+                return Err(
+                    TheurgyError::new(format!("unknown run-history option: {other}")).into(),
+                )
+            }
+        }
+    }
+    let manifest_path =
+        manifest_path.ok_or_else(|| TheurgyError::new("run-history --manifest PATH required"))?;
+    let output = run_history_output(&manifest_path, subject, limit.as_deref())?;
+    print!("{output}");
+    Ok(())
+}
+
 fn command_run_action(args: &[String]) -> Result<()> {
     if args.is_empty() {
         return Err(TheurgyError::new(
@@ -393,6 +453,38 @@ fn command_run_action(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+fn parse_manifest_only_args(args: &[String], usage: &str) -> Result<PathBuf> {
+    if args.len() != 2 || args.first().map(String::as_str) != Some("--manifest") {
+        return Err(TheurgyError::new(usage).into());
+    }
+    Ok(PathBuf::from(&args[1]))
+}
+
+fn run_state_output(manifest_path: &Path) -> Result<String> {
+    let runtime = runtime_contract_from_path(manifest_path)?;
+    run_manifest_command(&runtime.state_command, "state")
+}
+
+fn run_status_output(manifest_path: &Path) -> Result<String> {
+    let runtime = runtime_contract_from_path(manifest_path)?;
+    if runtime.status_command.is_empty() {
+        return Err(TheurgyError::new("runtime manifest statusCommand required").into());
+    }
+    run_manifest_command(&runtime.status_command, "status")
+}
+
+fn run_history_output(manifest_path: &Path, subject: &str, limit: Option<&str>) -> Result<String> {
+    let runtime = runtime_contract_from_path(manifest_path)?;
+    if runtime.history_command.is_empty() {
+        return Err(TheurgyError::new("runtime manifest historyCommand required").into());
+    }
+    let mut args = vec![subject.to_string()];
+    if let Some(limit) = limit {
+        args.push(limit.to_string());
+    }
+    run_manifest_command_with_args(&runtime.history_command, &args, "history")
+}
+
 fn run_action_output(
     action_id: &str,
     params: &str,
@@ -400,10 +492,7 @@ fn run_action_output(
 ) -> Result<String> {
     validate_json_params(params)?;
     if let Some(path) = manifest_path {
-        let manifest = fs::read_to_string(path).map_err(|error| {
-            TheurgyError::new(format!("could not read {}: {error}", path.display()))
-        })?;
-        let runtime = runtime_contract_from_manifest(&manifest)?;
+        let runtime = runtime_contract_from_path(path)?;
         return run_manifest_action(&runtime, action_id, params);
     }
     Ok(format!(
@@ -415,26 +504,51 @@ fn run_action_output(
 }
 
 fn run_manifest_action(runtime: &RuntimeContract, action_id: &str, params: &str) -> Result<String> {
-    let Some(executable) = runtime.action_command.first() else {
+    if runtime.action_command.is_empty() {
         return Err(TheurgyError::new("runtime manifest actionCommand required").into());
+    }
+    run_manifest_command_with_args(
+        &runtime.action_command,
+        &[action_id.to_string(), params.to_string()],
+        "action",
+    )
+}
+
+fn runtime_contract_from_path(path: &Path) -> Result<RuntimeContract> {
+    let manifest = fs::read_to_string(path).map_err(|error| {
+        TheurgyError::new(format!("could not read {}: {error}", path.display()))
+    })?;
+    runtime_contract_from_manifest(&manifest)
+}
+
+fn run_manifest_command(command: &[String], label: &str) -> Result<String> {
+    run_manifest_command_with_args(command, &[], label)
+}
+
+fn run_manifest_command_with_args(
+    command: &[String],
+    extra_args: &[String],
+    label: &str,
+) -> Result<String> {
+    let Some(executable) = command.first() else {
+        return Err(TheurgyError::new(format!("runtime manifest {label} command required")).into());
     };
     let output = Command::new(executable)
-        .args(&runtime.action_command[1..])
-        .arg(action_id)
-        .arg(params)
+        .args(&command[1..])
+        .args(extra_args)
         .output()
-        .map_err(|error| TheurgyError::new(format!("could not run action command: {error}")))?;
+        .map_err(|error| TheurgyError::new(format!("could not run {label} command: {error}")))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         let message = if stderr.is_empty() {
-            format!("action command exited with {}", output.status)
+            format!("{label} command exited with {}", output.status)
         } else {
             stderr
         };
         return Err(TheurgyError::new(message).into());
     }
     String::from_utf8(output.stdout).map_err(|error| {
-        TheurgyError::new(format!("action command output was not UTF-8: {error}")).into()
+        TheurgyError::new(format!("{label} command output was not UTF-8: {error}")).into()
     })
 }
 
@@ -1819,24 +1933,8 @@ mod tests {
 
     #[test]
     fn run_action_with_manifest_dispatches_action_command() {
-        let root = test_root("run-action");
-        fs::create_dir_all(&root).unwrap();
-        let runtime = root.join("runtime-action-fixture");
-        write_executable(
-            &runtime,
-            "#!/bin/sh\nset -eu\nprintf '{\"success\":true,\"action\":\"%s\",\"params\":%s}\\n' \"$1\" \"$2\"\n",
-        )
-        .unwrap();
+        let root = runtime_fixture_root("run-action");
         let manifest = root.join("runtime.manifest.json");
-        write_or_replace(
-            &manifest,
-            &format!(
-                "{{\n  \"version\": \"theurgy-runtime-manifest/v1\",\n  \"app\": \"deployments\",\n  \"productIr\": \"app-blueprint/product.ir.json\",\n  \"runtime\": {{\n    \"stateCommand\": [\"{}\", \"state\"],\n    \"actionCommand\": [\"{}\"],\n    \"protocol\": \"deployments-runtime/v1\"\n  }}\n}}",
-                json_escape(&runtime.display().to_string()),
-                json_escape(&runtime.display().to_string())
-            ),
-        )
-        .unwrap();
 
         let output =
             run_action_output("refresh_state", "{\"force\":true}", Some(&manifest)).unwrap();
@@ -1851,6 +1949,57 @@ mod tests {
             Some(true)
         );
 
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn run_state_with_manifest_dispatches_state_command() {
+        let root = runtime_fixture_root("run-state");
+        let output = run_state_output(&root.join("runtime.manifest.json")).unwrap();
+        let value: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(
+            value.get("schema").and_then(Value::as_str),
+            Some("theurgy-state-snapshot/v1")
+        );
+        assert_eq!(
+            value.get("app").and_then(Value::as_str),
+            Some("deployments")
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn run_status_with_manifest_dispatches_status_command() {
+        let root = runtime_fixture_root("run-status");
+        let output = run_status_output(&root.join("runtime.manifest.json")).unwrap();
+        let value: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(
+            value.get("schema").and_then(Value::as_str),
+            Some("theurgy-runtime-status/v1")
+        );
+        assert_eq!(
+            value.get("state_ready").and_then(Value::as_bool),
+            Some(true)
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn run_history_with_manifest_dispatches_history_command() {
+        let root = runtime_fixture_root("run-history");
+        let output =
+            run_history_output(&root.join("runtime.manifest.json"), "site-one", Some("12"))
+                .unwrap();
+        let value: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(
+            value.get("schema").and_then(Value::as_str),
+            Some("theurgy-operation-history/v1")
+        );
+        assert_eq!(
+            value.get("subject").and_then(Value::as_str),
+            Some("site-one")
+        );
+        assert_eq!(value.get("limit").and_then(Value::as_str), Some("12"));
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1998,6 +2147,29 @@ mod tests {
 
     fn sample_state_snapshot() -> String {
         "{\n  \"schema\": \"theurgy-state-snapshot/v1\",\n  \"app\": \"deployments\",\n  \"generatedAt\": \"2026-06-11T00:00:00Z\",\n  \"data\": {\n    \"servers\": [],\n    \"deployments\": []\n  }\n}".to_string()
+    }
+
+    fn runtime_fixture_root(label: &str) -> PathBuf {
+        let root = test_root(label);
+        fs::create_dir_all(&root).unwrap();
+        let runtime = root.join("runtime-fixture");
+        write_executable(
+            &runtime,
+            "#!/bin/sh\nset -eu\ncase \"${1-}\" in\n  state) printf '{\"schema\":\"theurgy-state-snapshot/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"data\":{}}\\n' ;;\n  status) printf '{\"schema\":\"theurgy-runtime-status/v1\",\"app\":\"deployments\",\"state_ready\":true}\\n' ;;\n  history) printf '{\"schema\":\"theurgy-operation-history/v1\",\"app\":\"deployments\",\"subject\":\"%s\",\"limit\":\"%s\"}\\n' \"${2-}\" \"${3-}\" ;;\n  action) printf '{\"success\":true,\"action\":\"%s\",\"params\":%s}\\n' \"${2-}\" \"${3-}\" ;;\n  *) printf 'unknown fixture command\\n' >&2; exit 2 ;;\nesac\n",
+        )
+        .unwrap();
+        write_or_replace(
+            &root.join("runtime.manifest.json"),
+            &format!(
+                "{{\n  \"version\": \"theurgy-runtime-manifest/v1\",\n  \"app\": \"deployments\",\n  \"productIr\": \"app-blueprint/product.ir.json\",\n  \"runtime\": {{\n    \"stateCommand\": [\"{}\", \"state\"],\n    \"statusCommand\": [\"{}\", \"status\"],\n    \"actionCommand\": [\"{}\", \"action\"],\n    \"historyCommand\": [\"{}\", \"history\"],\n    \"protocol\": \"deployments-runtime/v1\"\n  }}\n}}",
+                json_escape(&runtime.display().to_string()),
+                json_escape(&runtime.display().to_string()),
+                json_escape(&runtime.display().to_string()),
+                json_escape(&runtime.display().to_string())
+            ),
+        )
+        .unwrap();
+        root
     }
 
     fn sample_runtime_manifest() -> String {

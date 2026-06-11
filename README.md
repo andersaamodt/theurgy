@@ -47,6 +47,9 @@ cargo run --bin theurgy-runtime -- validate-surface-ir desktop.surface.ir.json
 cargo run --bin theurgy-runtime -- project-surface product.ir.json --target macos
 cargo run --bin theurgy-runtime -- compile-native product.ir.json --target linux --out /tmp/theurgy-linux
 cargo run --bin theurgy-runtime -- compile-app /path/to/app --target macos --out /tmp/theurgy-macos
+cargo run --bin theurgy-runtime -- run-state --manifest runtime.manifest.json
+cargo run --bin theurgy-runtime -- run-status --manifest runtime.manifest.json
+cargo run --bin theurgy-runtime -- run-history deployment-slug 40 --manifest runtime.manifest.json
 cargo run --bin theurgy-runtime -- run-action refresh_state --json '{}' --manifest runtime.manifest.json
 ```
 
