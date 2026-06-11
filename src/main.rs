@@ -289,6 +289,9 @@ fn command_validate_runtime_manifest(args: &[String]) -> Result<()> {
     if let Some(path) = summary.mobile_surface_ir {
         println!("mobile_surface_ir={path}");
     }
+    if let Some(path) = summary.legacy_native_desktop_ir {
+        println!("legacy_native_desktop_ir={path}");
+    }
     Ok(())
 }
 
@@ -657,6 +660,11 @@ fn inspect_app_lines(path: &Path) -> Result<Vec<String>> {
             )
             .into());
         }
+    }
+    if let Some(legacy_native_desktop_ir) = &runtime_summary.legacy_native_desktop_ir {
+        lines.push(format!(
+            "runtime_legacy_native_desktop_ir={legacy_native_desktop_ir}"
+        ));
     }
     Ok(lines)
 }
@@ -1604,6 +1612,7 @@ struct RuntimeManifestSummary {
     product_ir: String,
     desktop_surface_ir: Option<String>,
     mobile_surface_ir: Option<String>,
+    legacy_native_desktop_ir: Option<String>,
     protocol: String,
 }
 
@@ -1637,6 +1646,7 @@ struct RuntimeContract {
     product_ir: String,
     runtime_manifest: String,
     source_surface_ir: String,
+    legacy_native_desktop_ir: Option<String>,
     state_command: Vec<String>,
     status_command: Vec<String>,
     subscribe_status_command: Vec<String>,
@@ -1706,6 +1716,11 @@ fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
     value_string(&value, "sourceSurfaceIr")
         .filter(|path| !path.is_empty())
         .ok_or_else(|| TheurgyError::new("generated runtime sourceSurfaceIr required"))?;
+    optional_nonempty_string(
+        &value,
+        "legacyNativeDesktopIr",
+        "generated runtime legacyNativeDesktopIr",
+    )?;
     let state_snapshot_schema = value_string(&value, "productStateSnapshotSchema")
         .filter(|schema| !schema.is_empty())
         .ok_or_else(|| {
@@ -1901,6 +1916,7 @@ fn runtime_contract_from_manifest(text: &str) -> Result<RuntimeContract> {
         product_ir: summary.product_ir,
         runtime_manifest: "theurgy-runtime.manifest.json".to_string(),
         source_surface_ir: "theurgy-surface.json".to_string(),
+        legacy_native_desktop_ir: summary.legacy_native_desktop_ir,
         state_command: value_string_array(runtime, "stateCommand")?,
         status_command: value_string_array(runtime, "statusCommand").unwrap_or_default(),
         subscribe_status_command: optional_string_array(
@@ -2189,7 +2205,8 @@ fn validate_runtime_manifest_value(value: &Value) -> Result<RuntimeManifestSumma
     let product_ir = value_string(value, "productIr")
         .filter(|path| !path.is_empty())
         .ok_or_else(|| TheurgyError::new("runtime manifest productIr required"))?;
-    let (desktop_surface_ir, mobile_surface_ir) = runtime_manifest_surface_paths(value)?;
+    let (desktop_surface_ir, mobile_surface_ir, legacy_native_desktop_ir) =
+        runtime_manifest_surface_paths(value)?;
     validate_runtime_manifest_compatibility(value)?;
     let runtime = value_object(value, "runtime")?;
     let state_command = value_string_array(runtime, "stateCommand")?;
@@ -2225,13 +2242,16 @@ fn validate_runtime_manifest_value(value: &Value) -> Result<RuntimeManifestSumma
         product_ir,
         desktop_surface_ir,
         mobile_surface_ir,
+        legacy_native_desktop_ir,
         protocol,
     })
 }
 
-fn runtime_manifest_surface_paths(value: &Value) -> Result<(Option<String>, Option<String>)> {
+fn runtime_manifest_surface_paths(
+    value: &Value,
+) -> Result<(Option<String>, Option<String>, Option<String>)> {
     let Some(surfaces) = value.get("surfaces") else {
-        return Ok((None, None));
+        return Ok((None, None, None));
     };
     if !surfaces.is_object() {
         return Err(TheurgyError::new("runtime manifest surfaces must be an object").into());
@@ -2239,6 +2259,11 @@ fn runtime_manifest_surface_paths(value: &Value) -> Result<(Option<String>, Opti
     Ok((
         optional_nonempty_string(surfaces, "desktop", "runtime manifest surfaces.desktop")?,
         optional_nonempty_string(surfaces, "mobile", "runtime manifest surfaces.mobile")?,
+        optional_nonempty_string(
+            surfaces,
+            "legacyNativeDesktop",
+            "runtime manifest surfaces.legacyNativeDesktop",
+        )?,
     ))
 }
 
@@ -3039,6 +3064,7 @@ fn compile_native(product: &str, target: &str, out_dir: &Path) -> Result<()> {
         product_ir: "direct-product-ir".to_string(),
         runtime_manifest: "generated-runtime-manifest".to_string(),
         source_surface_ir: "projected-surface-ir".to_string(),
+        legacy_native_desktop_ir: None,
         state_command: vec![
             format!("{}-core", summary.app_id),
             "runtime-state".to_string(),
@@ -3173,6 +3199,12 @@ fn generated_runtime_metadata(
         "sourceSurfaceIr".to_string(),
         Value::String(runtime.source_surface_ir.clone()),
     );
+    if let Some(legacy_native_desktop_ir) = &runtime.legacy_native_desktop_ir {
+        object.insert(
+            "legacyNativeDesktopIr".to_string(),
+            Value::String(legacy_native_desktop_ir.clone()),
+        );
+    }
     object.insert(
         "productTargets".to_string(),
         string_vec_value(&summary.targets),
@@ -4462,6 +4494,8 @@ mod tests {
             &"product_background_job_server-queue_command=deployments-daemon".to_string()
         ));
         assert!(lines.contains(&"runtime_protocol=deployments-runtime/v1".to_string()));
+        assert!(lines
+            .contains(&"runtime_legacy_native_desktop_ir=app-blueprint/app.ir.yaml".to_string()));
         assert!(lines.contains(
             &"runtime_operation_status_command=custom-core operation-status".to_string()
         ));
@@ -5108,6 +5142,12 @@ mod tests {
         assert!(top_level_required
             .iter()
             .any(|value| value.as_str() == Some("targetReleaseArtifact")));
+        assert_eq!(
+            schema
+                .pointer("/properties/legacyNativeDesktopIr/minLength")
+                .and_then(Value::as_i64),
+            Some(1)
+        );
         assert_eq!(
             schema
                 .pointer("/properties/targetReleaseTarget/pattern")
@@ -6036,6 +6076,12 @@ mod tests {
             &serde_json::json!(["custom-core", "state"])
         );
         assert_eq!(
+            runtime_json
+                .get("legacyNativeDesktopIr")
+                .and_then(Value::as_str),
+            Some("app-blueprint/app.ir.yaml")
+        );
+        assert_eq!(
             runtime_json.get("statusCommand").unwrap(),
             &serde_json::json!(["custom-core", "status"])
         );
@@ -6686,6 +6732,7 @@ mod tests {
             product_ir: "app-blueprint/product.ir.json".to_string(),
             runtime_manifest: "app-blueprint/runtime.manifest.json".to_string(),
             source_surface_ir: "app-blueprint/desktop.surface.ir.json".to_string(),
+            legacy_native_desktop_ir: Some("app-blueprint/app.ir.yaml".to_string()),
             state_command: vec!["deployments-core".to_string(), "runtime-state".to_string()],
             status_command: vec!["deployments-core".to_string(), "runtime-status".to_string()],
             subscribe_status_command: vec![
@@ -6766,7 +6813,7 @@ mod tests {
     }
 
     fn sample_runtime_manifest() -> String {
-        "{\n  \"version\": \"theurgy-runtime-manifest/v1\",\n  \"app\": \"deployments\",\n  \"productIr\": \"app-blueprint/product.ir.json\",\n  \"runtime\": {\n    \"stateCommand\": [\"custom-core\", \"state\"],\n    \"statusCommand\": [\"custom-core\", \"status\"],\n    \"operationStatusCommand\": [\"custom-core\", \"operation-status\"],\n    \"actionCommand\": [\"custom-core\", \"action\"],\n    \"historyCommand\": [\"custom-core\", \"history\"],\n    \"daemonCommand\": [\"deployments-daemon\"],\n    \"protocol\": \"deployments-runtime/v1\"\n  },\n  \"surfaces\": {\n    \"desktop\": \"app-blueprint/desktop.surface.ir.json\"\n  },\n  \"compatibility\": {\n    \"wizardryAppsShellFirstStillSupported\": true,\n    \"theurgyRequiredForLegacyWizardryApps\": false\n  }\n}".to_string()
+        "{\n  \"version\": \"theurgy-runtime-manifest/v1\",\n  \"app\": \"deployments\",\n  \"productIr\": \"app-blueprint/product.ir.json\",\n  \"runtime\": {\n    \"stateCommand\": [\"custom-core\", \"state\"],\n    \"statusCommand\": [\"custom-core\", \"status\"],\n    \"operationStatusCommand\": [\"custom-core\", \"operation-status\"],\n    \"actionCommand\": [\"custom-core\", \"action\"],\n    \"historyCommand\": [\"custom-core\", \"history\"],\n    \"daemonCommand\": [\"deployments-daemon\"],\n    \"protocol\": \"deployments-runtime/v1\"\n  },\n  \"surfaces\": {\n    \"desktop\": \"app-blueprint/desktop.surface.ir.json\",\n    \"legacyNativeDesktop\": \"app-blueprint/app.ir.yaml\"\n  },\n  \"compatibility\": {\n    \"wizardryAppsShellFirstStillSupported\": true,\n    \"theurgyRequiredForLegacyWizardryApps\": false\n  }\n}".to_string()
     }
 
     fn sample_full_runtime_manifest() -> String {

@@ -35,6 +35,7 @@
     "productIr": { "type": "string", "minLength": 1 },
     "runtimeManifest": { "type": "string", "minLength": 1 },
     "sourceSurfaceIr": { "type": "string", "minLength": 1 },
+    "legacyNativeDesktopIr": { "type": "string", "minLength": 1 },
     "protocol": { "type": "string", "minLength": 1 },
     "targetReleaseTarget": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
     "targetReleaseArtifact": { "type": "string", "minLength": 1 },
