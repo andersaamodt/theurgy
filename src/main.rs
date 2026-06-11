@@ -563,7 +563,7 @@ fn parse_manifest_only_args(args: &[String], usage: &str) -> Result<PathBuf> {
 fn run_state_output(manifest_path: &Path) -> Result<String> {
     let runtime = runtime_contract_from_path(manifest_path)?;
     let output = run_manifest_command(&runtime.state_command, "state")?;
-    validate_manifest_state_output(&output)?;
+    validate_manifest_state_output(&runtime.app_id, &output)?;
     Ok(output)
 }
 
@@ -573,7 +573,7 @@ fn run_status_output(manifest_path: &Path) -> Result<String> {
         return Err(TheurgyError::new("runtime manifest statusCommand required").into());
     }
     let output = run_manifest_command(&runtime.status_command, "status")?;
-    validate_manifest_status_output(&output)?;
+    validate_manifest_status_output(&runtime.app_id, &output)?;
     Ok(output)
 }
 
@@ -587,7 +587,7 @@ fn run_history_output(manifest_path: &Path, subject: &str, limit: Option<&str>) 
         args.push(limit.to_string());
     }
     let output = run_manifest_command_with_args(&runtime.history_command, &args, "history")?;
-    validate_manifest_history_output(&output)?;
+    validate_manifest_history_output(&runtime.app_id, &output)?;
     Ok(output)
 }
 
@@ -647,24 +647,34 @@ fn validate_manifest_action_output(action_id: &str, output: &str) -> Result<()> 
     Ok(())
 }
 
-fn validate_manifest_state_output(output: &str) -> Result<()> {
+fn validate_manifest_state_output(expected_app: &str, output: &str) -> Result<()> {
     let value = parse_json(output)?;
     let result = manifest_payload_or_raw(&value);
-    validate_state_snapshot_value(result)?;
-    Ok(())
+    let summary = validate_state_snapshot_value(result)?;
+    validate_runtime_output_app("state snapshot", expected_app, &summary.app_id)
 }
 
-fn validate_manifest_status_output(output: &str) -> Result<()> {
+fn validate_manifest_status_output(expected_app: &str, output: &str) -> Result<()> {
     let value = parse_json(output)?;
     let result = manifest_payload_or_raw(&value);
-    validate_runtime_status_value(result)?;
-    Ok(())
+    let summary = validate_runtime_status_value(result)?;
+    validate_runtime_output_app("runtime status", expected_app, &summary.app_id)
 }
 
-fn validate_manifest_history_output(output: &str) -> Result<()> {
+fn validate_manifest_history_output(expected_app: &str, output: &str) -> Result<()> {
     let value = parse_json(output)?;
     let result = manifest_payload_or_raw(&value);
-    validate_operation_history_value(result)?;
+    let summary = validate_operation_history_value(result)?;
+    validate_runtime_output_app("operation history", expected_app, &summary.app_id)
+}
+
+fn validate_runtime_output_app(label: &str, expected_app: &str, actual_app: &str) -> Result<()> {
+    if actual_app != expected_app {
+        return Err(TheurgyError::new(format!(
+            "{label} app mismatch: expected {expected_app}, got {actual_app}"
+        ))
+        .into());
+    }
     Ok(())
 }
 
@@ -3461,7 +3471,7 @@ mod tests {
 
     #[test]
     fn manifest_state_output_rejects_untyped_stdout() {
-        let error = validate_manifest_state_output("{\"ok\":true}").unwrap_err();
+        let error = validate_manifest_state_output("deployments", "{\"ok\":true}").unwrap_err();
         assert_eq!(
             error.to_string(),
             "expected schema = theurgy-state-snapshot/v1"
@@ -3469,8 +3479,19 @@ mod tests {
     }
 
     #[test]
+    fn manifest_state_output_rejects_app_mismatch() {
+        let output =
+            sample_state_snapshot().replace("\"app\": \"deployments\"", "\"app\": \"other-app\"");
+        let error = validate_manifest_state_output("deployments", &output).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "state snapshot app mismatch: expected deployments, got other-app"
+        );
+    }
+
+    #[test]
     fn manifest_status_output_rejects_untyped_stdout() {
-        let error = validate_manifest_status_output("{\"ok\":true}").unwrap_err();
+        let error = validate_manifest_status_output("deployments", "{\"ok\":true}").unwrap_err();
         assert_eq!(
             error.to_string(),
             "expected schema = theurgy-runtime-status/v1"
@@ -3478,11 +3499,33 @@ mod tests {
     }
 
     #[test]
+    fn manifest_status_output_rejects_app_mismatch() {
+        let output =
+            sample_runtime_status().replace("\"app\": \"deployments\"", "\"app\": \"other-app\"");
+        let error = validate_manifest_status_output("deployments", &output).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "runtime status app mismatch: expected deployments, got other-app"
+        );
+    }
+
+    #[test]
     fn manifest_history_output_rejects_untyped_stdout() {
-        let error = validate_manifest_history_output("{\"ok\":true}").unwrap_err();
+        let error = validate_manifest_history_output("deployments", "{\"ok\":true}").unwrap_err();
         assert_eq!(
             error.to_string(),
             "expected schema = theurgy-operation-history/v1"
+        );
+    }
+
+    #[test]
+    fn manifest_history_output_rejects_app_mismatch() {
+        let output = sample_operation_history()
+            .replace("\"app\": \"deployments\"", "\"app\": \"other-app\"");
+        let error = validate_manifest_history_output("deployments", &output).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "operation history app mismatch: expected deployments, got other-app"
         );
     }
 
