@@ -3,7 +3,7 @@
   "$id": "https://wizardry.app/schemas/theurgy-product-ir-v1.json",
   "title": "Theurgy Product IR v1",
   "type": "object",
-  "required": ["version", "format", "app", "actions", "state"],
+  "required": ["version", "format", "app", "actions", "state", "releaseTargets"],
   "properties": {
     "version": { "const": "theurgy-product-ir/v1" },
     "format": { "const": "json" },
@@ -63,7 +63,8 @@
     },
     "releaseTargets": {
       "type": "array",
-      "items": { "$ref": "#/$defs/releaseTarget" }
+      "items": { "$ref": "#/$defs/releaseTarget" },
+      "minItems": 1
     },
     "audit": { "type": "object", "additionalProperties": true },
     "surfaces": { "type": "object", "additionalProperties": true }

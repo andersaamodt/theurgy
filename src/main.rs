@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::error::Error;
 use std::fmt;
@@ -516,6 +516,10 @@ fn inspect_app_lines(path: &Path) -> Result<Vec<String>> {
     lines.push(format!(
         "product_background_jobs={}",
         product.background_job_ids.join(",")
+    ));
+    lines.push(format!(
+        "product_release_targets={}",
+        release_target_ids(&product).join(",")
     ));
     lines.push(format!(
         "product_audit_keys={}",
@@ -1342,7 +1346,7 @@ struct ProductSummary {
     domain_object_ids: Vec<String>,
     persistence_root_ids: Vec<String>,
     background_job_ids: Vec<String>,
-    release_target_ids: Vec<String>,
+    release_targets: Vec<ReleaseTarget>,
     audit_keys: Vec<String>,
     action_contracts: Vec<ActionContract>,
     action_ids: Vec<String>,
@@ -1416,6 +1420,8 @@ struct RuntimeManifestSummary {
 struct GeneratedRuntimeSummary {
     app_id: String,
     target: String,
+    release_target: String,
+    release_artifact: String,
     actions: usize,
     product_actions: usize,
     surface_actions: usize,
@@ -1446,6 +1452,14 @@ struct RuntimeContract {
     product_action_contracts: Option<Vec<ActionContract>>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ReleaseTarget {
+    id: String,
+    target: String,
+    surface: String,
+    artifact: String,
+}
+
 fn read_json(path: &Path) -> Result<String> {
     let text = fs::read_to_string(path).map_err(|error| {
         TheurgyError::new(format!("could not read {}: {error}", path.display()))
@@ -1473,6 +1487,12 @@ fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
     value_string(&value, "protocol")
         .filter(|protocol| !protocol.is_empty())
         .ok_or_else(|| TheurgyError::new("generated runtime protocol required"))?;
+    let target_release_target = value_string(&value, "targetReleaseTarget")
+        .filter(|release_target| valid_action_id(release_target))
+        .ok_or_else(|| TheurgyError::new("generated runtime targetReleaseTarget required"))?;
+    let target_release_artifact = value_string(&value, "targetReleaseArtifact")
+        .filter(|artifact| !artifact.is_empty())
+        .ok_or_else(|| TheurgyError::new("generated runtime targetReleaseArtifact required"))?;
     for key in ["stateCommand", "subscribeStatusCommand", "actionCommand"] {
         if value_string_array(&value, key)?.is_empty() {
             return Err(
@@ -1502,6 +1522,16 @@ fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
         "surfaceRoles",
     ] {
         optional_string_array(&value, key, &format!("generated runtime {key}"))?;
+    }
+    let product_release_targets = value_string_array(&value, "productReleaseTargets")?;
+    if !product_release_targets
+        .iter()
+        .any(|release_target| release_target == &target_release_target)
+    {
+        return Err(TheurgyError::new(
+            "generated runtime targetReleaseTarget must be listed in productReleaseTargets",
+        )
+        .into());
     }
     let product_actions = value_string_array(&value, "productActions")?;
     if product_actions.is_empty() {
@@ -1615,6 +1645,8 @@ fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
     Ok(GeneratedRuntimeSummary {
         app_id,
         target,
+        release_target: target_release_target,
+        release_artifact: target_release_artifact,
         actions: product_actions.len(),
         product_actions: product_actions.len(),
         surface_actions: surface_actions.len(),
@@ -1867,7 +1899,7 @@ fn validate_product_ir_value(value: &Value) -> Result<ProductSummary> {
     validate_product_persistence(value)?;
     let background_job_ids =
         validate_product_background_jobs(value, "backgroundJobs", "product IR backgroundJobs")?;
-    let release_target_ids = validate_product_release_targets(
+    let release_targets = validate_product_release_targets(
         value,
         "releaseTargets",
         "product IR releaseTargets",
@@ -1883,7 +1915,7 @@ fn validate_product_ir_value(value: &Value) -> Result<ProductSummary> {
         domain_object_ids,
         persistence_root_ids,
         background_job_ids,
-        release_target_ids,
+        release_targets,
         audit_keys,
         action_contracts,
         actions: action_values.len(),
@@ -2254,19 +2286,27 @@ fn validate_product_release_targets(
     key: &str,
     label: &str,
     app_targets: &[String],
-) -> Result<Vec<String>> {
-    let Some(raw) = value.get(key) else {
-        return Ok(Vec::new());
-    };
+) -> Result<Vec<ReleaseTarget>> {
+    let raw = value
+        .get(key)
+        .ok_or_else(|| TheurgyError::new(format!("{label} required")))?;
     let Some(array) = raw.as_array() else {
         return Err(TheurgyError::new(format!("{label} must be an array")).into());
     };
-    let mut ids = Vec::new();
+    if array.is_empty() {
+        return Err(TheurgyError::new(format!("{label} required")).into());
+    }
+    let mut release_targets = Vec::new();
+    let mut ids = BTreeSet::new();
+    let mut target_names = BTreeSet::new();
     for item in array {
         let Some(_object) = item.as_object() else {
             return Err(TheurgyError::new(format!("{label} must contain objects")).into());
         };
         let id = required_stable_id(item, &format!("{label} object.id"))?;
+        if !ids.insert(id.clone()) {
+            return Err(TheurgyError::new(format!("{label} object.id duplicated: {id}")).into());
+        }
         let target =
             required_nonempty_object_string(item, "target", &format!("{label} object.target"))?;
         if !matches!(target.as_str(), "macos" | "linux" | "ios" | "android") {
@@ -2281,6 +2321,11 @@ fn validate_product_release_targets(
             ))
             .into());
         }
+        if !target_names.insert(target.clone()) {
+            return Err(
+                TheurgyError::new(format!("{label} object.target duplicated: {target}")).into(),
+            );
+        }
         let surface =
             required_nonempty_object_string(item, "surface", &format!("{label} object.surface"))?;
         let expected_surface = if matches!(target.as_str(), "macos" | "linux") {
@@ -2294,10 +2339,24 @@ fn validate_product_release_targets(
             ))
             .into());
         }
-        required_nonempty_object_string(item, "artifact", &format!("{label} object.artifact"))?;
-        ids.push(id);
+        let artifact =
+            required_nonempty_object_string(item, "artifact", &format!("{label} object.artifact"))?;
+        release_targets.push(ReleaseTarget {
+            id,
+            target,
+            surface,
+            artifact,
+        });
     }
-    Ok(ids)
+    for app_target in app_targets {
+        if !target_names.contains(app_target) {
+            return Err(TheurgyError::new(format!(
+                "{label} missing release target for app target: {app_target}"
+            ))
+            .into());
+        }
+    }
+    Ok(release_targets)
 }
 
 fn validate_product_persistence(value: &Value) -> Result<()> {
@@ -2703,9 +2762,40 @@ fn compile_native_with_contract(
     target: &str,
     out_dir: &Path,
 ) -> Result<()> {
+    if !summary
+        .targets
+        .iter()
+        .any(|candidate| candidate.as_str() == target)
+    {
+        return Err(
+            TheurgyError::new(format!("product IR does not declare target: {target}")).into(),
+        );
+    }
+    let release_target = release_target_for_target(summary, target).ok_or_else(|| {
+        TheurgyError::new(format!(
+            "product IR release target missing for target: {target}"
+        ))
+    })?;
     let surface_summary = validate_surface_ir(surface)?;
     if surface_summary.product != summary.app_id {
         return Err(TheurgyError::new("surface IR product does not match product IR app").into());
+    }
+    let expected_surface_target = if matches!(target, "macos" | "linux") {
+        "desktop"
+    } else {
+        "mobile"
+    };
+    if release_target.surface != expected_surface_target {
+        return Err(TheurgyError::new(format!(
+            "product IR release target surface for {target} must be {expected_surface_target}"
+        ))
+        .into());
+    }
+    if surface_summary.target != target && surface_summary.target != expected_surface_target {
+        return Err(TheurgyError::new(format!(
+            "surface IR target must be {target} or {expected_surface_target}"
+        ))
+        .into());
     }
     for action_id in &surface_summary.action_ids {
         if !summary
@@ -2743,6 +2833,8 @@ fn generated_runtime_metadata(
     target: &str,
     surface: &SurfaceSummary,
 ) -> String {
+    let release_target = release_target_for_target(summary, target)
+        .expect("validated product summary includes compile target release target");
     let mut object = serde_json::Map::new();
     object.insert(
         "version".to_string(),
@@ -2784,7 +2876,15 @@ fn generated_runtime_metadata(
     );
     object.insert(
         "productReleaseTargets".to_string(),
-        string_vec_value(&summary.release_target_ids),
+        string_vec_value(&release_target_ids(summary)),
+    );
+    object.insert(
+        "targetReleaseTarget".to_string(),
+        Value::String(release_target.id.clone()),
+    );
+    object.insert(
+        "targetReleaseArtifact".to_string(),
+        Value::String(release_target.artifact.clone()),
     );
     object.insert(
         "productAuditKeys".to_string(),
@@ -2855,6 +2955,24 @@ fn generated_runtime_metadata(
         "{}\n",
         serde_json::to_string_pretty(&Value::Object(object)).expect("runtime metadata serializes")
     )
+}
+
+fn release_target_ids(summary: &ProductSummary) -> Vec<String> {
+    summary
+        .release_targets
+        .iter()
+        .map(|release_target| release_target.id.clone())
+        .collect()
+}
+
+fn release_target_for_target<'a>(
+    summary: &'a ProductSummary,
+    target: &str,
+) -> Option<&'a ReleaseTarget> {
+    summary
+        .release_targets
+        .iter()
+        .find(|release_target| release_target.target == target)
 }
 
 fn string_vec_value(values: &[String]) -> Value {
@@ -4134,7 +4252,10 @@ mod tests {
             vec!["headquarters-workspace".to_string()]
         );
         assert_eq!(summary.background_job_ids, vec!["server-queue".to_string()]);
-        assert_eq!(summary.release_target_ids, vec!["macos-app".to_string()]);
+        assert_eq!(
+            release_target_ids(&summary),
+            vec!["macos-app".to_string(), "linux-app".to_string()]
+        );
         assert_eq!(
             summary.audit_keys,
             vec!["cliParity".to_string(), "operationHistory".to_string()]
@@ -4186,6 +4307,12 @@ mod tests {
         let product = sample_product().replace("\"label\": \"Server Queue\"", "\"label\": \"\"");
         let error = validate_product_ir(&product).unwrap_err().to_string();
         assert!(error.contains("backgroundJobs object.label required"));
+        let product = sample_product().replace(
+            ",\n    {\"id\": \"linux-app\", \"target\": \"linux\", \"surface\": \"desktop\", \"artifact\": \"generated/linux\"}",
+            "",
+        );
+        let error = validate_product_ir(&product).unwrap_err().to_string();
+        assert!(error.contains("releaseTargets missing release target for app target: linux"));
     }
 
     #[test]
@@ -4401,6 +4528,13 @@ mod tests {
                 .and_then(Value::as_str),
             Some("#/$defs/releaseTarget")
         );
+        let top_level_required = schema
+            .pointer("/required")
+            .and_then(Value::as_array)
+            .unwrap();
+        assert!(top_level_required
+            .iter()
+            .any(|value| value.as_str() == Some("releaseTargets")));
         assert_eq!(
             schema
                 .pointer("/properties/persistence/required/0")
@@ -4541,6 +4675,18 @@ mod tests {
         assert!(top_level_required
             .iter()
             .any(|value| value.as_str() == Some("subscribeStatusCommand")));
+        assert!(top_level_required
+            .iter()
+            .any(|value| value.as_str() == Some("targetReleaseTarget")));
+        assert!(top_level_required
+            .iter()
+            .any(|value| value.as_str() == Some("targetReleaseArtifact")));
+        assert_eq!(
+            schema
+                .pointer("/properties/targetReleaseTarget/pattern")
+                .and_then(Value::as_str),
+            Some("^[a-z][a-z0-9_.-]*$")
+        );
         assert_eq!(
             schema
                 .pointer("/$defs/actionContract/properties/inputShape/$ref")
@@ -4984,7 +5130,7 @@ mod tests {
 
     #[test]
     fn projects_mobile_surface_from_product_ir() {
-        let product = "{\n  \"version\": \"theurgy-product-ir/v1\",\n  \"format\": \"json\",\n  \"app\": {\"id\": \"deployments\", \"name\": \"Deployments\", \"targets\": [\"ios\"]},\n  \"actions\": [{\"id\": \"refresh_state\", \"label\": \"Refresh\", \"input\": {}, \"output\": {}, \"effect\": \"read\", \"failure\": {}, \"safe\": true, \"mutating\": false, \"longRunning\": false, \"privileged\": false}],\n  \"state\": {\"snapshotSchema\": \"deployments-state/v1\"}\n}".to_string();
+        let product = "{\n  \"version\": \"theurgy-product-ir/v1\",\n  \"format\": \"json\",\n  \"app\": {\"id\": \"deployments\", \"name\": \"Deployments\", \"targets\": [\"ios\"]},\n  \"actions\": [{\"id\": \"refresh_state\", \"label\": \"Refresh\", \"input\": {}, \"output\": {}, \"effect\": \"read\", \"failure\": {}, \"safe\": true, \"mutating\": false, \"longRunning\": false, \"privileged\": false}],\n  \"state\": {\"snapshotSchema\": \"deployments-state/v1\"},\n  \"releaseTargets\": [{\"id\": \"ios-app\", \"target\": \"ios\", \"surface\": \"mobile\", \"artifact\": \"generated/mobile/ios\"}]\n}".to_string();
         let surface = project_surface(&product, "ios").unwrap();
         assert!(surface.contains("\"version\": \"theurgy-mobile-surface-ir/v1\""));
         assert!(surface.contains("\"role\": \"status-overview\""));
@@ -5088,7 +5234,21 @@ mod tests {
         );
         assert_eq!(
             runtime_json.get("productReleaseTargets").unwrap(),
-            &serde_json::json!(["macos-app"])
+            &serde_json::json!(["macos-app", "linux-app"])
+        );
+        assert_eq!(generated.release_target, "linux-app".to_string());
+        assert_eq!(generated.release_artifact, "generated/linux".to_string());
+        assert_eq!(
+            runtime_json
+                .get("targetReleaseTarget")
+                .and_then(Value::as_str),
+            Some("linux-app")
+        );
+        assert_eq!(
+            runtime_json
+                .get("targetReleaseArtifact")
+                .and_then(Value::as_str),
+            Some("generated/linux")
         );
         let main_c = fs::read_to_string(root.join("src/main.c")).unwrap();
         assert!(main_c.contains("gtk_application_window_new"));
@@ -5613,7 +5773,7 @@ mod tests {
     }
 
     fn sample_product() -> String {
-        "{\n  \"version\": \"theurgy-product-ir/v1\",\n  \"format\": \"json\",\n  \"app\": {\n    \"id\": \"deployments\",\n    \"name\": \"Deployments\",\n    \"targets\": [\"macos\", \"linux\"],\n    \"capabilities\": [\"native-desktop\", \"runtime-actions\"],\n    \"permissions\": [\"files\"]\n  },\n  \"domain\": {\n    \"objects\": [\n      {\"id\": \"server\", \"label\": \"Server\"},\n      {\"id\": \"deployment\", \"label\": \"Deployment\"}\n    ]\n  },\n  \"actions\": [\n    {\"id\": \"refresh_state\", \"label\": \"Refresh\", \"input\": {}, \"output\": {\"params\": \"object\"}, \"effect\": \"read\", \"failure\": {}, \"safe\": true, \"mutating\": false, \"longRunning\": false, \"privileged\": false},\n    {\"id\": \"publish_changes\", \"label\": \"Push to Production\", \"input\": {\"deployment\": \"string\"}, \"output\": {\"params\": \"object\"}, \"effect\": \"release\", \"failure\": {}, \"safe\": false, \"mutating\": true, \"longRunning\": true, \"privileged\": true}\n  ],\n  \"state\": {\n    \"snapshotSchema\": \"deployments-state/v1\",\n    \"roots\": [{\"id\": \"headquarters-workspace\", \"kind\": \"xdg-state\"}]\n  },\n  \"backgroundJobs\": [\n    {\"id\": \"server-queue\", \"label\": \"Server Queue\", \"command\": [\"deployments-daemon\"], \"state\": \"server.queue_mode\"}\n  ],\n  \"releaseTargets\": [\n    {\"id\": \"macos-app\", \"target\": \"macos\", \"surface\": \"desktop\", \"artifact\": \"generated/macos\"}\n  ],\n  \"persistence\": {\n    \"truth\": \"file-first\"\n  },\n  \"audit\": {\n    \"operationHistory\": true,\n    \"cliParity\": true\n  }\n}".to_string()
+        "{\n  \"version\": \"theurgy-product-ir/v1\",\n  \"format\": \"json\",\n  \"app\": {\n    \"id\": \"deployments\",\n    \"name\": \"Deployments\",\n    \"targets\": [\"macos\", \"linux\"],\n    \"capabilities\": [\"native-desktop\", \"runtime-actions\"],\n    \"permissions\": [\"files\"]\n  },\n  \"domain\": {\n    \"objects\": [\n      {\"id\": \"server\", \"label\": \"Server\"},\n      {\"id\": \"deployment\", \"label\": \"Deployment\"}\n    ]\n  },\n  \"actions\": [\n    {\"id\": \"refresh_state\", \"label\": \"Refresh\", \"input\": {}, \"output\": {\"params\": \"object\"}, \"effect\": \"read\", \"failure\": {}, \"safe\": true, \"mutating\": false, \"longRunning\": false, \"privileged\": false},\n    {\"id\": \"publish_changes\", \"label\": \"Push to Production\", \"input\": {\"deployment\": \"string\"}, \"output\": {\"params\": \"object\"}, \"effect\": \"release\", \"failure\": {}, \"safe\": false, \"mutating\": true, \"longRunning\": true, \"privileged\": true}\n  ],\n  \"state\": {\n    \"snapshotSchema\": \"deployments-state/v1\",\n    \"roots\": [{\"id\": \"headquarters-workspace\", \"kind\": \"xdg-state\"}]\n  },\n  \"backgroundJobs\": [\n    {\"id\": \"server-queue\", \"label\": \"Server Queue\", \"command\": [\"deployments-daemon\"], \"state\": \"server.queue_mode\"}\n  ],\n  \"releaseTargets\": [\n    {\"id\": \"macos-app\", \"target\": \"macos\", \"surface\": \"desktop\", \"artifact\": \"generated/macos\"},\n    {\"id\": \"linux-app\", \"target\": \"linux\", \"surface\": \"desktop\", \"artifact\": \"generated/linux\"}\n  ],\n  \"persistence\": {\n    \"truth\": \"file-first\"\n  },\n  \"audit\": {\n    \"operationHistory\": true,\n    \"cliParity\": true\n  }\n}".to_string()
     }
 
     fn sample_mobile_product() -> String {
@@ -5623,7 +5783,7 @@ mod tests {
                 "\"targets\": [\"ios\", \"android\"]",
             )
             .replace(
-                "{\"id\": \"macos-app\", \"target\": \"macos\", \"surface\": \"desktop\", \"artifact\": \"generated/macos\"}",
+                "{\"id\": \"macos-app\", \"target\": \"macos\", \"surface\": \"desktop\", \"artifact\": \"generated/macos\"},\n    {\"id\": \"linux-app\", \"target\": \"linux\", \"surface\": \"desktop\", \"artifact\": \"generated/linux\"}",
                 "{\"id\": \"ios-app\", \"target\": \"ios\", \"surface\": \"mobile\", \"artifact\": \"generated/mobile/ios\"},\n    {\"id\": \"android-app\", \"target\": \"android\", \"surface\": \"mobile\", \"artifact\": \"generated/mobile/android\"}",
             )
     }
