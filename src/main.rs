@@ -2971,9 +2971,20 @@ fn compile_native_with_contract(
     } else {
         "mobile"
     };
+    let expected_surface_schema = if matches!(target, "macos" | "linux") {
+        "theurgy-desktop-surface-ir/v1"
+    } else {
+        "theurgy-mobile-surface-ir/v1"
+    };
     if release_target.surface != expected_surface_target {
         return Err(TheurgyError::new(format!(
             "product IR release target surface for {target} must be {expected_surface_target}"
+        ))
+        .into());
+    }
+    if surface_summary.schema != expected_surface_schema {
+        return Err(TheurgyError::new(format!(
+            "surface IR schema for {target} must be {expected_surface_schema}"
         ))
         .into());
     }
@@ -6020,6 +6031,46 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(error.contains("product IR surfaces.desktop does not match declared surface IR"));
+
+        fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
+    fn compile_app_rejects_surface_schema_target_drift() {
+        let app = test_root("compile-app-surface-schema-drift");
+        let out = test_root("compile-app-surface-schema-drift-out");
+        fs::create_dir_all(app.join("app-blueprint")).unwrap();
+        write_or_replace(
+            &app.join("theurgy.project.toml"),
+            "name = \"deployments\"\nkind = \"desktop\"\nsource_root = \"src\"\nproduct_ir = \"app-blueprint/product.ir.json\"\ndesktop_surface_ir = \"app-blueprint/desktop.surface.ir.json\"\nruntime_manifest = \"app-blueprint/runtime.manifest.json\"\n",
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/product.ir.json"),
+            &sample_product(),
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/runtime.manifest.json"),
+            &sample_runtime_manifest(),
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/desktop.surface.ir.json"),
+            "{\n  \"version\": \"theurgy-mobile-surface-ir/v1\",\n  \"format\": \"json\",\n  \"product\": \"deployments\",\n  \"target\": \"desktop\",\n  \"actions\": [\"refresh_state\", \"publish_changes\"],\n  \"screens\": [{\"id\": \"overview\", \"title\": \"Deployments\", \"node\": {\"id\": \"screen.overview\", \"type\": \"NavigationStack\", \"role\": \"status-overview\"}}]\n}\n",
+        )
+        .unwrap();
+
+        let error = command_compile_app(&[
+            app.display().to_string(),
+            "--target".to_string(),
+            "linux".to_string(),
+            "--out".to_string(),
+            out.display().to_string(),
+        ])
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("surface IR schema for linux must be theurgy-desktop-surface-ir/v1"));
 
         fs::remove_dir_all(app).unwrap();
     }
