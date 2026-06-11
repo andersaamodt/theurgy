@@ -987,6 +987,23 @@ fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
         )
         .into());
     }
+    let surface_contracts = value_array(&value, "surfaceActionContracts")?;
+    if surface_contracts.len() != surface_actions.len() {
+        return Err(TheurgyError::new(
+            "generated runtime surfaceActionContracts must match surfaceActions length",
+        )
+        .into());
+    }
+    let mut surface_contract_ids = Vec::new();
+    for contract in surface_contracts {
+        surface_contract_ids.push(validate_generated_action_contract(contract)?);
+    }
+    if surface_contract_ids != surface_actions {
+        return Err(TheurgyError::new(
+            "generated runtime surfaceActionContracts order must match surfaceActions",
+        )
+        .into());
+    }
     value_string(&value, "surface")
         .filter(|surface| !surface.is_empty())
         .ok_or_else(|| TheurgyError::new("generated runtime surface required"))?;
@@ -1915,6 +1932,10 @@ fn generated_runtime_metadata(
     object.insert(
         "surfaceActions".to_string(),
         string_vec_value(&surface.action_ids),
+    );
+    object.insert(
+        "surfaceActionContracts".to_string(),
+        action_contracts_value(&surface_action_contracts(summary, surface)),
     );
     object.insert("surfaceRoles".to_string(), string_vec_value(&surface.roles));
     format!(
@@ -3195,6 +3216,12 @@ mod tests {
                 .and_then(Value::as_str),
             Some("#/$defs/actionContract")
         );
+        assert_eq!(
+            schema
+                .pointer("/properties/surfaceActionContracts/items/$ref")
+                .and_then(Value::as_str),
+            Some("#/$defs/actionContract")
+        );
         let required = schema
             .pointer("/$defs/actionContract/required")
             .and_then(Value::as_array)
@@ -3477,6 +3504,18 @@ mod tests {
             Some(true)
         );
         assert_eq!(
+            runtime_json
+                .pointer("/surfaceActionContracts/1/id")
+                .and_then(Value::as_str),
+            Some("publish_changes")
+        );
+        assert_eq!(
+            runtime_json
+                .pointer("/surfaceActionContracts/1/inputKeys")
+                .unwrap(),
+            &serde_json::json!(["deployment"])
+        );
+        assert_eq!(
             runtime_json.get("productDomainObjects").unwrap(),
             &serde_json::json!(["server", "deployment"])
         );
@@ -3511,6 +3550,24 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("productActionContracts order must match productActions"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn generated_runtime_validation_rejects_surface_action_contract_drift() {
+        let root = test_root("generated-runtime-surface-drift");
+        compile_native(&sample_product(), "linux", &root).unwrap();
+        let mut runtime_json: Value =
+            serde_json::from_str(&fs::read_to_string(root.join("theurgy-runtime.json")).unwrap())
+                .unwrap();
+        *runtime_json
+            .pointer_mut("/surfaceActionContracts/1/id")
+            .unwrap() = Value::String("refresh_state".to_string());
+        let runtime = serde_json::to_string(&runtime_json).unwrap();
+        let error = validate_generated_runtime(&runtime)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("surfaceActionContracts order must match surfaceActions"));
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -17,6 +17,7 @@
     "surfaceSchema",
     "surfaceTarget",
     "surfaceActions",
+    "surfaceActionContracts",
     "surfaceRoles"
   ],
   "properties": {
@@ -49,6 +50,10 @@
     },
     "surfaceTarget": { "type": "string", "minLength": 1 },
     "surfaceActions": { "$ref": "#/$defs/actionIdList" },
+    "surfaceActionContracts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/actionContract" }
+    },
     "surfaceRoles": { "$ref": "#/$defs/stringList" }
   },
   "$defs": {
