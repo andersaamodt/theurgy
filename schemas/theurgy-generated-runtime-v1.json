@@ -82,7 +82,10 @@
         "privileged",
         "inputKeys",
         "outputKeys",
-        "failureKeys"
+        "failureKeys",
+        "inputShape",
+        "outputShape",
+        "failureShape"
       ],
       "properties": {
         "id": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
@@ -94,9 +97,20 @@
         "privileged": { "type": "boolean" },
         "inputKeys": { "$ref": "#/$defs/stringList" },
         "outputKeys": { "$ref": "#/$defs/stringList" },
-        "failureKeys": { "$ref": "#/$defs/stringList" }
+        "failureKeys": { "$ref": "#/$defs/stringList" },
+        "inputShape": { "$ref": "#/$defs/shape" },
+        "outputShape": { "$ref": "#/$defs/shape" },
+        "failureShape": { "$ref": "#/$defs/shape" }
       },
       "additionalProperties": false
+    },
+    "shape": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/shapeDescriptor" }
+    },
+    "shapeDescriptor": {
+      "type": "string",
+      "pattern": "^([a-z][a-z0-9_-]*(\\|[a-z][a-z0-9_-]*)*\\??)$"
     }
   },
   "additionalProperties": false

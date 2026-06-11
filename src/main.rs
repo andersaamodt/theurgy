@@ -1589,6 +1589,14 @@ fn validate_generated_action_contract(contract: &Value) -> Result<String> {
             ))
         })?;
     }
+    for key in ["inputShape", "outputShape", "failureShape"] {
+        let shape = value_object(contract, key).map_err(|_| {
+            TheurgyError::new(format!(
+                "generated runtime action contract {key} object required"
+            ))
+        })?;
+        object_shape(shape, &format!("generated runtime action contract {key}"))?;
+    }
     Ok(id)
 }
 
@@ -1853,10 +1861,27 @@ fn action_contracts_value(contracts: &[ActionContract]) -> Value {
                     "failureKeys".to_string(),
                     string_vec_value(&contract.failure_keys),
                 );
+                object.insert("inputShape".to_string(), shape_value(&contract.input_shape));
+                object.insert(
+                    "outputShape".to_string(),
+                    shape_value(&contract.output_shape),
+                );
+                object.insert(
+                    "failureShape".to_string(),
+                    shape_value(&contract.failure_shape),
+                );
                 Value::Object(object)
             })
             .collect(),
     )
+}
+
+fn shape_value(shape: &BTreeMap<String, String>) -> Value {
+    let mut object = serde_json::Map::new();
+    for (key, type_name) in shape {
+        object.insert(key.clone(), Value::String(type_name.clone()));
+    }
+    Value::Object(object)
 }
 
 fn json_string_array_literal(values: &[String]) -> String {
@@ -1877,12 +1902,23 @@ fn swift_string_array_literal(values: &[String]) -> String {
     format!("[{items}]")
 }
 
+fn swift_shape_literal(shape: &BTreeMap<String, String>) -> String {
+    let items = shape
+        .iter()
+        .map(|(key, type_name)| {
+            format!("\"{}\": \"{}\"", swift_escape(key), swift_escape(type_name))
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("[{items}]")
+}
+
 fn swift_action_contracts_literal(contracts: &[ActionContract]) -> String {
     let items = contracts
         .iter()
         .map(|contract| {
             format!(
-                "ProductActionContract(id: \"{}\", label: \"{}\", effect: \"{}\", safe: {}, mutating: {}, longRunning: {}, privileged: {}, inputKeys: {}, outputKeys: {}, failureKeys: {})",
+                "ProductActionContract(id: \"{}\", label: \"{}\", effect: \"{}\", safe: {}, mutating: {}, longRunning: {}, privileged: {}, inputKeys: {}, outputKeys: {}, failureKeys: {}, inputShape: {}, outputShape: {}, failureShape: {})",
                 swift_escape(&contract.id),
                 swift_escape(&contract.label),
                 swift_escape(&contract.effect),
@@ -1892,7 +1928,10 @@ fn swift_action_contracts_literal(contracts: &[ActionContract]) -> String {
                 swift_bool(contract.privileged),
                 swift_string_array_literal(&contract.input_keys),
                 swift_string_array_literal(&contract.output_keys),
-                swift_string_array_literal(&contract.failure_keys)
+                swift_string_array_literal(&contract.failure_keys),
+                swift_shape_literal(&contract.input_shape),
+                swift_shape_literal(&contract.output_shape),
+                swift_shape_literal(&contract.failure_shape)
             )
         })
         .collect::<Vec<_>>()
@@ -1932,12 +1971,27 @@ fn java_string_array_literal(values: &[String]) -> String {
     format!("new String[] {{{items}}}")
 }
 
+fn java_shape_literal(shape: &BTreeMap<String, String>) -> String {
+    let items = shape
+        .iter()
+        .map(|(key, type_name)| {
+            format!(
+                "{{\"{}\", \"{}\"}}",
+                java_escape(key),
+                java_escape(type_name)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("new String[][] {{{items}}}")
+}
+
 fn java_action_contracts_literal(contracts: &[ActionContract]) -> String {
     let items = contracts
         .iter()
         .map(|contract| {
             format!(
-                "new ProductActionContract(\"{}\", \"{}\", \"{}\", {}, {}, {}, {}, {}, {}, {})",
+                "new ProductActionContract(\"{}\", \"{}\", \"{}\", {}, {}, {}, {}, {}, {}, {}, {}, {}, {})",
                 java_escape(&contract.id),
                 java_escape(&contract.label),
                 java_escape(&contract.effect),
@@ -1947,7 +2001,10 @@ fn java_action_contracts_literal(contracts: &[ActionContract]) -> String {
                 java_bool(contract.privileged),
                 java_string_array_literal(&contract.input_keys),
                 java_string_array_literal(&contract.output_keys),
-                java_string_array_literal(&contract.failure_keys)
+                java_string_array_literal(&contract.failure_keys),
+                java_shape_literal(&contract.input_shape),
+                java_shape_literal(&contract.output_shape),
+                java_shape_literal(&contract.failure_shape)
             )
         })
         .collect::<Vec<_>>()
@@ -2569,6 +2626,9 @@ struct ProductActionContract {
   let inputKeys: [String]
   let outputKeys: [String]
   let failureKeys: [String]
+  let inputShape: [String: String]
+  let outputShape: [String: String]
+  let failureShape: [String: String]
 }
 
 struct RuntimeContract {
@@ -2684,8 +2744,11 @@ public final class MainActivity extends Activity {
     final String[] inputKeys;
     final String[] outputKeys;
     final String[] failureKeys;
+    final String[][] inputShape;
+    final String[][] outputShape;
+    final String[][] failureShape;
 
-    ProductActionContract(String id, String label, String effect, boolean safe, boolean mutating, boolean longRunning, boolean privileged, String[] inputKeys, String[] outputKeys, String[] failureKeys) {
+    ProductActionContract(String id, String label, String effect, boolean safe, boolean mutating, boolean longRunning, boolean privileged, String[] inputKeys, String[] outputKeys, String[] failureKeys, String[][] inputShape, String[][] outputShape, String[][] failureShape) {
       this.id = id;
       this.label = label;
       this.effect = effect;
@@ -2696,6 +2759,9 @@ public final class MainActivity extends Activity {
       this.inputKeys = inputKeys;
       this.outputKeys = outputKeys;
       this.failureKeys = failureKeys;
+      this.inputShape = inputShape;
+      this.outputShape = outputShape;
+      this.failureShape = failureShape;
     }
   }
 
@@ -3523,11 +3589,27 @@ mod tests {
                 .and_then(Value::as_str),
             Some("#/$defs/actionContract")
         );
+        assert_eq!(
+            schema
+                .pointer("/$defs/actionContract/properties/inputShape/$ref")
+                .and_then(Value::as_str),
+            Some("#/$defs/shape")
+        );
         let required = schema
             .pointer("/$defs/actionContract/required")
             .and_then(Value::as_array)
             .unwrap();
-        for key in ["id", "label", "effect", "safe", "mutating", "longRunning"] {
+        for key in [
+            "id",
+            "label",
+            "effect",
+            "safe",
+            "mutating",
+            "longRunning",
+            "inputShape",
+            "outputShape",
+            "failureShape",
+        ] {
             assert!(required.iter().any(|value| value.as_str() == Some(key)));
         }
     }
@@ -3890,6 +3972,12 @@ mod tests {
                 .pointer("/productActionContracts/1/inputKeys")
                 .unwrap(),
             &serde_json::json!(["deployment"])
+        );
+        assert_eq!(
+            runtime_json
+                .pointer("/productActionContracts/1/inputShape/deployment")
+                .and_then(Value::as_str),
+            Some("string")
         );
         assert_eq!(
             runtime_json
@@ -4300,6 +4388,8 @@ mod tests {
         assert!(ios.contains("inputKeys: [\"deployment\"]"));
         assert!(ios.contains("outputKeys: [\"params\"]"));
         assert!(ios.contains("failureKeys: []"));
+        assert!(ios.contains("inputShape: [\"deployment\": \"string\"]"));
+        assert!(ios.contains("outputShape: [\"params\": \"object\"]"));
         assert!(!ios.contains("id: \"refresh_state\""));
 
         let android = fs::read_to_string(
@@ -4321,8 +4411,11 @@ mod tests {
         ));
         assert!(android.contains("new String[] {\"deployment\"}"));
         assert!(android.contains("new String[] {\"params\"}"));
+        assert!(android.contains("new String[][] {{\"deployment\", \"string\"}}"));
+        assert!(android.contains("new String[][] {{\"params\", \"object\"}}"));
         assert!(android.contains("final String[] outputKeys;"));
         assert!(android.contains("final String[] failureKeys;"));
+        assert!(android.contains("final String[][] outputShape;"));
         assert!(!android.contains("new ProductActionContract(\"refresh_state\""));
 
         fs::remove_dir_all(ios_root).unwrap();
