@@ -1,0 +1,16 @@
+#!/bin/sh
+# Validate a Theurgy Action IR file.
+
+case "${1-}" in
+--help|--usage|-h)
+  cat <<'USAGE'
+Usage: validate-theurgy-action-ir PATH
+USAGE
+  exit 0
+  ;;
+esac
+
+set -eu
+
+repo_dir=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd -P)
+exec cargo run --quiet --manifest-path "$repo_dir/Cargo.toml" --bin theurgy-runtime -- validate-action-ir "$@"

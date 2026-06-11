@@ -40,6 +40,8 @@ spells/conjure-native-desktop sample-desktop
 spells/conjure-enterprise-website sample-website
 spells/inspect-theurgy-project sample-desktop
 cargo run --bin theurgy-runtime -- validate-product-ir product.ir.json
+cargo run --bin theurgy-runtime -- validate-action-ir action.ir.json
+cargo run --bin theurgy-runtime -- validate-state-snapshot state.snapshot.json
 cargo run --bin theurgy-runtime -- validate-runtime-manifest runtime.manifest.json
 cargo run --bin theurgy-runtime -- validate-surface-ir desktop.surface.ir.json
 cargo run --bin theurgy-runtime -- project-surface product.ir.json --target macos

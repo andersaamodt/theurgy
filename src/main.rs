@@ -69,6 +69,8 @@ fn run(args: Vec<String>) -> Result<()> {
         Some("conjure-enterprise-website") => command_conjure(ProjectKind::Website, &args[2..]),
         Some("inspect") => command_inspect(&args[2..]),
         Some("validate-product-ir") => command_validate_product_ir(&args[2..]),
+        Some("validate-action-ir") => command_validate_action_ir(&args[2..]),
+        Some("validate-state-snapshot") => command_validate_state_snapshot(&args[2..]),
         Some("validate-runtime-manifest") => command_validate_runtime_manifest(&args[2..]),
         Some("validate-surface-ir") => command_validate_surface_ir(&args[2..]),
         Some("project-surface") => command_project_surface(&args[2..]),
@@ -176,6 +178,31 @@ fn command_validate_product_ir(args: &[String]) -> Result<()> {
     println!("app={}", summary.app_id);
     println!("actions={}", summary.actions);
     println!("targets={}", summary.targets.join(","));
+    Ok(())
+}
+
+fn command_validate_action_ir(args: &[String]) -> Result<()> {
+    if args.len() != 1 {
+        return Err(TheurgyError::new("usage: validate-action-ir PATH").into());
+    }
+    let value = read_json(Path::new(&args[0]))?;
+    let summary = validate_action_ir(&value)?;
+    println!("status=ok");
+    println!("schema=theurgy-action-ir/v1");
+    println!("actions={}", summary.actions);
+    println!("ids={}", summary.action_ids.join(","));
+    Ok(())
+}
+
+fn command_validate_state_snapshot(args: &[String]) -> Result<()> {
+    if args.len() != 1 {
+        return Err(TheurgyError::new("usage: validate-state-snapshot PATH").into());
+    }
+    let value = read_json(Path::new(&args[0]))?;
+    let summary = validate_state_snapshot(&value)?;
+    println!("status=ok");
+    println!("schema=theurgy-state-snapshot/v1");
+    println!("app={}", summary.app_id);
     Ok(())
 }
 
@@ -365,6 +392,17 @@ struct ProductSummary {
 }
 
 #[derive(Debug, Eq, PartialEq)]
+struct ActionSummary {
+    action_ids: Vec<String>,
+    actions: usize,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct StateSnapshotSummary {
+    app_id: String,
+}
+
+#[derive(Debug, Eq, PartialEq)]
 struct RuntimeManifestSummary {
     app_id: String,
     protocol: String,
@@ -464,6 +502,36 @@ fn validate_surface_ir(text: &str) -> Result<SurfaceSummary> {
 fn validate_product_ir(text: &str) -> Result<ProductSummary> {
     let value = parse_json(text)?;
     validate_product_ir_value(&value)
+}
+
+fn validate_action_ir(text: &str) -> Result<ActionSummary> {
+    let value = parse_json(text)?;
+    expect_value_string(&value, "version", "theurgy-action-ir/v1")?;
+    let action_values = value_array(&value, "actions")?;
+    if action_values.is_empty() {
+        return Err(TheurgyError::new("action IR actions required").into());
+    }
+    let mut action_ids = Vec::new();
+    for action in action_values {
+        action_ids.push(validate_action(action)?);
+    }
+    Ok(ActionSummary {
+        actions: action_values.len(),
+        action_ids,
+    })
+}
+
+fn validate_state_snapshot(text: &str) -> Result<StateSnapshotSummary> {
+    let value = parse_json(text)?;
+    expect_value_string(&value, "schema", "theurgy-state-snapshot/v1")?;
+    let app_id = value_string(&value, "app")
+        .filter(|id| valid_slug(id))
+        .ok_or_else(|| TheurgyError::new("state snapshot app must be a lowercase slug"))?;
+    value_string(&value, "generatedAt")
+        .filter(|generated_at| !generated_at.is_empty())
+        .ok_or_else(|| TheurgyError::new("state snapshot generatedAt required"))?;
+    value_object(&value, "data")?;
+    Ok(StateSnapshotSummary { app_id })
 }
 
 fn validate_product_ir_value(value: &Value) -> Result<ProductSummary> {
@@ -1563,6 +1631,43 @@ mod tests {
     }
 
     #[test]
+    fn validates_action_ir_contract() {
+        let actions = sample_action_ir();
+        let summary = validate_action_ir(&actions).unwrap();
+        assert_eq!(summary.actions, 2);
+        assert_eq!(
+            summary.action_ids,
+            vec!["refresh_state".to_string(), "publish_changes".to_string()]
+        );
+    }
+
+    #[test]
+    fn action_ir_validation_uses_typed_action_contract() {
+        let actions = sample_action_ir().replace("\"longRunning\": true", "\"longRunning\": 1");
+        let error = validate_action_ir(&actions).unwrap_err().to_string();
+        assert!(error.contains("action.longRunning boolean required"));
+        assert!(validate_action_ir("{\"version\":\"theurgy-action-ir/v1\",").is_err());
+    }
+
+    #[test]
+    fn validates_state_snapshot_contract() {
+        let snapshot = sample_state_snapshot();
+        let summary = validate_state_snapshot(&snapshot).unwrap();
+        assert_eq!(summary.app_id, "deployments");
+    }
+
+    #[test]
+    fn state_snapshot_validation_requires_data_object() {
+        let snapshot = "{\n  \"schema\": \"theurgy-state-snapshot/v1\",\n  \"app\": \"deployments\",\n  \"generatedAt\": \"2026-06-11T00:00:00Z\",\n  \"data\": []\n}";
+        let error = validate_state_snapshot(&snapshot).unwrap_err().to_string();
+        assert!(error.contains("missing JSON object key: data"));
+        let snapshot =
+            sample_state_snapshot().replace("\"generatedAt\": \"2026-06-11T00:00:00Z\",", "");
+        let error = validate_state_snapshot(&snapshot).unwrap_err().to_string();
+        assert!(error.contains("generatedAt required"));
+    }
+
+    #[test]
     fn runtime_manifest_validation_requires_string_arrays() {
         let manifest = sample_runtime_manifest().replace(
             "\"stateCommand\": [\"custom-core\", \"state\"]",
@@ -1718,6 +1823,14 @@ mod tests {
             "\"targets\": [\"macos\", \"linux\"]",
             "\"targets\": [\"ios\", \"android\"]",
         )
+    }
+
+    fn sample_action_ir() -> String {
+        "{\n  \"version\": \"theurgy-action-ir/v1\",\n  \"actions\": [\n    {\"id\": \"refresh_state\", \"label\": \"Refresh\", \"input\": {}, \"output\": {}, \"effect\": \"read\", \"failure\": {}, \"safe\": true, \"mutating\": false, \"longRunning\": false, \"privileged\": false},\n    {\"id\": \"publish_changes\", \"label\": \"Push to Production\", \"input\": {}, \"output\": {}, \"effect\": \"release\", \"failure\": {}, \"safe\": false, \"mutating\": true, \"longRunning\": true, \"privileged\": true}\n  ]\n}".to_string()
+    }
+
+    fn sample_state_snapshot() -> String {
+        "{\n  \"schema\": \"theurgy-state-snapshot/v1\",\n  \"app\": \"deployments\",\n  \"generatedAt\": \"2026-06-11T00:00:00Z\",\n  \"data\": {\n    \"servers\": [],\n    \"deployments\": []\n  }\n}".to_string()
     }
 
     fn sample_runtime_manifest() -> String {
