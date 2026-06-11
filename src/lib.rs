@@ -171,6 +171,15 @@ pub mod product_runtime {
         pub artifact: String,
     }
 
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct SurfaceIr {
+        pub schema: String,
+        pub product: String,
+        pub target: String,
+        pub action_ids: Vec<String>,
+        pub roles: Vec<String>,
+    }
+
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     pub struct RuntimeCompatibility {
         pub wizardry_apps_shell_first_still_supported: bool,
@@ -460,6 +469,51 @@ pub mod product_runtime {
         })
     }
 
+    pub fn validate_surface_ir_value(value: &Value) -> ContractResult<SurfaceIr> {
+        let schema = value_string(value, "version")
+            .ok_or_else(|| ContractError::new("surface IR version required"))?;
+        if !matches!(
+            schema.as_str(),
+            DESKTOP_SURFACE_IR_SCHEMA | MOBILE_SURFACE_IR_SCHEMA
+        ) {
+            return Err(ContractError::new("surface IR version invalid"));
+        }
+        expect_value_string(value, "format", "json")?;
+        let product = value_string(value, "product")
+            .filter(|id| valid_slug(id))
+            .ok_or_else(|| ContractError::new("surface IR product must be a lowercase slug"))?;
+        let target = value_string(value, "target")
+            .filter(|target| !target.is_empty())
+            .ok_or_else(|| ContractError::new("surface IR target required"))?;
+        let action_ids = surface_action_ids(value)?;
+        let mut roles = Vec::new();
+        if schema == DESKTOP_SURFACE_IR_SCHEMA {
+            if !matches!(target.as_str(), "desktop" | "macos" | "linux") {
+                return Err(ContractError::new("desktop surface IR target invalid"));
+            }
+            let window = value_object(value, "window")?;
+            collect_surface_roles(window, &mut roles);
+        } else {
+            if !matches!(target.as_str(), "mobile" | "ios" | "android") {
+                return Err(ContractError::new("mobile surface IR target invalid"));
+            }
+            for screen in value_array(value, "screens")? {
+                if let Ok(node) = value_object(screen, "node") {
+                    collect_surface_roles(node, &mut roles);
+                }
+            }
+        }
+        roles.sort();
+        roles.dedup();
+        Ok(SurfaceIr {
+            schema,
+            product,
+            target,
+            action_ids,
+            roles,
+        })
+    }
+
     pub fn validate_action_ir_value(value: &Value) -> ContractResult<ActionIr> {
         expect_value_string(value, "version", ACTION_IR_SCHEMA)?;
         let action_values = value_array(value, "actions")?;
@@ -623,6 +677,49 @@ pub mod product_runtime {
         match value_string(value, key) {
             Some(actual) if actual == expected => Ok(()),
             _ => Err(ContractError::new(format!("expected {key} = {expected}"))),
+        }
+    }
+
+    fn surface_action_ids(value: &Value) -> ContractResult<Vec<String>> {
+        let Some(actions) = value.get("actions") else {
+            return Ok(Vec::new());
+        };
+        let Some(array) = actions.as_array() else {
+            return Err(ContractError::new("surface IR actions must be an array"));
+        };
+        let mut action_ids = Vec::new();
+        for item in array {
+            let Some(action_id) = item.as_str() else {
+                return Err(ContractError::new(
+                    "surface IR actions must contain strings",
+                ));
+            };
+            if !valid_action_id(action_id) {
+                return Err(ContractError::new(
+                    "surface IR action must be a stable action id",
+                ));
+            }
+            action_ids.push(action_id.to_string());
+        }
+        Ok(action_ids)
+    }
+
+    fn collect_surface_roles(node: &Value, roles: &mut Vec<String>) {
+        if let Some(role) = value_string(node, "role").filter(|role| !role.is_empty()) {
+            roles.push(role);
+        }
+        match node {
+            Value::Object(object) => {
+                for child in object.values() {
+                    collect_surface_roles(child, roles);
+                }
+            }
+            Value::Array(children) => {
+                for child in children {
+                    collect_surface_roles(child, roles);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -1477,5 +1574,72 @@ mod tests {
             error,
             "product IR releaseTargets missing release target for app target: linux"
         );
+    }
+
+    #[test]
+    fn product_runtime_validates_surface_ir_contracts() {
+        let desktop = serde_json::json!({
+            "version": product_runtime::DESKTOP_SURFACE_IR_SCHEMA,
+            "format": "json",
+            "product": "deployments",
+            "target": "desktop",
+            "actions": ["refresh_state", "publish_changes"],
+            "window": {
+                "id": "window.main",
+                "type": "Window",
+                "role": "native-product-root",
+                "child": {
+                    "id": "split.main",
+                    "type": "SplitPane",
+                    "role": "left-list-detail",
+                    "children": [
+                        {"id": "list", "type": "TreeList", "role": "product-navigation"},
+                        {"id": "detail", "type": "Detail", "role": "product-detail"}
+                    ]
+                }
+            }
+        });
+        let desktop = product_runtime::validate_surface_ir_value(&desktop).unwrap();
+        assert_eq!(desktop.product, "deployments");
+        assert_eq!(desktop.target, "desktop");
+        assert_eq!(
+            desktop.action_ids,
+            vec!["refresh_state".to_string(), "publish_changes".to_string()]
+        );
+        assert!(desktop.roles.contains(&"left-list-detail".to_string()));
+        assert!(desktop.roles.contains(&"native-product-root".to_string()));
+
+        let mobile = serde_json::json!({
+            "version": product_runtime::MOBILE_SURFACE_IR_SCHEMA,
+            "format": "json",
+            "product": "deployments",
+            "target": "mobile",
+            "actions": ["refresh_state"],
+            "screens": [{
+                "id": "overview",
+                "title": "Deployments",
+                "node": {
+                    "id": "screen.overview",
+                    "type": "NavigationStack",
+                    "role": "status-overview"
+                }
+            }]
+        });
+        let mobile = product_runtime::validate_surface_ir_value(&mobile).unwrap();
+        assert_eq!(mobile.schema, product_runtime::MOBILE_SURFACE_IR_SCHEMA);
+        assert_eq!(mobile.roles, vec!["status-overview".to_string()]);
+
+        let invalid = serde_json::json!({
+            "version": product_runtime::MOBILE_SURFACE_IR_SCHEMA,
+            "format": "json",
+            "product": "deployments",
+            "target": "linux",
+            "actions": [],
+            "screens": []
+        });
+        let error = product_runtime::validate_surface_ir_value(&invalid)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(error, "mobile surface IR target invalid");
     }
 }

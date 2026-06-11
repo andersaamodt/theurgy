@@ -2113,48 +2113,18 @@ fn runtime_contract_from_manifest(text: &str) -> Result<RuntimeContract> {
 
 fn validate_surface_ir(text: &str) -> Result<SurfaceSummary> {
     let value = parse_json(text)?;
-    let schema = value_string(&value, "version")
-        .ok_or_else(|| TheurgyError::new("surface IR version required"))?;
-    if !matches!(
-        schema.as_str(),
-        product_runtime::DESKTOP_SURFACE_IR_SCHEMA | product_runtime::MOBILE_SURFACE_IR_SCHEMA
-    ) {
-        return Err(TheurgyError::new("surface IR version invalid").into());
+    let surface = product_runtime::validate_surface_ir_value(&value)?;
+    Ok(surface_summary_from_library(surface))
+}
+
+fn surface_summary_from_library(surface: product_runtime::SurfaceIr) -> SurfaceSummary {
+    SurfaceSummary {
+        schema: surface.schema,
+        product: surface.product,
+        target: surface.target,
+        action_ids: surface.action_ids,
+        roles: surface.roles,
     }
-    expect_value_string(&value, "format", "json")?;
-    let product = value_string(&value, "product")
-        .filter(|id| valid_slug(id))
-        .ok_or_else(|| TheurgyError::new("surface IR product must be a lowercase slug"))?;
-    let target = value_string(&value, "target")
-        .filter(|target| !target.is_empty())
-        .ok_or_else(|| TheurgyError::new("surface IR target required"))?;
-    let action_ids = surface_action_ids(&value)?;
-    let mut roles = Vec::new();
-    if schema == product_runtime::DESKTOP_SURFACE_IR_SCHEMA {
-        if !matches!(target.as_str(), "desktop" | "macos" | "linux") {
-            return Err(TheurgyError::new("desktop surface IR target invalid").into());
-        }
-        let window = value_object(&value, "window")?;
-        collect_surface_roles(window, &mut roles);
-    } else {
-        if !matches!(target.as_str(), "mobile" | "ios" | "android") {
-            return Err(TheurgyError::new("mobile surface IR target invalid").into());
-        }
-        for screen in value_array(&value, "screens")? {
-            if let Ok(node) = value_object(screen, "node") {
-                collect_surface_roles(node, &mut roles);
-            }
-        }
-    }
-    roles.sort();
-    roles.dedup();
-    Ok(SurfaceSummary {
-        schema,
-        product,
-        target,
-        action_ids,
-        roles,
-    })
 }
 
 fn validate_product_ir(text: &str) -> Result<ProductSummary> {
@@ -2436,45 +2406,6 @@ fn validate_generated_action_contract(contract: &Value) -> Result<String> {
         }
     }
     Ok(id)
-}
-
-fn surface_action_ids(value: &Value) -> Result<Vec<String>> {
-    let Some(actions) = value.get("actions") else {
-        return Ok(Vec::new());
-    };
-    let Some(array) = actions.as_array() else {
-        return Err(TheurgyError::new("surface IR actions must be an array").into());
-    };
-    let mut action_ids = Vec::new();
-    for item in array {
-        let Some(action_id) = item.as_str() else {
-            return Err(TheurgyError::new("surface IR actions must contain strings").into());
-        };
-        if !valid_action_id(action_id) {
-            return Err(TheurgyError::new("surface IR action must be a stable action id").into());
-        }
-        action_ids.push(action_id.to_string());
-    }
-    Ok(action_ids)
-}
-
-fn collect_surface_roles(node: &Value, roles: &mut Vec<String>) {
-    if let Some(role) = value_string(node, "role").filter(|role| !role.is_empty()) {
-        roles.push(role);
-    }
-    match node {
-        Value::Object(object) => {
-            for child in object.values() {
-                collect_surface_roles(child, roles);
-            }
-        }
-        Value::Array(children) => {
-            for child in children {
-                collect_surface_roles(child, roles);
-            }
-        }
-        _ => {}
-    }
 }
 
 fn parse_json(text: &str) -> Result<Value> {
