@@ -72,6 +72,7 @@ fn run(args: Vec<String>) -> Result<()> {
         Some("validate-product-ir") => command_validate_product_ir(&args[2..]),
         Some("validate-action-ir") => command_validate_action_ir(&args[2..]),
         Some("validate-state-snapshot") => command_validate_state_snapshot(&args[2..]),
+        Some("validate-runtime-status") => command_validate_runtime_status(&args[2..]),
         Some("validate-runtime-action-result") => {
             command_validate_runtime_action_result(&args[2..])
         }
@@ -211,6 +212,18 @@ fn command_validate_state_snapshot(args: &[String]) -> Result<()> {
     let summary = validate_state_snapshot(&value)?;
     println!("status=ok");
     println!("schema=theurgy-state-snapshot/v1");
+    println!("app={}", summary.app_id);
+    Ok(())
+}
+
+fn command_validate_runtime_status(args: &[String]) -> Result<()> {
+    if args.len() != 1 {
+        return Err(TheurgyError::new("usage: validate-runtime-status PATH").into());
+    }
+    let value = read_json(Path::new(&args[0]))?;
+    let summary = validate_runtime_status(&value)?;
+    println!("status=ok");
+    println!("schema=theurgy-runtime-status/v1");
     println!("app={}", summary.app_id);
     Ok(())
 }
@@ -1069,6 +1082,11 @@ fn validate_action_ir(text: &str) -> Result<ActionSummary> {
 fn validate_state_snapshot(text: &str) -> Result<StateSnapshotSummary> {
     let value = parse_json(text)?;
     validate_state_snapshot_value(&value)
+}
+
+fn validate_runtime_status(text: &str) -> Result<RuntimeStatusSummary> {
+    let value = parse_json(text)?;
+    validate_runtime_status_value(&value)
 }
 
 fn validate_state_snapshot_value(value: &Value) -> Result<StateSnapshotSummary> {
@@ -2950,6 +2968,24 @@ mod tests {
     }
 
     #[test]
+    fn validates_runtime_status_contract() {
+        let status = sample_runtime_status();
+        let summary = validate_runtime_status(&status).unwrap();
+        assert_eq!(summary.app_id, "deployments");
+    }
+
+    #[test]
+    fn runtime_status_validation_requires_state_ready_boolean() {
+        let status = sample_runtime_status().replace("\"state_ready\": true", "\"state_ready\": 1");
+        let error = validate_runtime_status(&status).unwrap_err().to_string();
+        assert!(error.contains("state_ready must be boolean"));
+        let status =
+            sample_runtime_status().replace("\"generatedAt\": \"2026-06-11T00:00:00Z\",", "");
+        let error = validate_runtime_status(&status).unwrap_err().to_string();
+        assert!(error.contains("generatedAt required"));
+    }
+
+    #[test]
     fn validates_runtime_action_result_contract() {
         let result = sample_runtime_action_result();
         let summary = validate_runtime_action_result(&result).unwrap();
@@ -3045,6 +3081,25 @@ mod tests {
                 .pointer("/properties/data/type")
                 .and_then(Value::as_str),
             Some("object")
+        );
+    }
+
+    #[test]
+    fn runtime_status_schema_uses_state_ready_boolean() {
+        let schema: Value =
+            serde_json::from_str(include_str!("../schemas/theurgy-runtime-status-v1.json"))
+                .unwrap();
+        assert_eq!(
+            schema
+                .pointer("/properties/app/pattern")
+                .and_then(Value::as_str),
+            Some("^[a-z][a-z0-9-]*$")
+        );
+        assert_eq!(
+            schema
+                .pointer("/properties/state_ready/type")
+                .and_then(Value::as_str),
+            Some("boolean")
         );
     }
 
@@ -3771,6 +3826,10 @@ mod tests {
 
     fn sample_state_snapshot() -> String {
         "{\n  \"schema\": \"theurgy-state-snapshot/v1\",\n  \"app\": \"deployments\",\n  \"generatedAt\": \"2026-06-11T00:00:00Z\",\n  \"data\": {\n    \"servers\": [],\n    \"deployments\": []\n  }\n}".to_string()
+    }
+
+    fn sample_runtime_status() -> String {
+        "{\n  \"schema\": \"theurgy-runtime-status/v1\",\n  \"app\": \"deployments\",\n  \"generatedAt\": \"2026-06-11T00:00:00Z\",\n  \"state_ready\": true,\n  \"servers\": 0,\n  \"deployments\": 0\n}".to_string()
     }
 
     fn sample_runtime_action_result() -> String {
