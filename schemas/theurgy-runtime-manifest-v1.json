@@ -10,12 +10,40 @@
     "productIr": { "type": "string", "minLength": 1 },
     "runtime": {
       "type": "object",
-      "required": ["stateCommand", "actionCommand"],
+      "required": ["stateCommand", "actionCommand", "protocol"],
       "properties": {
-        "stateCommand": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
-        "actionCommand": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+        "stateCommand": { "$ref": "#/$defs/command" },
+        "statusCommand": { "$ref": "#/$defs/command" },
+        "actionCommand": { "$ref": "#/$defs/command" },
+        "historyCommand": { "$ref": "#/$defs/command" },
+        "daemonCommand": { "$ref": "#/$defs/command" },
+        "protocol": { "type": "string", "minLength": 1 }
       },
       "additionalProperties": true
+    },
+    "surfaces": {
+      "type": "object",
+      "properties": {
+        "desktop": { "type": "string", "minLength": 1 },
+        "mobile": { "type": "string", "minLength": 1 },
+        "legacyNativeDesktop": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": true
+    },
+    "compatibility": {
+      "type": "object",
+      "properties": {
+        "wizardryAppsShellFirstStillSupported": { "type": "boolean" },
+        "theurgyRequiredForLegacyWizardryApps": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "command": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1
     }
   },
   "additionalProperties": true

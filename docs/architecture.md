@@ -20,7 +20,7 @@ Theurgy is a higher-integration layer for wizardry-family apps.
 - Theurgy owns the opt-in Product IR for apps that need a shared typed app brain across native targets.
 - Product IR describes identity, domain objects, state snapshots, typed actions, persistence roots, background jobs, audit behavior, and release targets.
 - Desktop Surface IR and Mobile Surface IR are separate projections from Product IR; do not force one universal widget tree across desktop and mobile.
-- Native adapters should be platform-owned and thin over the runtime protocol: state, action, status/progress, and history.
+- Native adapters should be platform-owned and thin over the runtime protocol: `stateCommand`, `statusCommand`, `actionCommand`, `historyCommand`, and operation progress records.
 - Existing wizardry-apps shell-first builds remain valid without theurgy; theurgy is the higher-integration path, not a mandatory dependency for ordinary script-first apps.
 
 ## Enterprise Web

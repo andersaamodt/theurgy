@@ -41,6 +41,8 @@
       "required": ["snapshotSchema"],
       "properties": {
         "snapshotSchema": { "type": "string", "minLength": 1 },
+        "command": { "$ref": "#/$defs/command" },
+        "statusCommand": { "$ref": "#/$defs/command" },
         "roots": { "type": "array", "items": { "type": "object" } }
       },
       "additionalProperties": true
@@ -67,6 +69,11 @@
         "privileged": { "type": "boolean" }
       },
       "additionalProperties": true
+    },
+    "command": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1
     }
   },
   "additionalProperties": true
