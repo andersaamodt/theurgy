@@ -49,6 +49,7 @@
     },
     "persistence": { "type": "object", "additionalProperties": true },
     "backgroundJobs": { "type": "array", "items": { "type": "object" } },
+    "releaseTargets": { "type": "array", "items": { "type": "object" } },
     "audit": { "type": "object", "additionalProperties": true },
     "surfaces": { "type": "object", "additionalProperties": true }
   },
