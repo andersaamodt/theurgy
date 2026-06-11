@@ -658,6 +658,16 @@ fn compile_native(product: &str, target: &str, out_dir: &Path) -> Result<()> {
         &out_dir.join("theurgy-surface.json"),
         &format!("{surface}\n"),
     )?;
+    write_or_replace(
+        &out_dir.join("theurgy-runtime.json"),
+        &format!(
+            "{{\n  \"version\": \"theurgy-generated-runtime/v1\",\n  \"app\": \"{}\",\n  \"target\": \"{}\",\n  \"stateCommand\": [\"{}-core\", \"runtime-state\"],\n  \"actionCommand\": [\"{}-core\", \"runtime-action\"],\n  \"surface\": \"theurgy-surface.json\"\n}}\n",
+            json_escape(&summary.app_id),
+            json_escape(target),
+            json_escape(&summary.app_id),
+            json_escape(&summary.app_id)
+        ),
+    )?;
     match target {
         "macos" => compile_macos(&summary, out_dir),
         "linux" => compile_linux(&summary, out_dir),
@@ -681,7 +691,10 @@ fn compile_macos(summary: &ProductSummary, out_dir: &Path) -> Result<()> {
         &format!(
             "import SwiftUI\n\n@main\nstruct TheurgyNativeApp: App {{\n  var body: some Scene {{\n    WindowGroup(\"{}\") {{\n      Text(\"{}\")\n        .frame(minWidth: 960, minHeight: 640)\n    }}\n  }}\n}}\n",
             swift_escape(&summary.app_name),
-            swift_escape(&summary.app_name)
+            swift_escape(&format!(
+                "{} native adapter\nRuntime: theurgy-runtime.json\nSurface: theurgy-surface.json",
+                summary.app_name
+            ))
         ),
     )
 }
@@ -698,7 +711,7 @@ fn compile_linux(summary: &ProductSummary, out_dir: &Path) -> Result<()> {
     write_or_replace(
         &out_dir.join("src/main.c"),
         &format!(
-            "#include <gtk/gtk.h>\n\nstatic void activate(GtkApplication *app, gpointer user_data) {{\n  (void)user_data;\n  GtkWidget *window = gtk_application_window_new(app);\n  gtk_window_set_title(GTK_WINDOW(window), \"{}\");\n  gtk_window_set_default_size(GTK_WINDOW(window), 960, 640);\n  gtk_window_set_child(GTK_WINDOW(window), gtk_label_new(\"{}\"));\n  gtk_window_present(GTK_WINDOW(window));\n}}\n\nint main(int argc, char **argv) {{\n  GtkApplication *app = gtk_application_new(\"app.theurgy.{}\", G_APPLICATION_DEFAULT_FLAGS);\n  g_signal_connect(app, \"activate\", G_CALLBACK(activate), NULL);\n  int status = g_application_run(G_APPLICATION(app), argc, argv);\n  g_object_unref(app);\n  return status;\n}}\n",
+            "#include <gtk/gtk.h>\n\nstatic void activate(GtkApplication *app, gpointer user_data) {{\n  (void)user_data;\n  GtkWidget *window = gtk_application_window_new(app);\n  gtk_window_set_title(GTK_WINDOW(window), \"{}\");\n  gtk_window_set_default_size(GTK_WINDOW(window), 960, 640);\n  gtk_window_set_child(GTK_WINDOW(window), gtk_label_new(\"{} native adapter\\nRuntime: theurgy-runtime.json\\nSurface: theurgy-surface.json\"));\n  gtk_window_present(GTK_WINDOW(window));\n}}\n\nint main(int argc, char **argv) {{\n  GtkApplication *app = gtk_application_new(\"app.theurgy.{}\", G_APPLICATION_DEFAULT_FLAGS);\n  g_signal_connect(app, \"activate\", G_CALLBACK(activate), NULL);\n  int status = g_application_run(G_APPLICATION(app), argc, argv);\n  g_object_unref(app);\n  return status;\n}}\n",
             c_escape(&summary.app_name),
             c_escape(&summary.app_name),
             summary.app_id.replace('-', "_")
@@ -711,7 +724,7 @@ fn compile_ios(summary: &ProductSummary, out_dir: &Path) -> Result<()> {
     write_or_replace(
         &out_dir.join("Host/App.swift"),
         &format!(
-            "import SwiftUI\n\n@main\nstruct TheurgyMobileApp: App {{\n  var body: some Scene {{\n    WindowGroup {{\n      NavigationStack {{ Text(\"{}\") }}\n    }}\n  }}\n}}\n",
+            "import SwiftUI\n\n@main\nstruct TheurgyMobileApp: App {{\n  var body: some Scene {{\n    WindowGroup {{\n      NavigationStack {{ Text(\"{} native adapter\") }}\n    }}\n  }}\n}}\n",
             swift_escape(&summary.app_name)
         ),
     )
@@ -726,7 +739,7 @@ fn compile_android(summary: &ProductSummary, out_dir: &Path) -> Result<()> {
     write_or_replace(
         &out_dir.join("app/src/main/java/app/theurgy/generated/MainActivity.java"),
         &format!(
-            "package app.theurgy.generated;\n\nimport android.app.Activity;\nimport android.os.Bundle;\nimport android.widget.TextView;\n\npublic final class MainActivity extends Activity {{\n  @Override public void onCreate(Bundle state) {{\n    super.onCreate(state);\n    TextView view = new TextView(this);\n    view.setText(\"{}\");\n    setContentView(view);\n  }}\n}}\n",
+            "package app.theurgy.generated;\n\nimport android.app.Activity;\nimport android.os.Bundle;\nimport android.widget.TextView;\n\npublic final class MainActivity extends Activity {{\n  @Override public void onCreate(Bundle state) {{\n    super.onCreate(state);\n    TextView view = new TextView(this);\n    view.setText(\"{} native adapter\");\n    setContentView(view);\n  }}\n}}\n",
             java_escape(&summary.app_name)
         ),
     )
@@ -1167,9 +1180,13 @@ mod tests {
         let root = test_root("compile-native");
         compile_native(&sample_product(), "linux", &root).unwrap();
         assert!(root.join("theurgy-surface.json").exists());
+        assert!(root.join("theurgy-runtime.json").exists());
+        let runtime = fs::read_to_string(root.join("theurgy-runtime.json")).unwrap();
+        assert!(runtime.contains("\"stateCommand\": [\"deployments-core\", \"runtime-state\"]"));
         let main_c = fs::read_to_string(root.join("src/main.c")).unwrap();
         assert!(main_c.contains("gtk_application_window_new"));
         assert!(main_c.contains("Deployments"));
+        assert!(main_c.contains("theurgy-runtime.json"));
         fs::remove_dir_all(root).unwrap();
     }
 
