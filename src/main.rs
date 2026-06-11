@@ -530,6 +530,18 @@ fn inspect_app_lines(path: &Path) -> Result<Vec<String>> {
         "product_state_snapshot_schema={}",
         product.state_snapshot_schema
     ));
+    if !product.state_command.is_empty() {
+        lines.push(format!(
+            "product_state_command={}",
+            command_text(&product.state_command)
+        ));
+    }
+    if !product.state_status_command.is_empty() {
+        lines.push(format!(
+            "product_state_status_command={}",
+            command_text(&product.state_status_command)
+        ));
+    }
     lines.push(format!("product_actions={}", product.actions));
     lines.push(format!(
         "product_long_running_actions={}",
@@ -694,6 +706,18 @@ fn validate_product_action_commands(
     product: &ProductSummary,
     runtime: &RuntimeContract,
 ) -> Result<()> {
+    validate_optional_product_command(
+        "state.command",
+        &product.state_command,
+        "stateCommand",
+        &runtime.state_command,
+    )?;
+    validate_optional_product_command(
+        "state.statusCommand",
+        &product.state_status_command,
+        "statusCommand",
+        &runtime.status_command,
+    )?;
     for contract in &product.action_contracts {
         if contract.command.is_empty() {
             continue;
@@ -743,6 +767,30 @@ fn validate_product_action_commands(
             ))
             .into());
         }
+    }
+    Ok(())
+}
+
+fn validate_optional_product_command(
+    product_key: &str,
+    product_command: &[String],
+    runtime_key: &str,
+    runtime_command: &[String],
+) -> Result<()> {
+    if product_command.is_empty() {
+        return Ok(());
+    }
+    if runtime_command.is_empty() {
+        return Err(TheurgyError::new(format!(
+            "product IR {product_key} requires runtime manifest {runtime_key}"
+        ))
+        .into());
+    }
+    if product_command != runtime_command {
+        return Err(TheurgyError::new(format!(
+            "product IR {product_key} must match runtime manifest {runtime_key}"
+        ))
+        .into());
     }
     Ok(())
 }
@@ -1454,6 +1502,8 @@ struct ProductSummary {
     permissions: Vec<String>,
     domain_object_ids: Vec<String>,
     state_snapshot_schema: String,
+    state_command: Vec<String>,
+    state_status_command: Vec<String>,
     persistence_root_ids: Vec<String>,
     background_job_ids: Vec<String>,
     release_targets: Vec<ReleaseTarget>,
@@ -2057,6 +2107,9 @@ fn validate_product_ir_value(value: &Value) -> Result<ProductSummary> {
     let state_snapshot_schema = value_string(state, "snapshotSchema")
         .filter(|schema| !schema.is_empty())
         .ok_or_else(|| TheurgyError::new("product IR state.snapshotSchema required"))?;
+    let state_command = optional_string_array(state, "command", "product IR state.command")?;
+    let state_status_command =
+        optional_string_array(state, "statusCommand", "product IR state.statusCommand")?;
     let persistence_root_ids = optional_object_id_array(state, "roots", "product IR state.roots")?;
     validate_product_persistence(value)?;
     let background_job_ids =
@@ -2078,6 +2131,8 @@ fn validate_product_ir_value(value: &Value) -> Result<ProductSummary> {
         permissions,
         domain_object_ids,
         state_snapshot_schema,
+        state_command,
+        state_status_command,
         persistence_root_ids,
         background_job_ids,
         release_targets,
@@ -4327,7 +4382,7 @@ mod tests {
         .unwrap();
         write_or_replace(
             &app.join("app-blueprint/product.ir.json"),
-            &sample_product_with_surfaces("app-blueprint/desktop.surface.ir.json"),
+            &sample_product_with_state_commands("app-blueprint/desktop.surface.ir.json"),
         )
         .unwrap();
         write_or_replace(
@@ -4349,6 +4404,8 @@ mod tests {
         assert!(lines
             .contains(&"product_surface_mobile=app-blueprint/mobile.surface.ir.json".to_string()));
         assert!(lines.contains(&"product_state_snapshot_schema=deployments-state/v1".to_string()));
+        assert!(lines.contains(&"product_state_command=custom-core state".to_string()));
+        assert!(lines.contains(&"product_state_status_command=custom-core status".to_string()));
         assert!(lines.contains(&"product_actions=2".to_string()));
         assert!(lines.contains(&"product_long_running_actions=1".to_string()));
         assert!(lines.contains(&"runtime_protocol=deployments-runtime/v1".to_string()));
@@ -6199,6 +6256,95 @@ mod tests {
     }
 
     #[test]
+    fn compile_app_rejects_product_state_command_drift() {
+        let app = test_root("compile-app-state-command-drift");
+        let out = test_root("compile-app-state-command-drift-out");
+        fs::create_dir_all(app.join("app-blueprint")).unwrap();
+        write_or_replace(
+            &app.join("theurgy.project.toml"),
+            "name = \"deployments\"\nkind = \"desktop\"\nsource_root = \"src\"\nproduct_ir = \"app-blueprint/product.ir.json\"\ndesktop_surface_ir = \"app-blueprint/desktop.surface.ir.json\"\nruntime_manifest = \"app-blueprint/runtime.manifest.json\"\n",
+        )
+        .unwrap();
+        let product = sample_product().replace(
+            "\"snapshotSchema\": \"deployments-state/v1\"",
+            "\"snapshotSchema\": \"deployments-state/v1\", \"command\": [\"other-core\", \"state\"]",
+        );
+        write_or_replace(&app.join("app-blueprint/product.ir.json"), &product).unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/runtime.manifest.json"),
+            &sample_runtime_manifest(),
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/desktop.surface.ir.json"),
+            &sample_desktop_surface(),
+        )
+        .unwrap();
+
+        let error = command_compile_app(&[
+            app.display().to_string(),
+            "--target".to_string(),
+            "linux".to_string(),
+            "--out".to_string(),
+            out.display().to_string(),
+        ])
+        .unwrap_err()
+        .to_string();
+        assert_eq!(
+            error,
+            "product IR state.command must match runtime manifest stateCommand"
+        );
+
+        fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
+    fn compile_app_rejects_product_status_command_without_runtime_status() {
+        let app = test_root("compile-app-status-command-drift");
+        let out = test_root("compile-app-status-command-drift-out");
+        fs::create_dir_all(app.join("app-blueprint")).unwrap();
+        write_or_replace(
+            &app.join("theurgy.project.toml"),
+            "name = \"deployments\"\nkind = \"desktop\"\nsource_root = \"src\"\nproduct_ir = \"app-blueprint/product.ir.json\"\ndesktop_surface_ir = \"app-blueprint/desktop.surface.ir.json\"\nruntime_manifest = \"app-blueprint/runtime.manifest.json\"\n",
+        )
+        .unwrap();
+        let product = sample_product().replace(
+            "\"snapshotSchema\": \"deployments-state/v1\"",
+            "\"snapshotSchema\": \"deployments-state/v1\", \"statusCommand\": [\"custom-core\", \"status\"]",
+        );
+        write_or_replace(&app.join("app-blueprint/product.ir.json"), &product).unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/runtime.manifest.json"),
+            &sample_runtime_manifest().replace(
+                "\"statusCommand\": [\"custom-core\", \"status\"],\n    ",
+                "",
+            ),
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/desktop.surface.ir.json"),
+            &sample_desktop_surface(),
+        )
+        .unwrap();
+
+        let error = command_compile_app(&[
+            app.display().to_string(),
+            "--target".to_string(),
+            "linux".to_string(),
+            "--out".to_string(),
+            out.display().to_string(),
+        ])
+        .unwrap_err()
+        .to_string();
+        assert_eq!(
+            error,
+            "product IR state.statusCommand requires runtime manifest statusCommand"
+        );
+
+        fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
     fn compile_macos_emits_full_runtime_bridge() {
         let root = test_root("compile-macos-bridge");
         let product = sample_product();
@@ -6363,6 +6509,13 @@ mod tests {
                 "\"audit\": {{\n    \"operationHistory\": true,\n    \"cliParity\": true\n  }},\n  \"surfaces\": {{\n    \"desktop\": \"{}\",\n    \"mobile\": \"app-blueprint/mobile.surface.ir.json\"\n  }}",
                 json_escape(desktop_surface_ir)
             ),
+        )
+    }
+
+    fn sample_product_with_state_commands(desktop_surface_ir: &str) -> String {
+        sample_product_with_surfaces(desktop_surface_ir).replace(
+            "\"snapshotSchema\": \"deployments-state/v1\",",
+            "\"snapshotSchema\": \"deployments-state/v1\",\n    \"command\": [\"custom-core\", \"state\"],\n    \"statusCommand\": [\"custom-core\", \"status\"],",
         )
     }
 
