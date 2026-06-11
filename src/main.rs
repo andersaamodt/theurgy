@@ -376,6 +376,12 @@ fn command_compile_app(args: &[String]) -> Result<()> {
     let surface_path = app_dir.join(&surface_ir);
     let product = read_json(&product_path)?;
     let product_summary = validate_product_ir(&product)?;
+    let surface_kind = if matches!(target, "macos" | "linux") {
+        "desktop"
+    } else {
+        "mobile"
+    };
+    validate_product_surface_path(&product_summary, surface_kind, &surface_ir)?;
     if !product_summary
         .targets
         .iter()
@@ -432,7 +438,7 @@ fn command_compile_app(args: &[String]) -> Result<()> {
             .into());
         }
     }
-    let expected_surface_target = if matches!(target, "macos" | "linux") {
+    let expected_surface_target = if surface_kind == "desktop" {
         "desktop"
     } else {
         "mobile"
@@ -505,6 +511,12 @@ fn inspect_app_lines(path: &Path) -> Result<Vec<String>> {
     let product = validate_product_ir(&product_text)?;
     lines.push(format!("product_app={}", product.app_id));
     lines.push(format!("product_targets={}", product.targets.join(",")));
+    if let Some(desktop_surface_ir) = &product.desktop_surface_ir {
+        lines.push(format!("product_surface_desktop={desktop_surface_ir}"));
+    }
+    if let Some(mobile_surface_ir) = &product.mobile_surface_ir {
+        lines.push(format!("product_surface_mobile={mobile_surface_ir}"));
+    }
     lines.push(format!("product_actions={}", product.actions));
     lines.push(format!(
         "product_long_running_actions={}",
@@ -574,6 +586,7 @@ fn inspect_app_lines(path: &Path) -> Result<Vec<String>> {
     lines.extend(inspect_runtime_compatibility_lines(&runtime_text)?);
 
     if let Ok(desktop_surface_ir) = manifest_value(&manifest, "desktop_surface_ir") {
+        validate_product_surface_path(&product, "desktop", &desktop_surface_ir)?;
         let surface = validate_declared_surface(&path, &desktop_surface_ir, &product)?;
         lines.push(format!("desktop_surface_schema={}", surface.schema));
         lines.push(format!("desktop_surface_target={}", surface.target));
@@ -590,6 +603,7 @@ fn inspect_app_lines(path: &Path) -> Result<Vec<String>> {
         }
     }
     if let Ok(mobile_surface_ir) = manifest_value(&manifest, "mobile_surface_ir") {
+        validate_product_surface_path(&product, "mobile", &mobile_surface_ir)?;
         let surface = validate_declared_surface(&path, &mobile_surface_ir, &product)?;
         lines.push(format!("mobile_surface_schema={}", surface.schema));
         lines.push(format!("mobile_surface_target={}", surface.target));
@@ -713,6 +727,27 @@ fn validate_product_action_commands(
             return Err(TheurgyError::new(format!(
                 "product IR action.command params for {} must be {}",
                 contract.id, expected_params
+            ))
+            .into());
+        }
+    }
+    Ok(())
+}
+
+fn validate_product_surface_path(
+    product: &ProductSummary,
+    surface_kind: &str,
+    surface_ir: &str,
+) -> Result<()> {
+    let declared = match surface_kind {
+        "desktop" => product.desktop_surface_ir.as_deref(),
+        "mobile" => product.mobile_surface_ir.as_deref(),
+        _ => None,
+    };
+    if let Some(declared) = declared {
+        if declared != surface_ir {
+            return Err(TheurgyError::new(format!(
+                "product IR surfaces.{surface_kind} does not match declared surface IR: {declared}"
             ))
             .into());
         }
@@ -1400,6 +1435,8 @@ struct ProductSummary {
     app_id: String,
     app_name: String,
     targets: Vec<String>,
+    desktop_surface_ir: Option<String>,
+    mobile_surface_ir: Option<String>,
     capabilities: Vec<String>,
     permissions: Vec<String>,
     domain_object_ids: Vec<String>,
@@ -1935,6 +1972,7 @@ fn validate_product_ir_value(value: &Value) -> Result<ProductSummary> {
     }
     let capabilities = optional_string_array(app, "capabilities", "product IR app.capabilities")?;
     let permissions = optional_string_array(app, "permissions", "product IR app.permissions")?;
+    let (desktop_surface_ir, mobile_surface_ir) = product_surface_paths(value)?;
     let domain_object_ids = optional_object_id_array(
         value.get("domain").unwrap_or(&Value::Null),
         "objects",
@@ -1970,6 +2008,8 @@ fn validate_product_ir_value(value: &Value) -> Result<ProductSummary> {
         app_id,
         app_name,
         targets,
+        desktop_surface_ir,
+        mobile_surface_ir,
         capabilities,
         permissions,
         domain_object_ids,
@@ -2040,6 +2080,19 @@ fn runtime_manifest_surface_paths(value: &Value) -> Result<(Option<String>, Opti
     Ok((
         optional_nonempty_string(surfaces, "desktop", "runtime manifest surfaces.desktop")?,
         optional_nonempty_string(surfaces, "mobile", "runtime manifest surfaces.mobile")?,
+    ))
+}
+
+fn product_surface_paths(value: &Value) -> Result<(Option<String>, Option<String>)> {
+    let Some(surfaces) = value.get("surfaces") else {
+        return Ok((None, None));
+    };
+    if !surfaces.is_object() {
+        return Err(TheurgyError::new("product IR surfaces must be an object").into());
+    }
+    Ok((
+        optional_nonempty_string(surfaces, "desktop", "product IR surfaces.desktop")?,
+        optional_nonempty_string(surfaces, "mobile", "product IR surfaces.mobile")?,
     ))
 }
 
@@ -4157,7 +4210,7 @@ mod tests {
         .unwrap();
         write_or_replace(
             &app.join("app-blueprint/product.ir.json"),
-            &sample_product(),
+            &sample_product_with_surfaces("app-blueprint/desktop.surface.ir.json"),
         )
         .unwrap();
         write_or_replace(
@@ -4173,6 +4226,11 @@ mod tests {
 
         let lines = inspect_app_lines(&app).unwrap();
         assert!(lines.contains(&"product_app=deployments".to_string()));
+        assert!(lines.contains(
+            &"product_surface_desktop=app-blueprint/desktop.surface.ir.json".to_string()
+        ));
+        assert!(lines
+            .contains(&"product_surface_mobile=app-blueprint/mobile.surface.ir.json".to_string()));
         assert!(lines.contains(&"product_actions=2".to_string()));
         assert!(lines.contains(&"product_long_running_actions=1".to_string()));
         assert!(lines.contains(&"runtime_protocol=deployments-runtime/v1".to_string()));
@@ -4302,6 +4360,8 @@ mod tests {
             summary.targets,
             vec!["macos".to_string(), "linux".to_string()]
         );
+        assert_eq!(summary.desktop_surface_ir, None);
+        assert_eq!(summary.mobile_surface_ir, None);
         assert_eq!(summary.actions, 2);
         assert_eq!(
             summary.capabilities,
@@ -4378,6 +4438,18 @@ mod tests {
         );
         let error = validate_product_ir(&product).unwrap_err().to_string();
         assert!(error.contains("action.command required"));
+        let product = sample_product().replace(
+            "\"audit\": {\n    \"operationHistory\": true,\n    \"cliParity\": true\n  }",
+            "\"surfaces\": []",
+        );
+        let error = validate_product_ir(&product).unwrap_err().to_string();
+        assert!(error.contains("product IR surfaces must be an object"));
+        let product = sample_product().replace(
+            "\"audit\": {\n    \"operationHistory\": true,\n    \"cliParity\": true\n  }",
+            "\"surfaces\": {\"desktop\": \"\"}",
+        );
+        let error = validate_product_ir(&product).unwrap_err().to_string();
+        assert!(error.contains("product IR surfaces.desktop must be a non-empty string"));
         let product = sample_product().replace(
             ",\n    {\"id\": \"linux-app\", \"target\": \"linux\", \"surface\": \"desktop\", \"artifact\": \"generated/linux\"}",
             "",
@@ -4586,6 +4658,18 @@ mod tests {
                 .pointer("/$defs/action/properties/command/$ref")
                 .and_then(Value::as_str),
             Some("#/$defs/command")
+        );
+        assert_eq!(
+            schema
+                .pointer("/properties/surfaces/properties/desktop/type")
+                .and_then(Value::as_str),
+            Some("string")
+        );
+        assert_eq!(
+            schema
+                .pointer("/properties/surfaces/properties/mobile/minLength")
+                .and_then(Value::as_u64),
+            Some(1)
         );
         assert_eq!(
             schema
@@ -5720,6 +5804,46 @@ mod tests {
     }
 
     #[test]
+    fn compile_app_rejects_product_surface_drift() {
+        let app = test_root("compile-app-product-surface-drift");
+        let out = test_root("compile-app-product-surface-drift-out");
+        fs::create_dir_all(app.join("app-blueprint")).unwrap();
+        write_or_replace(
+            &app.join("theurgy.project.toml"),
+            "name = \"deployments\"\nkind = \"desktop\"\nsource_root = \"src\"\nproduct_ir = \"app-blueprint/product.ir.json\"\ndesktop_surface_ir = \"app-blueprint/desktop.surface.ir.json\"\nruntime_manifest = \"app-blueprint/runtime.manifest.json\"\n",
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/product.ir.json"),
+            &sample_product_with_surfaces("app-blueprint/other.desktop.surface.ir.json"),
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/runtime.manifest.json"),
+            &sample_runtime_manifest(),
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/desktop.surface.ir.json"),
+            &sample_desktop_surface(),
+        )
+        .unwrap();
+
+        let error = command_compile_app(&[
+            app.display().to_string(),
+            "--target".to_string(),
+            "linux".to_string(),
+            "--out".to_string(),
+            out.display().to_string(),
+        ])
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("product IR surfaces.desktop does not match declared surface IR"));
+
+        fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
     fn compile_app_rejects_product_action_command_drift() {
         let app = test_root("compile-app-action-command-drift");
         let out = test_root("compile-app-action-command-drift-out");
@@ -5917,6 +6041,16 @@ mod tests {
                 "\"id\": \"publish_changes\", \"label\": \"Push to Production\", \"input\": {\"deployment\": \"string\"}, \"output\": {\"params\": \"object\"}, \"effect\": \"release\", \"failure\": {}, \"safe\": false, \"mutating\": true, \"longRunning\": true, \"privileged\": true",
                 "\"id\": \"publish_changes\", \"label\": \"Push to Production\", \"input\": {\"deployment\": \"string\"}, \"output\": {\"params\": \"object\"}, \"effect\": \"release\", \"failure\": {}, \"safe\": false, \"mutating\": true, \"longRunning\": true, \"privileged\": true, \"command\": [\"custom-core\", \"action\", \"publish_changes\", \"<json>\"]",
             )
+    }
+
+    fn sample_product_with_surfaces(desktop_surface_ir: &str) -> String {
+        sample_product().replace(
+            "\"audit\": {\n    \"operationHistory\": true,\n    \"cliParity\": true\n  }",
+            &format!(
+                "\"audit\": {{\n    \"operationHistory\": true,\n    \"cliParity\": true\n  }},\n  \"surfaces\": {{\n    \"desktop\": \"{}\",\n    \"mobile\": \"app-blueprint/mobile.surface.ir.json\"\n  }}",
+                json_escape(desktop_surface_ir)
+            ),
+        )
     }
 
     fn sample_full_runtime_contract() -> RuntimeContract {
