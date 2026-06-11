@@ -31,6 +31,8 @@
 - During source-tree development, backend wrappers should avoid preferring stale release binaries over freshly built debug binaries. Installed app bundles should prefer the bundled compiled binary.
 - Append-only logs are a good audit substrate, but migrated app features still need active-state projections. Memory, resident workers, artifacts, and desktop-control audits should not surface raw event logs as their primary UX or API.
 - Compiled core reasoning context should be passed through typed sidecar state keyed by durable run identifiers, not by mutating user-visible prompts or transcript messages.
+- Compiled core reasoning context should include exact mediated command affordances for governed tools when the host controller uses mediated shell commands as its tool protocol.
+- Resident worker migrations should attach to the app's existing daemon or scheduled worker lifecycle before introducing another scheduler.
 - Structured desktop-control adapters may call platform tools internally, but they must not expose freeform shell, AppleScript, or automation strings as the capability contract.
 
 ## Validation
