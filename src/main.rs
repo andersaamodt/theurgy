@@ -1769,6 +1769,18 @@ fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
     let persistence_truth = value_string(&value, "productPersistenceTruth")
         .filter(|truth| !truth.is_empty())
         .ok_or_else(|| TheurgyError::new("generated runtime productPersistenceTruth required"))?;
+    let adapter_runtime_transport = value_string(&value, "adapterRuntimeTransport")
+        .ok_or_else(|| TheurgyError::new("generated runtime adapterRuntimeTransport required"))?;
+    match (target.as_str(), adapter_runtime_transport.as_str()) {
+        ("macos" | "linux", "local-process-json") => {}
+        ("ios" | "android", "external-json-abi") => {}
+        _ => {
+            return Err(TheurgyError::new(
+                "generated runtime adapterRuntimeTransport must match target family",
+            )
+            .into())
+        }
+    }
     let target_release_target = value_string(&value, "targetReleaseTarget")
         .filter(|release_target| valid_action_id(release_target))
         .ok_or_else(|| TheurgyError::new("generated runtime targetReleaseTarget required"))?;
@@ -3335,6 +3347,10 @@ fn generated_runtime_metadata(
         Value::String(summary.persistence_truth.clone()),
     );
     object.insert(
+        "adapterRuntimeTransport".to_string(),
+        Value::String(adapter_runtime_transport(target).to_string()),
+    );
+    object.insert(
         "productBackgroundJobs".to_string(),
         string_vec_value(&summary.background_job_ids),
     );
@@ -3419,6 +3435,14 @@ fn generated_runtime_metadata(
         "{}\n",
         serde_json::to_string_pretty(&Value::Object(object)).expect("runtime metadata serializes")
     )
+}
+
+fn adapter_runtime_transport(target: &str) -> &'static str {
+    if matches!(target, "macos" | "linux") {
+        "local-process-json"
+    } else {
+        "external-json-abi"
+    }
 }
 
 fn release_target_ids(summary: &ProductSummary) -> Vec<String> {
@@ -4061,6 +4085,7 @@ struct RuntimeContract {
   let surfaceMetadata = loadBundledContract("theurgy-surface")
   var runtimeApp: String { runtimeString(runtimeMetadata, key: "app") }
   var runtimeTarget: String { runtimeString(runtimeMetadata, key: "target") }
+  var runtimeTransport: String { runtimeString(runtimeMetadata, key: "adapterRuntimeTransport") }
   var runtimeSurfaceActions: [String] { runtimeStringArray(runtimeMetadata, key: "surfaceActions") }
   let protocolName = "__PROTOCOL__"
   let stateCommand = __STATE_COMMAND__
@@ -4087,6 +4112,7 @@ struct RuntimeContractView: View {
           Text(contract.protocolName)
           Text("Runtime app: \(contract.runtimeApp)")
           Text("Runtime target: \(contract.runtimeTarget)")
+          Text("Runtime transport: \(contract.runtimeTransport)")
           Text("Runtime surface actions: \(contract.runtimeSurfaceActions.joined(separator: ", "))")
           Text(contract.stateCommand.joined(separator: " "))
           Text(contract.statusCommand.joined(separator: " "))
@@ -4279,6 +4305,7 @@ public final class MainActivity extends Activity {
     text.append("__APP_NAME__\nRuntime: ").append(PROTOCOL)
       .append("\nRuntime app: ").append(jsonString(runtimeMetadata, "app"))
       .append("\nRuntime target: ").append(jsonString(runtimeMetadata, "target"))
+      .append("\nRuntime transport: ").append(jsonString(runtimeMetadata, "adapterRuntimeTransport"))
       .append("\nRuntime surface actions: ").append(jsonStringArray(runtimeMetadata, "surfaceActions"))
       .append("\nState: ").append(String.join(" ", STATE_COMMAND))
       .append("\nStatus: ").append(String.join(" ", STATUS_COMMAND))
@@ -5993,6 +6020,12 @@ mod tests {
             &serde_json::json!(["deployments-core", "runtime-operation-status"])
         );
         assert_eq!(
+            runtime_json
+                .get("adapterRuntimeTransport")
+                .and_then(Value::as_str),
+            Some("local-process-json")
+        );
+        assert_eq!(
             runtime_json.get("surfaceSchema").and_then(Value::as_str),
             Some("theurgy-desktop-surface-ir/v1")
         );
@@ -6381,6 +6414,12 @@ mod tests {
         assert_eq!(
             runtime_json.get("operationStatusCommand").unwrap(),
             &serde_json::json!(["custom-core", "operation-status"])
+        );
+        assert_eq!(
+            runtime_json
+                .get("adapterRuntimeTransport")
+                .and_then(Value::as_str),
+            Some("local-process-json")
         );
         assert_eq!(
             runtime_json.get("historyCommand").unwrap(),
@@ -6973,9 +7012,11 @@ mod tests {
         assert!(ios.contains("JSONSerialization.jsonObject(with: data)"));
         assert!(ios.contains("runtimeString(runtimeMetadata, key: \"app\")"));
         assert!(ios.contains("runtimeString(runtimeMetadata, key: \"target\")"));
+        assert!(ios.contains("runtimeString(runtimeMetadata, key: \"adapterRuntimeTransport\")"));
         assert!(ios.contains("runtimeStringArray(runtimeMetadata, key: \"surfaceActions\")"));
         assert!(ios.contains("Runtime app: \\(contract.runtimeApp)"));
         assert!(ios.contains("Runtime target: \\(contract.runtimeTarget)"));
+        assert!(ios.contains("Runtime transport: \\(contract.runtimeTransport)"));
         assert!(ios.contains("Runtime surface actions: \\(contract.runtimeSurfaceActions.joined"));
         assert!(ios.contains("\"deployments-core\", \"runtime-state\""));
         assert!(ios.contains("\"deployments-core\", \"runtime-status\""));
@@ -7012,6 +7053,16 @@ mod tests {
             fs::read_to_string(ios_root.join("Host/Resources/theurgy-surface.json")).unwrap(),
             fs::read_to_string(ios_root.join("theurgy-surface.json")).unwrap()
         );
+        let ios_runtime: Value = serde_json::from_str(
+            &fs::read_to_string(ios_root.join("theurgy-runtime.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            ios_runtime
+                .get("adapterRuntimeTransport")
+                .and_then(Value::as_str),
+            Some("external-json-abi")
+        );
 
         let android = fs::read_to_string(
             android_root.join("app/src/main/java/app/theurgy/generated/MainActivity.java"),
@@ -7024,9 +7075,11 @@ mod tests {
         assert!(android.contains("new JSONObject(json)"));
         assert!(android.contains("jsonString(runtimeMetadata, \"app\")"));
         assert!(android.contains("jsonString(runtimeMetadata, \"target\")"));
+        assert!(android.contains("jsonString(runtimeMetadata, \"adapterRuntimeTransport\")"));
         assert!(android.contains("jsonStringArray(runtimeMetadata, \"surfaceActions\")"));
         assert!(android.contains("Runtime app: "));
         assert!(android.contains("Runtime target: "));
+        assert!(android.contains("Runtime transport: "));
         assert!(android.contains("Runtime surface actions: "));
         assert!(android.contains("new String[] {\"deployments-core\", \"runtime-action\"}"));
         assert!(android.contains("new String[] {\"deployments-core\", \"runtime-status\"}"));
@@ -7077,6 +7130,16 @@ mod tests {
             fs::read_to_string(android_root.join("app/src/main/assets/theurgy-surface.json"))
                 .unwrap(),
             fs::read_to_string(android_root.join("theurgy-surface.json")).unwrap()
+        );
+        let android_runtime: Value = serde_json::from_str(
+            &fs::read_to_string(android_root.join("theurgy-runtime.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            android_runtime
+                .get("adapterRuntimeTransport")
+                .and_then(Value::as_str),
+            Some("external-json-abi")
         );
 
         fs::remove_dir_all(ios_root).unwrap();

@@ -23,6 +23,7 @@
     "productActionContracts",
     "productStateSnapshotSchema",
     "productPersistenceTruth",
+    "adapterRuntimeTransport",
     "surface",
     "surfaceSchema",
     "surfaceTarget",
@@ -62,6 +63,9 @@
     "productDomainObjects": { "$ref": "#/$defs/stringList" },
     "productStateSnapshotSchema": { "type": "string", "minLength": 1 },
     "productPersistenceTruth": { "type": "string", "minLength": 1 },
+    "adapterRuntimeTransport": {
+      "enum": ["local-process-json", "external-json-abi"]
+    },
     "productPersistenceRoots": { "$ref": "#/$defs/stringList" },
     "productBackgroundJobs": { "$ref": "#/$defs/stringList" },
     "productReleaseTargets": { "$ref": "#/$defs/stringList" },
@@ -86,6 +90,7 @@
       },
       "then": {
         "properties": {
+          "adapterRuntimeTransport": { "const": "local-process-json" },
           "surfaceSchema": { "const": "theurgy-desktop-surface-ir/v1" },
           "surfaceTarget": { "enum": ["desktop", "macos", "linux"] }
         }
@@ -98,6 +103,7 @@
       },
       "then": {
         "properties": {
+          "adapterRuntimeTransport": { "const": "external-json-abi" },
           "surfaceSchema": { "const": "theurgy-mobile-surface-ir/v1" },
           "surfaceTarget": { "enum": ["mobile", "ios", "android"] }
         }
