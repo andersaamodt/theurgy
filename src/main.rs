@@ -286,6 +286,12 @@ fn command_validate_generated_runtime(args: &[String]) -> Result<()> {
     println!("app={}", summary.app_id);
     println!("target={}", summary.target);
     println!("actions={}", summary.actions);
+    println!("product_actions={}", summary.product_actions);
+    println!("surface_actions={}", summary.surface_actions);
+    println!(
+        "surface_action_contracts={}",
+        summary.surface_action_contracts
+    );
     Ok(())
 }
 
@@ -878,6 +884,9 @@ struct GeneratedRuntimeSummary {
     app_id: String,
     target: String,
     actions: usize,
+    product_actions: usize,
+    surface_actions: usize,
+    surface_action_contracts: usize,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -1029,6 +1038,9 @@ fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
         app_id,
         target,
         actions: product_actions.len(),
+        product_actions: product_actions.len(),
+        surface_actions: surface_actions.len(),
+        surface_action_contracts: surface_contracts.len(),
     })
 }
 
@@ -3460,6 +3472,9 @@ mod tests {
         assert_eq!(generated.app_id, "deployments");
         assert_eq!(generated.target, "linux");
         assert_eq!(generated.actions, 2);
+        assert_eq!(generated.product_actions, 2);
+        assert_eq!(generated.surface_actions, 2);
+        assert_eq!(generated.surface_action_contracts, 2);
         assert_eq!(
             runtime_json.get("stateCommand").unwrap(),
             &serde_json::json!(["deployments-core", "runtime-state"])
