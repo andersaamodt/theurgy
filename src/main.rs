@@ -1298,9 +1298,13 @@ fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
             );
         }
     }
+    let operation_status_command = optional_string_array(
+        &value,
+        "operationStatusCommand",
+        "generated runtime operationStatusCommand",
+    )?;
     for key in [
         "statusCommand",
-        "operationStatusCommand",
         "historyCommand",
         "daemonCommand",
         "productTargets",
@@ -1341,8 +1345,22 @@ fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
         .into());
     }
     let mut contract_ids = Vec::new();
+    let mut has_long_running_action = false;
     for contract in contracts {
         contract_ids.push(validate_generated_action_contract(contract)?);
+        if contract
+            .get("longRunning")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            has_long_running_action = true;
+        }
+    }
+    if has_long_running_action && operation_status_command.is_empty() {
+        return Err(TheurgyError::new(
+            "generated runtime operationStatusCommand required for long-running actions",
+        )
+        .into());
     }
     if contract_ids != product_actions {
         return Err(TheurgyError::new(
@@ -2352,7 +2370,10 @@ fn compile_native(product: &str, target: &str, out_dir: &Path) -> Result<()> {
             "runtime-status".to_string(),
         ],
         subscribe_status_command: Vec::new(),
-        operation_status_command: Vec::new(),
+        operation_status_command: vec![
+            format!("{}-core", summary.app_id),
+            "runtime-operation-status".to_string(),
+        ],
         action_command: vec![
             format!("{}-core", summary.app_id),
             "runtime-action".to_string(),
@@ -4579,6 +4600,10 @@ mod tests {
             &serde_json::json!(["deployments-core", "runtime-status"])
         );
         assert_eq!(
+            runtime_json.get("operationStatusCommand").unwrap(),
+            &serde_json::json!(["deployments-core", "runtime-operation-status"])
+        );
+        assert_eq!(
             runtime_json.get("surfaceSchema").and_then(Value::as_str),
             Some("theurgy-desktop-surface-ir/v1")
         );
@@ -4703,6 +4728,25 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("inputKeys must match inputShape keys"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn generated_runtime_validation_requires_operation_status_for_long_running_actions() {
+        let root = test_root("generated-runtime-operation-status");
+        compile_native(&sample_product(), "linux", &root).unwrap();
+        let mut runtime_json: Value =
+            serde_json::from_str(&fs::read_to_string(root.join("theurgy-runtime.json")).unwrap())
+                .unwrap();
+        runtime_json
+            .as_object_mut()
+            .unwrap()
+            .remove("operationStatusCommand");
+        let runtime = serde_json::to_string(&runtime_json).unwrap();
+        let error = validate_generated_runtime(&runtime)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("operationStatusCommand required for long-running actions"));
         fs::remove_dir_all(root).unwrap();
     }
 
