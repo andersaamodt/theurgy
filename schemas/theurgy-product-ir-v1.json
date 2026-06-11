@@ -83,7 +83,8 @@
         "safe": { "type": "boolean" },
         "mutating": { "type": "boolean" },
         "longRunning": { "type": "boolean" },
-        "privileged": { "type": "boolean" }
+        "privileged": { "type": "boolean" },
+        "command": { "$ref": "#/$defs/command" }
       },
       "additionalProperties": true
     },

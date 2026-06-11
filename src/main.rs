@@ -414,6 +414,7 @@ fn command_compile_app(args: &[String]) -> Result<()> {
         .into());
     }
     let runtime_contract = runtime_contract_from_manifest(&runtime_text)?;
+    validate_product_action_commands(&product_summary, &runtime_contract)?;
     let surface = read_json(&surface_path)?;
     let surface_summary = validate_surface_ir(&surface)?;
     if surface_summary.product != product_summary.app_id {
@@ -540,6 +541,7 @@ fn inspect_app_lines(path: &Path) -> Result<Vec<String>> {
         .into());
     }
     let runtime = runtime_contract_from_manifest(&runtime_text)?;
+    validate_product_action_commands(&product, &runtime)?;
     lines.push(format!("runtime_protocol={}", runtime.protocol));
     lines.push(format!(
         "runtime_state_command={}",
@@ -659,6 +661,63 @@ fn inspect_runtime_compatibility_lines(runtime_text: &str) -> Result<Vec<String>
         ));
     }
     Ok(lines)
+}
+
+fn validate_product_action_commands(
+    product: &ProductSummary,
+    runtime: &RuntimeContract,
+) -> Result<()> {
+    for contract in &product.action_contracts {
+        if contract.command.is_empty() {
+            continue;
+        }
+        if runtime.action_command.is_empty() {
+            return Err(TheurgyError::new(
+                "product IR action.command requires runtime manifest actionCommand",
+            )
+            .into());
+        }
+        let expected_len = runtime.action_command.len() + 2;
+        if contract.command.len() != expected_len {
+            return Err(TheurgyError::new(format!(
+                "product IR action.command for {} must be runtime actionCommand plus action id and JSON params",
+                contract.id
+            ))
+            .into());
+        }
+        if contract.command[..runtime.action_command.len()] != runtime.action_command[..] {
+            return Err(TheurgyError::new(format!(
+                "product IR action.command for {} must start with runtime manifest actionCommand",
+                contract.id
+            ))
+            .into());
+        }
+        if contract.command[runtime.action_command.len()] != contract.id {
+            return Err(TheurgyError::new(format!(
+                "product IR action.command action id mismatch for {}",
+                contract.id
+            ))
+            .into());
+        }
+        let params = contract
+            .command
+            .last()
+            .map(String::as_str)
+            .unwrap_or_default();
+        let expected_params = if contract.input_keys.is_empty() {
+            "{}"
+        } else {
+            "<json>"
+        };
+        if params != expected_params {
+            return Err(TheurgyError::new(format!(
+                "product IR action.command params for {} must be {}",
+                contract.id, expected_params
+            ))
+            .into());
+        }
+    }
+    Ok(())
 }
 
 fn command_text(command: &[String]) -> String {
@@ -1362,6 +1421,7 @@ struct ActionContract {
     mutating: bool,
     long_running: bool,
     privileged: bool,
+    command: Vec<String>,
     input_keys: Vec<String>,
     output_keys: Vec<String>,
     failure_keys: Vec<String>,
@@ -2019,6 +2079,10 @@ fn validate_action_contract(action: &Value) -> Result<ActionContract> {
             TheurgyError::new(format!("product IR action.{key} boolean required"))
         })?;
     }
+    let command = optional_string_array(action, "command", "product IR action.command")?;
+    if action.get("command").is_some() && command.is_empty() {
+        return Err(TheurgyError::new("product IR action.command required").into());
+    }
     Ok(ActionContract {
         id,
         label,
@@ -2027,6 +2091,7 @@ fn validate_action_contract(action: &Value) -> Result<ActionContract> {
         mutating: value_bool(action, "mutating").unwrap_or(false),
         long_running: value_bool(action, "longRunning").unwrap_or(false),
         privileged: value_bool(action, "privileged").unwrap_or(false),
+        command,
         input_keys: object_keys(input),
         output_keys: object_keys(output),
         failure_keys: object_keys(failure),
@@ -4308,6 +4373,12 @@ mod tests {
         let error = validate_product_ir(&product).unwrap_err().to_string();
         assert!(error.contains("backgroundJobs object.label required"));
         let product = sample_product().replace(
+            "\"safe\": true, \"mutating\": false",
+            "\"safe\": true, \"mutating\": false, \"command\": []",
+        );
+        let error = validate_product_ir(&product).unwrap_err().to_string();
+        assert!(error.contains("action.command required"));
+        let product = sample_product().replace(
             ",\n    {\"id\": \"linux-app\", \"target\": \"linux\", \"surface\": \"desktop\", \"artifact\": \"generated/linux\"}",
             "",
         );
@@ -4509,6 +4580,12 @@ mod tests {
                 .pointer("/$defs/action/properties/failure/$ref")
                 .and_then(Value::as_str),
             Some("#/$defs/shape")
+        );
+        assert_eq!(
+            schema
+                .pointer("/$defs/action/properties/command/$ref")
+                .and_then(Value::as_str),
+            Some("#/$defs/command")
         );
         assert_eq!(
             schema
@@ -5643,6 +5720,48 @@ mod tests {
     }
 
     #[test]
+    fn compile_app_rejects_product_action_command_drift() {
+        let app = test_root("compile-app-action-command-drift");
+        let out = test_root("compile-app-action-command-drift-out");
+        fs::create_dir_all(app.join("app-blueprint")).unwrap();
+        write_or_replace(
+            &app.join("theurgy.project.toml"),
+            "name = \"deployments\"\nkind = \"desktop\"\nsource_root = \"src\"\nproduct_ir = \"app-blueprint/product.ir.json\"\ndesktop_surface_ir = \"app-blueprint/desktop.surface.ir.json\"\nruntime_manifest = \"app-blueprint/runtime.manifest.json\"\n",
+        )
+        .unwrap();
+        let product = sample_product_with_action_commands().replace(
+            "[\"custom-core\", \"action\", \"publish_changes\", \"<json>\"]",
+            "[\"custom-core\", \"other-action\", \"publish_changes\", \"<json>\"]",
+        );
+        write_or_replace(&app.join("app-blueprint/product.ir.json"), &product).unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/runtime.manifest.json"),
+            &sample_runtime_manifest(),
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/desktop.surface.ir.json"),
+            &sample_desktop_surface(),
+        )
+        .unwrap();
+
+        let error = command_compile_app(&[
+            app.display().to_string(),
+            "--target".to_string(),
+            "linux".to_string(),
+            "--out".to_string(),
+            out.display().to_string(),
+        ])
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains(
+            "product IR action.command for publish_changes must start with runtime manifest actionCommand"
+        ));
+
+        fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
     fn compile_macos_emits_full_runtime_bridge() {
         let root = test_root("compile-macos-bridge");
         let product = sample_product();
@@ -5785,6 +5904,18 @@ mod tests {
             .replace(
                 "{\"id\": \"macos-app\", \"target\": \"macos\", \"surface\": \"desktop\", \"artifact\": \"generated/macos\"},\n    {\"id\": \"linux-app\", \"target\": \"linux\", \"surface\": \"desktop\", \"artifact\": \"generated/linux\"}",
                 "{\"id\": \"ios-app\", \"target\": \"ios\", \"surface\": \"mobile\", \"artifact\": \"generated/mobile/ios\"},\n    {\"id\": \"android-app\", \"target\": \"android\", \"surface\": \"mobile\", \"artifact\": \"generated/mobile/android\"}",
+            )
+    }
+
+    fn sample_product_with_action_commands() -> String {
+        sample_product()
+            .replace(
+                "\"id\": \"refresh_state\", \"label\": \"Refresh\", \"input\": {}, \"output\": {\"params\": \"object\"}, \"effect\": \"read\", \"failure\": {}, \"safe\": true, \"mutating\": false, \"longRunning\": false, \"privileged\": false",
+                "\"id\": \"refresh_state\", \"label\": \"Refresh\", \"input\": {}, \"output\": {\"params\": \"object\"}, \"effect\": \"read\", \"failure\": {}, \"safe\": true, \"mutating\": false, \"longRunning\": false, \"privileged\": false, \"command\": [\"custom-core\", \"action\", \"refresh_state\", \"{}\"]",
+            )
+            .replace(
+                "\"id\": \"publish_changes\", \"label\": \"Push to Production\", \"input\": {\"deployment\": \"string\"}, \"output\": {\"params\": \"object\"}, \"effect\": \"release\", \"failure\": {}, \"safe\": false, \"mutating\": true, \"longRunning\": true, \"privileged\": true",
+                "\"id\": \"publish_changes\", \"label\": \"Push to Production\", \"input\": {\"deployment\": \"string\"}, \"output\": {\"params\": \"object\"}, \"effect\": \"release\", \"failure\": {}, \"safe\": false, \"mutating\": true, \"longRunning\": true, \"privileged\": true, \"command\": [\"custom-core\", \"action\", \"publish_changes\", \"<json>\"]",
             )
     }
 
