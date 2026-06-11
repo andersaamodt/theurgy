@@ -306,6 +306,7 @@ fn command_validate_generated_runtime(args: &[String]) -> Result<()> {
         "product_state_snapshot_schema={}",
         summary.state_snapshot_schema
     );
+    println!("product_persistence_truth={}", summary.persistence_truth);
     println!("actions={}", summary.actions);
     println!("product_actions={}", summary.product_actions);
     println!("surface_actions={}", summary.surface_actions);
@@ -550,6 +551,10 @@ fn inspect_app_lines(path: &Path) -> Result<Vec<String>> {
             .iter()
             .filter(|contract| contract.long_running)
             .count()
+    ));
+    lines.push(format!(
+        "product_persistence_truth={}",
+        product.persistence_truth
     ));
     lines.push(format!(
         "product_background_jobs={}",
@@ -1521,6 +1526,7 @@ struct ProductSummary {
     state_snapshot_schema: String,
     state_command: Vec<String>,
     state_status_command: Vec<String>,
+    persistence_truth: String,
     persistence_root_ids: Vec<String>,
     background_jobs: Vec<BackgroundJob>,
     background_job_ids: Vec<String>,
@@ -1608,6 +1614,7 @@ struct GeneratedRuntimeSummary {
     release_target: String,
     release_artifact: String,
     state_snapshot_schema: String,
+    persistence_truth: String,
     actions: usize,
     product_actions: usize,
     surface_actions: usize,
@@ -1704,6 +1711,9 @@ fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
         .ok_or_else(|| {
             TheurgyError::new("generated runtime productStateSnapshotSchema required")
         })?;
+    let persistence_truth = value_string(&value, "productPersistenceTruth")
+        .filter(|truth| !truth.is_empty())
+        .ok_or_else(|| TheurgyError::new("generated runtime productPersistenceTruth required"))?;
     let target_release_target = value_string(&value, "targetReleaseTarget")
         .filter(|release_target| valid_action_id(release_target))
         .ok_or_else(|| TheurgyError::new("generated runtime targetReleaseTarget required"))?;
@@ -1873,6 +1883,7 @@ fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
         release_target: target_release_target,
         release_artifact: target_release_artifact,
         state_snapshot_schema,
+        persistence_truth,
         actions: product_actions.len(),
         product_actions: product_actions.len(),
         surface_actions: surface_actions.len(),
@@ -2135,7 +2146,7 @@ fn validate_product_ir_value(value: &Value) -> Result<ProductSummary> {
     let state_status_command =
         optional_string_array(state, "statusCommand", "product IR state.statusCommand")?;
     let persistence_root_ids = optional_object_id_array(state, "roots", "product IR state.roots")?;
-    validate_product_persistence(value)?;
+    let persistence_truth = validate_product_persistence(value)?;
     let background_jobs =
         validate_product_background_jobs(value, "backgroundJobs", "product IR backgroundJobs")?;
     let background_job_ids = background_jobs.iter().map(|job| job.id.clone()).collect();
@@ -2158,6 +2169,7 @@ fn validate_product_ir_value(value: &Value) -> Result<ProductSummary> {
         state_snapshot_schema,
         state_command,
         state_status_command,
+        persistence_truth,
         persistence_root_ids,
         background_jobs,
         background_job_ids,
@@ -2653,17 +2665,17 @@ fn validate_product_release_targets(
     Ok(release_targets)
 }
 
-fn validate_product_persistence(value: &Value) -> Result<()> {
+fn validate_product_persistence(value: &Value) -> Result<String> {
     let Some(raw) = value.get("persistence") else {
-        return Ok(());
+        return Ok("file-first".to_string());
     };
     let Some(_object) = raw.as_object() else {
         return Err(TheurgyError::new("product IR persistence must be an object").into());
     };
-    required_nonempty_object_string(raw, "truth", "product IR persistence.truth")?;
+    let truth = required_nonempty_object_string(raw, "truth", "product IR persistence.truth")?;
     optional_nonempty_object_string(raw, "database", "product IR persistence.database")?;
     optional_nonempty_object_string(raw, "history", "product IR persistence.history")?;
-    Ok(())
+    Ok(truth)
 }
 
 fn required_stable_id(value: &Value, label: &str) -> Result<String> {
@@ -3192,6 +3204,10 @@ fn generated_runtime_metadata(
     object.insert(
         "productPersistenceRoots".to_string(),
         string_vec_value(&summary.persistence_root_ids),
+    );
+    object.insert(
+        "productPersistenceTruth".to_string(),
+        Value::String(summary.persistence_truth.clone()),
     );
     object.insert(
         "productBackgroundJobs".to_string(),
@@ -4441,6 +4457,7 @@ mod tests {
         assert!(lines.contains(&"product_state_status_command=custom-core status".to_string()));
         assert!(lines.contains(&"product_actions=2".to_string()));
         assert!(lines.contains(&"product_long_running_actions=1".to_string()));
+        assert!(lines.contains(&"product_persistence_truth=file-first".to_string()));
         assert!(lines.contains(
             &"product_background_job_server-queue_command=deployments-daemon".to_string()
         ));
@@ -5084,6 +5101,9 @@ mod tests {
             .any(|value| value.as_str() == Some("productStateSnapshotSchema")));
         assert!(top_level_required
             .iter()
+            .any(|value| value.as_str() == Some("productPersistenceTruth")));
+        assert!(top_level_required
+            .iter()
             .any(|value| value.as_str() == Some("targetReleaseTarget")));
         assert!(top_level_required
             .iter()
@@ -5103,6 +5123,12 @@ mod tests {
         assert_eq!(
             schema
                 .pointer("/properties/productStateSnapshotSchema/minLength")
+                .and_then(Value::as_u64),
+            Some(1)
+        );
+        assert_eq!(
+            schema
+                .pointer("/properties/productPersistenceTruth/minLength")
                 .and_then(Value::as_u64),
             Some(1)
         );
@@ -5634,6 +5660,13 @@ mod tests {
                 .and_then(Value::as_str),
             Some("deployments-state/v1")
         );
+        assert_eq!(generated.persistence_truth, "file-first");
+        assert_eq!(
+            runtime_json
+                .get("productPersistenceTruth")
+                .and_then(Value::as_str),
+            Some("file-first")
+        );
         assert_eq!(generated.actions, 2);
         assert_eq!(generated.product_actions, 2);
         assert_eq!(generated.surface_actions, 2);
@@ -5801,6 +5834,10 @@ mod tests {
             (
                 "productStateSnapshotSchema",
                 "productStateSnapshotSchema required",
+            ),
+            (
+                "productPersistenceTruth",
+                "productPersistenceTruth required",
             ),
         ] {
             let root = test_root(&format!("generated-runtime-source-{key}"));
