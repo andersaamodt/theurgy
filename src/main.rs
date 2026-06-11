@@ -2404,6 +2404,10 @@ let runtimeDaemonCommand = __DAEMON_COMMAND__
 let actionContracts = __ACTION_CONTRACTS__
 let defaultActionId = "__DEFAULT_ACTION_ID__"
 
+func command(for action: ProductActionContract, json: String) -> [String] {
+  runtimeActionCommand + [action.id, json]
+}
+
 struct RuntimeStateView: View {
   @State private var status = "Runtime state not loaded."
 
@@ -2438,6 +2442,15 @@ struct RuntimeStateView: View {
           Button("History") {
             status = runRuntimeCommand(runtimeHistoryCommand + ["default", "20"])
           }
+        }
+      }
+      VStack(alignment: .leading, spacing: 6) {
+        ForEach(actionContracts, id: \.id) { action in
+          Button(action.label) {
+            status = runRuntimeCommand(command(for: action, json: "{}"))
+          }
+          Text(command(for: action, json: "{}").joined(separator: " "))
+            .font(.system(.caption2, design: .monospaced))
         }
       }
       Text(status)
@@ -2539,6 +2552,13 @@ fn linux_adapter_source(
     let status_executable = runtime.status_command.first().cloned().unwrap_or_default();
     let status_tail = runtime.status_command.get(1..).unwrap_or(&[]);
     let status_arguments = c_argv_tail_literal(status_tail);
+    let action_executable = runtime.action_command.first().cloned().unwrap_or_default();
+    let action_tail = runtime.action_command.get(1..).unwrap_or(&[]);
+    let action_arguments = c_argv_tail_literal(action_tail);
+    let default_action_id = action_contracts
+        .first()
+        .map(|contract| contract.id.clone())
+        .unwrap_or_default();
     let action_text = runtime.action_command.join(" ");
     let history_text = runtime.history_command.join(" ");
     let daemon_text = runtime.daemon_command.join(" ");
@@ -2585,6 +2605,12 @@ static char *load_runtime_status(void) {
   return run_runtime_command(argv);
 }
 
+static char *run_default_action(void) {
+  g_autofree char *runtime = resolve_executable("__ACTION_EXECUTABLE__");
+  const char *argv[] = { runtime, __ACTION_ARGUMENTS__ "__DEFAULT_ACTION_ID__", "{}", NULL };
+  return run_runtime_command(argv);
+}
+
 static char *run_runtime_command(const char *argv[]) {
   g_autoptr(GError) error = NULL;
   g_autoptr(GSubprocess) process = g_subprocess_newv(
@@ -2623,6 +2649,13 @@ static void refresh_status(GtkButton *button, gpointer user_data) {
   gtk_label_set_text(label, state);
 }
 
+static void run_action(GtkButton *button, gpointer user_data) {
+  (void)button;
+  GtkLabel *label = GTK_LABEL(user_data);
+  g_autofree char *state = run_default_action();
+  gtk_label_set_text(label, state);
+}
+
 static void activate(GtkApplication *app, gpointer user_data) {
   (void)user_data;
   GtkWidget *window = gtk_application_window_new(app);
@@ -2631,6 +2664,7 @@ static void activate(GtkApplication *app, gpointer user_data) {
   GtkWidget *button_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
   GtkWidget *button = gtk_button_new_with_label("State");
   GtkWidget *status_button = gtk_button_new_with_label("Status");
+  GtkWidget *action_button = gtk_button_new_with_label("Action");
   GtkWidget *label = gtk_label_new("Runtime state not loaded.");
   gtk_window_set_title(GTK_WINDOW(window), "__APP_NAME__");
   gtk_window_set_default_size(GTK_WINDOW(window), 960, 640);
@@ -2640,12 +2674,14 @@ static void activate(GtkApplication *app, gpointer user_data) {
   gtk_label_set_wrap(GTK_LABEL(label), TRUE);
   gtk_box_append(GTK_BOX(button_box), button);
   gtk_box_append(GTK_BOX(button_box), status_button);
+  gtk_box_append(GTK_BOX(button_box), action_button);
   gtk_box_append(GTK_BOX(box), contract);
   gtk_box_append(GTK_BOX(box), button_box);
   gtk_box_append(GTK_BOX(box), label);
   gtk_window_set_child(GTK_WINDOW(window), box);
   g_signal_connect(button, "clicked", G_CALLBACK(refresh_state), label);
   g_signal_connect(status_button, "clicked", G_CALLBACK(refresh_status), label);
+  g_signal_connect(action_button, "clicked", G_CALLBACK(run_action), label);
   refresh_state(GTK_BUTTON(button), label);
   gtk_window_present(GTK_WINDOW(window));
 }
@@ -2665,6 +2701,9 @@ int main(int argc, char **argv) {
         .replace("__STATE_ARGUMENTS__", &arguments)
         .replace("__STATUS_EXECUTABLE__", &c_escape(&status_executable))
         .replace("__STATUS_ARGUMENTS__", &status_arguments)
+        .replace("__ACTION_EXECUTABLE__", &c_escape(&action_executable))
+        .replace("__ACTION_ARGUMENTS__", &action_arguments)
+        .replace("__DEFAULT_ACTION_ID__", &c_escape(&default_action_id))
         .replace(
             "__STATE_COMMAND_TEXT__",
             &c_escape(&runtime.state_command.join(" ")),
@@ -4157,6 +4196,11 @@ mod tests {
         assert!(main_c.contains("\\\"inputShape\\\""));
         assert!(main_c.contains("\\\"deployment\\\":\\\"string\\\""));
         assert!(main_c.contains("Surface action contracts: refresh_state, publish_changes"));
+        assert!(main_c.contains("static char *run_default_action(void)"));
+        assert!(main_c.contains("\"runtime-action\""));
+        assert!(main_c.contains("\"refresh_state\", \"{}\", NULL"));
+        assert!(main_c.contains("GtkWidget *action_button = gtk_button_new_with_label(\"Action\")"));
+        assert!(main_c.contains("G_CALLBACK(run_action)"));
         let meson = fs::read_to_string(root.join("meson.build")).unwrap();
         assert!(meson.contains("json-glib-1.0"));
         fs::remove_dir_all(root).unwrap();
@@ -4526,6 +4570,10 @@ mod tests {
         assert!(swift.contains("runtimeActionCommand + [defaultActionId, \"{}\"]"));
         assert!(swift.contains("struct ProductActionContract"));
         assert!(swift.contains("let actionContracts = [ProductActionContract"));
+        assert!(swift
+            .contains("func command(for action: ProductActionContract, json: String) -> [String]"));
+        assert!(swift.contains("runtimeActionCommand + [action.id, json]"));
+        assert!(swift.contains("ForEach(actionContracts, id: \\.id)"));
         assert!(swift.contains("inputShape: [\"deployment\": \"string\"]"));
         assert!(swift.contains("outputShape: [\"params\": \"object\"]"));
         assert!(swift.contains("Surface actions:"));
