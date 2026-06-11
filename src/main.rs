@@ -1795,10 +1795,26 @@ fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
     value_string(&value, "protocol")
         .filter(|protocol| !protocol.is_empty())
         .ok_or_else(|| TheurgyError::new("generated runtime protocol required"))?;
+    expect_value_string(&value, "runtimeStatusSchema", "theurgy-runtime-status/v1")?;
     expect_value_string(
         &value,
         "runtimeActionRequestSchema",
         "theurgy-runtime-action-request/v1",
+    )?;
+    expect_value_string(
+        &value,
+        "runtimeActionResultSchema",
+        "theurgy-runtime-action-result/v1",
+    )?;
+    expect_value_string(
+        &value,
+        "operationStatusSchema",
+        "theurgy-operation-status/v1",
+    )?;
+    expect_value_string(
+        &value,
+        "operationHistorySchema",
+        "theurgy-operation-history/v1",
     )?;
     value_string(&value, "productIr")
         .filter(|path| !path.is_empty())
@@ -3486,8 +3502,24 @@ fn generated_runtime_metadata(
         Value::String(runtime.protocol.clone()),
     );
     object.insert(
+        "runtimeStatusSchema".to_string(),
+        Value::String("theurgy-runtime-status/v1".to_string()),
+    );
+    object.insert(
         "runtimeActionRequestSchema".to_string(),
         Value::String("theurgy-runtime-action-request/v1".to_string()),
+    );
+    object.insert(
+        "runtimeActionResultSchema".to_string(),
+        Value::String("theurgy-runtime-action-result/v1".to_string()),
+    );
+    object.insert(
+        "operationStatusSchema".to_string(),
+        Value::String("theurgy-operation-status/v1".to_string()),
+    );
+    object.insert(
+        "operationHistorySchema".to_string(),
+        Value::String("theurgy-operation-history/v1".to_string()),
     );
     object.insert(
         "stateCommand".to_string(),
@@ -4201,7 +4233,11 @@ struct RuntimeContract {
   var runtimeApp: String { runtimeString(runtimeMetadata, key: "app") }
   var runtimeTarget: String { runtimeString(runtimeMetadata, key: "target") }
   var runtimeTransport: String { runtimeString(runtimeMetadata, key: "adapterRuntimeTransport") }
+  var runtimeStatusSchema: String { runtimeString(runtimeMetadata, key: "runtimeStatusSchema") }
   var runtimeActionRequestSchema: String { runtimeString(runtimeMetadata, key: "runtimeActionRequestSchema") }
+  var runtimeActionResultSchema: String { runtimeString(runtimeMetadata, key: "runtimeActionResultSchema") }
+  var operationStatusSchema: String { runtimeString(runtimeMetadata, key: "operationStatusSchema") }
+  var operationHistorySchema: String { runtimeString(runtimeMetadata, key: "operationHistorySchema") }
   var runtimeSurfaceActions: [String] { runtimeStringArray(runtimeMetadata, key: "surfaceActions") }
   let protocolName = "__PROTOCOL__"
   let stateCommand = __STATE_COMMAND__
@@ -4242,7 +4278,11 @@ struct RuntimeContractView: View {
           Text("Runtime app: \(contract.runtimeApp)")
           Text("Runtime target: \(contract.runtimeTarget)")
           Text("Runtime transport: \(contract.runtimeTransport)")
+          Text("Runtime status schema: \(contract.runtimeStatusSchema)")
           Text("Runtime action request schema: \(contract.runtimeActionRequestSchema)")
+          Text("Runtime action result schema: \(contract.runtimeActionResultSchema)")
+          Text("Operation status schema: \(contract.operationStatusSchema)")
+          Text("Operation history schema: \(contract.operationHistorySchema)")
           Text("Runtime surface actions: \(contract.runtimeSurfaceActions.joined(separator: ", "))")
           Text(contract.stateCommand.joined(separator: " "))
           Text(contract.statusCommand.joined(separator: " "))
@@ -4451,7 +4491,11 @@ public final class MainActivity extends Activity {
       .append("\nRuntime app: ").append(runtimeApp)
       .append("\nRuntime target: ").append(jsonString(runtimeMetadata, "target"))
       .append("\nRuntime transport: ").append(jsonString(runtimeMetadata, "adapterRuntimeTransport"))
+      .append("\nRuntime status schema: ").append(jsonString(runtimeMetadata, "runtimeStatusSchema"))
       .append("\nRuntime action request schema: ").append(jsonString(runtimeMetadata, "runtimeActionRequestSchema"))
+      .append("\nRuntime action result schema: ").append(jsonString(runtimeMetadata, "runtimeActionResultSchema"))
+      .append("\nOperation status schema: ").append(jsonString(runtimeMetadata, "operationStatusSchema"))
+      .append("\nOperation history schema: ").append(jsonString(runtimeMetadata, "operationHistorySchema"))
       .append("\nRuntime surface actions: ").append(jsonStringArray(runtimeMetadata, "surfaceActions"))
       .append("\nState: ").append(String.join(" ", STATE_COMMAND))
       .append("\nStatus: ").append(String.join(" ", STATUS_COMMAND))
@@ -6300,9 +6344,33 @@ mod tests {
         );
         assert_eq!(
             runtime_json
+                .get("runtimeStatusSchema")
+                .and_then(Value::as_str),
+            Some("theurgy-runtime-status/v1")
+        );
+        assert_eq!(
+            runtime_json
                 .get("runtimeActionRequestSchema")
                 .and_then(Value::as_str),
             Some("theurgy-runtime-action-request/v1")
+        );
+        assert_eq!(
+            runtime_json
+                .get("runtimeActionResultSchema")
+                .and_then(Value::as_str),
+            Some("theurgy-runtime-action-result/v1")
+        );
+        assert_eq!(
+            runtime_json
+                .get("operationStatusSchema")
+                .and_then(Value::as_str),
+            Some("theurgy-operation-status/v1")
+        );
+        assert_eq!(
+            runtime_json
+                .get("operationHistorySchema")
+                .and_then(Value::as_str),
+            Some("theurgy-operation-history/v1")
         );
         assert_eq!(
             runtime_json
@@ -6702,9 +6770,33 @@ mod tests {
         );
         assert_eq!(
             runtime_json
+                .get("runtimeStatusSchema")
+                .and_then(Value::as_str),
+            Some("theurgy-runtime-status/v1")
+        );
+        assert_eq!(
+            runtime_json
                 .get("runtimeActionRequestSchema")
                 .and_then(Value::as_str),
             Some("theurgy-runtime-action-request/v1")
+        );
+        assert_eq!(
+            runtime_json
+                .get("runtimeActionResultSchema")
+                .and_then(Value::as_str),
+            Some("theurgy-runtime-action-result/v1")
+        );
+        assert_eq!(
+            runtime_json
+                .get("operationStatusSchema")
+                .and_then(Value::as_str),
+            Some("theurgy-operation-status/v1")
+        );
+        assert_eq!(
+            runtime_json
+                .get("operationHistorySchema")
+                .and_then(Value::as_str),
+            Some("theurgy-operation-history/v1")
         );
         assert_eq!(
             runtime_json
@@ -7304,14 +7396,24 @@ mod tests {
         assert!(ios.contains("runtimeString(runtimeMetadata, key: \"app\")"));
         assert!(ios.contains("runtimeString(runtimeMetadata, key: \"target\")"));
         assert!(ios.contains("runtimeString(runtimeMetadata, key: \"adapterRuntimeTransport\")"));
+        assert!(ios.contains("runtimeString(runtimeMetadata, key: \"runtimeStatusSchema\")"));
         assert!(ios.contains("runtimeString(runtimeMetadata, key: \"runtimeActionRequestSchema\")"));
+        assert!(ios.contains("runtimeString(runtimeMetadata, key: \"runtimeActionResultSchema\")"));
+        assert!(ios.contains("runtimeString(runtimeMetadata, key: \"operationStatusSchema\")"));
+        assert!(ios.contains("runtimeString(runtimeMetadata, key: \"operationHistorySchema\")"));
         assert!(ios.contains("runtimeStringArray(runtimeMetadata, key: \"surfaceActions\")"));
         assert!(ios.contains("Runtime app: \\(contract.runtimeApp)"));
         assert!(ios.contains("Runtime target: \\(contract.runtimeTarget)"));
         assert!(ios.contains("Runtime transport: \\(contract.runtimeTransport)"));
+        assert!(ios.contains("Runtime status schema: \\(contract.runtimeStatusSchema)"));
         assert!(
             ios.contains("Runtime action request schema: \\(contract.runtimeActionRequestSchema)")
         );
+        assert!(
+            ios.contains("Runtime action result schema: \\(contract.runtimeActionResultSchema)")
+        );
+        assert!(ios.contains("Operation status schema: \\(contract.operationStatusSchema)"));
+        assert!(ios.contains("Operation history schema: \\(contract.operationHistorySchema)"));
         assert!(ios.contains("Runtime surface actions: \\(contract.runtimeSurfaceActions.joined"));
         assert!(ios.contains("\"deployments-core\", \"runtime-state\""));
         assert!(ios.contains("\"deployments-core\", \"runtime-status\""));
@@ -7363,9 +7465,33 @@ mod tests {
         .unwrap();
         assert_eq!(
             ios_runtime
+                .get("runtimeStatusSchema")
+                .and_then(Value::as_str),
+            Some("theurgy-runtime-status/v1")
+        );
+        assert_eq!(
+            ios_runtime
                 .get("runtimeActionRequestSchema")
                 .and_then(Value::as_str),
             Some("theurgy-runtime-action-request/v1")
+        );
+        assert_eq!(
+            ios_runtime
+                .get("runtimeActionResultSchema")
+                .and_then(Value::as_str),
+            Some("theurgy-runtime-action-result/v1")
+        );
+        assert_eq!(
+            ios_runtime
+                .get("operationStatusSchema")
+                .and_then(Value::as_str),
+            Some("theurgy-operation-status/v1")
+        );
+        assert_eq!(
+            ios_runtime
+                .get("operationHistorySchema")
+                .and_then(Value::as_str),
+            Some("theurgy-operation-history/v1")
         );
         assert_eq!(
             ios_runtime
@@ -7386,12 +7512,20 @@ mod tests {
         assert!(android.contains("jsonString(runtimeMetadata, \"app\")"));
         assert!(android.contains("jsonString(runtimeMetadata, \"target\")"));
         assert!(android.contains("jsonString(runtimeMetadata, \"adapterRuntimeTransport\")"));
+        assert!(android.contains("jsonString(runtimeMetadata, \"runtimeStatusSchema\")"));
         assert!(android.contains("jsonString(runtimeMetadata, \"runtimeActionRequestSchema\")"));
+        assert!(android.contains("jsonString(runtimeMetadata, \"runtimeActionResultSchema\")"));
+        assert!(android.contains("jsonString(runtimeMetadata, \"operationStatusSchema\")"));
+        assert!(android.contains("jsonString(runtimeMetadata, \"operationHistorySchema\")"));
         assert!(android.contains("jsonStringArray(runtimeMetadata, \"surfaceActions\")"));
         assert!(android.contains("Runtime app: "));
         assert!(android.contains("Runtime target: "));
         assert!(android.contains("Runtime transport: "));
+        assert!(android.contains("Runtime status schema: "));
         assert!(android.contains("Runtime action request schema: "));
+        assert!(android.contains("Runtime action result schema: "));
+        assert!(android.contains("Operation status schema: "));
+        assert!(android.contains("Operation history schema: "));
         assert!(android.contains("Runtime surface actions: "));
         assert!(android.contains("new String[] {\"deployments-core\", \"runtime-action\"}"));
         assert!(android.contains("new String[] {\"deployments-core\", \"runtime-status\"}"));
@@ -7458,9 +7592,33 @@ mod tests {
         .unwrap();
         assert_eq!(
             android_runtime
+                .get("runtimeStatusSchema")
+                .and_then(Value::as_str),
+            Some("theurgy-runtime-status/v1")
+        );
+        assert_eq!(
+            android_runtime
                 .get("runtimeActionRequestSchema")
                 .and_then(Value::as_str),
             Some("theurgy-runtime-action-request/v1")
+        );
+        assert_eq!(
+            android_runtime
+                .get("runtimeActionResultSchema")
+                .and_then(Value::as_str),
+            Some("theurgy-runtime-action-result/v1")
+        );
+        assert_eq!(
+            android_runtime
+                .get("operationStatusSchema")
+                .and_then(Value::as_str),
+            Some("theurgy-operation-status/v1")
+        );
+        assert_eq!(
+            android_runtime
+                .get("operationHistorySchema")
+                .and_then(Value::as_str),
+            Some("theurgy-operation-history/v1")
         );
         assert_eq!(
             android_runtime

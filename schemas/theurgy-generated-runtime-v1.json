@@ -13,7 +13,11 @@
     "compatibilityWizardryAppsShellFirstStillSupported",
     "compatibilityTheurgyRequiredForLegacyWizardryApps",
     "protocol",
+    "runtimeStatusSchema",
     "runtimeActionRequestSchema",
+    "runtimeActionResultSchema",
+    "operationStatusSchema",
+    "operationHistorySchema",
     "targetReleaseTarget",
     "targetReleaseArtifact",
     "stateCommand",
@@ -43,8 +47,20 @@
     "compatibilityWizardryAppsShellFirstStillSupported": { "type": "boolean" },
     "compatibilityTheurgyRequiredForLegacyWizardryApps": { "type": "boolean" },
     "protocol": { "type": "string", "minLength": 1 },
+    "runtimeStatusSchema": {
+      "const": "theurgy-runtime-status/v1"
+    },
     "runtimeActionRequestSchema": {
       "const": "theurgy-runtime-action-request/v1"
+    },
+    "runtimeActionResultSchema": {
+      "const": "theurgy-runtime-action-result/v1"
+    },
+    "operationStatusSchema": {
+      "const": "theurgy-operation-status/v1"
+    },
+    "operationHistorySchema": {
+      "const": "theurgy-operation-history/v1"
     },
     "targetReleaseTarget": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
     "targetReleaseArtifact": { "type": "string", "minLength": 1 },
