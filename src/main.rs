@@ -579,7 +579,7 @@ fn run_action_output(
 ) -> Result<String> {
     validate_json_params(params)?;
     if let Some(path) = manifest_path {
-        let runtime = runtime_contract_from_path(path)?;
+        let runtime = runtime_contract_from_path_with_product_actions(path)?;
         return run_manifest_action(&runtime, action_id, params);
     }
     Ok(format!(
@@ -594,6 +594,14 @@ fn run_manifest_action(runtime: &RuntimeContract, action_id: &str, params: &str)
     if runtime.action_command.is_empty() {
         return Err(TheurgyError::new("runtime manifest actionCommand required").into());
     }
+    if let Some(action_ids) = &runtime.product_action_ids {
+        if !action_ids.iter().any(|declared| declared == action_id) {
+            return Err(TheurgyError::new(format!(
+                "runtime action not declared in Product IR: {action_id}"
+            ))
+            .into());
+        }
+    }
     run_manifest_command_with_args(
         &runtime.action_command,
         &[action_id.to_string(), params.to_string()],
@@ -606,6 +614,46 @@ fn runtime_contract_from_path(path: &Path) -> Result<RuntimeContract> {
         TheurgyError::new(format!("could not read {}: {error}", path.display()))
     })?;
     runtime_contract_from_manifest(&manifest)
+}
+
+fn runtime_contract_from_path_with_product_actions(path: &Path) -> Result<RuntimeContract> {
+    let manifest = fs::read_to_string(path).map_err(|error| {
+        TheurgyError::new(format!("could not read {}: {error}", path.display()))
+    })?;
+    let summary = validate_runtime_manifest(&manifest)?;
+    let mut runtime = runtime_contract_from_manifest(&manifest)?;
+    let product_path = manifest_relative_path(path, &summary.product_ir);
+    let product_text = fs::read_to_string(&product_path).map_err(|error| {
+        TheurgyError::new(format!(
+            "could not read {}: {error}",
+            product_path.display()
+        ))
+    })?;
+    let product = validate_product_ir(&product_text)?;
+    if product.app_id != runtime.app_id {
+        return Err(TheurgyError::new(format!(
+            "runtime manifest app {} does not match Product IR app {}",
+            runtime.app_id, product.app_id
+        ))
+        .into());
+    }
+    runtime.product_action_ids = Some(product.action_ids);
+    Ok(runtime)
+}
+
+fn manifest_relative_path(manifest_path: &Path, relative_or_absolute: &str) -> PathBuf {
+    let path = PathBuf::from(relative_or_absolute);
+    if path.is_absolute() {
+        return path;
+    }
+    let manifest_relative = manifest_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(&path);
+    if manifest_relative.exists() {
+        return manifest_relative;
+    }
+    path
 }
 
 fn run_manifest_command(command: &[String], label: &str) -> Result<String> {
@@ -727,6 +775,7 @@ struct RuntimeContract {
     action_command: Vec<String>,
     history_command: Vec<String>,
     daemon_command: Vec<String>,
+    product_action_ids: Option<Vec<String>>,
 }
 
 fn read_json(path: &Path) -> Result<String> {
@@ -854,6 +903,7 @@ fn runtime_contract_from_manifest(text: &str) -> Result<RuntimeContract> {
         action_command: value_string_array(runtime, "actionCommand")?,
         history_command: value_string_array(runtime, "historyCommand").unwrap_or_default(),
         daemon_command: value_string_array(runtime, "daemonCommand").unwrap_or_default(),
+        product_action_ids: None,
     })
 }
 
@@ -1497,6 +1547,7 @@ fn compile_native(product: &str, target: &str, out_dir: &Path) -> Result<()> {
         ],
         history_command: Vec::new(),
         daemon_command: Vec::new(),
+        product_action_ids: Some(summary.action_ids.clone()),
     };
     compile_native_with_contract(&summary, &surface, &runtime, target, out_dir)
 }
@@ -2834,6 +2885,20 @@ mod tests {
     }
 
     #[test]
+    fn run_action_with_manifest_rejects_undeclared_product_action() {
+        let root = runtime_fixture_root("run-action-undeclared");
+        let manifest = root.join("runtime.manifest.json");
+
+        let error = run_action_output("delete_everything", "{}", Some(&manifest)).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "runtime action not declared in Product IR: delete_everything"
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn run_state_with_manifest_dispatches_state_command() {
         let root = runtime_fixture_root("run-state");
         let output = run_state_output(&root.join("runtime.manifest.json")).unwrap();
@@ -3302,6 +3367,10 @@ mod tests {
                 "runtime-history".to_string(),
             ],
             daemon_command: vec!["deployments-daemon".to_string()],
+            product_action_ids: Some(vec![
+                "refresh_state".to_string(),
+                "publish_changes".to_string(),
+            ]),
         }
     }
 
@@ -3324,12 +3393,15 @@ mod tests {
     fn runtime_fixture_root(label: &str) -> PathBuf {
         let root = test_root(label);
         fs::create_dir_all(&root).unwrap();
+        let blueprint = root.join("app-blueprint");
+        fs::create_dir_all(&blueprint).unwrap();
         let runtime = root.join("runtime-fixture");
         write_executable(
             &runtime,
             "#!/bin/sh\nset -eu\ncase \"${1-}\" in\n  state) printf '{\"schema\":\"theurgy-state-snapshot/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"data\":{}}\\n' ;;\n  status) printf '{\"schema\":\"theurgy-runtime-status/v1\",\"app\":\"deployments\",\"state_ready\":true}\\n' ;;\n  history) printf '{\"schema\":\"theurgy-operation-history/v1\",\"app\":\"deployments\",\"subject\":\"%s\",\"limit\":\"%s\"}\\n' \"${2-}\" \"${3-}\" ;;\n  action) printf '{\"success\":true,\"action\":\"%s\",\"params\":%s}\\n' \"${2-}\" \"${3-}\" ;;\n  *) printf 'unknown fixture command\\n' >&2; exit 2 ;;\nesac\n",
         )
         .unwrap();
+        write_or_replace(&blueprint.join("product.ir.json"), &sample_product()).unwrap();
         write_or_replace(
             &root.join("runtime.manifest.json"),
             &format!(
