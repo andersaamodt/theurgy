@@ -374,6 +374,29 @@ fn command_validate_generated_runtime(args: &[String]) -> Result<()> {
         summary.state_snapshot_schema
     );
     println!("product_persistence_truth={}", summary.persistence_truth);
+    println!(
+        "adapter_runtime_transport={}",
+        summary.adapter_runtime_transport
+    );
+    println!("runtime_status_schema={}", summary.runtime_status_schema);
+    println!(
+        "runtime_action_request_schema={}",
+        summary.runtime_action_request_schema
+    );
+    println!(
+        "runtime_action_result_schema={}",
+        summary.runtime_action_result_schema
+    );
+    println!(
+        "operation_status_schema={}",
+        summary.operation_status_schema
+    );
+    println!(
+        "operation_history_schema={}",
+        summary.operation_history_schema
+    );
+    println!("surface_schema={}", summary.surface_schema);
+    println!("surface_target={}", summary.surface_target);
     println!("actions={}", summary.actions);
     println!("product_actions={}", summary.product_actions);
     println!("surface_actions={}", summary.surface_actions);
@@ -1696,6 +1719,14 @@ struct GeneratedRuntimeSummary {
     release_artifact: String,
     state_snapshot_schema: String,
     persistence_truth: String,
+    adapter_runtime_transport: String,
+    runtime_status_schema: String,
+    runtime_action_request_schema: String,
+    runtime_action_result_schema: String,
+    operation_status_schema: String,
+    operation_history_schema: String,
+    surface_schema: String,
+    surface_target: String,
     actions: usize,
     product_actions: usize,
     surface_actions: usize,
@@ -1795,23 +1826,24 @@ fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
     value_string(&value, "protocol")
         .filter(|protocol| !protocol.is_empty())
         .ok_or_else(|| TheurgyError::new("generated runtime protocol required"))?;
-    expect_value_string(&value, "runtimeStatusSchema", "theurgy-runtime-status/v1")?;
-    expect_value_string(
+    let runtime_status_schema =
+        expect_and_return_value_string(&value, "runtimeStatusSchema", "theurgy-runtime-status/v1")?;
+    let runtime_action_request_schema = expect_and_return_value_string(
         &value,
         "runtimeActionRequestSchema",
         "theurgy-runtime-action-request/v1",
     )?;
-    expect_value_string(
+    let runtime_action_result_schema = expect_and_return_value_string(
         &value,
         "runtimeActionResultSchema",
         "theurgy-runtime-action-result/v1",
     )?;
-    expect_value_string(
+    let operation_status_schema = expect_and_return_value_string(
         &value,
         "operationStatusSchema",
         "theurgy-operation-status/v1",
     )?;
-    expect_value_string(
+    let operation_history_schema = expect_and_return_value_string(
         &value,
         "operationHistorySchema",
         "theurgy-operation-history/v1",
@@ -2030,6 +2062,14 @@ fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
         release_artifact: target_release_artifact,
         state_snapshot_schema,
         persistence_truth,
+        adapter_runtime_transport,
+        runtime_status_schema,
+        runtime_action_request_schema,
+        runtime_action_result_schema,
+        operation_status_schema,
+        operation_history_schema,
+        surface_schema,
+        surface_target,
         actions: product_actions.len(),
         product_actions: product_actions.len(),
         surface_actions: surface_actions.len(),
@@ -2671,6 +2711,11 @@ fn expect_value_string(value: &Value, key: &str, expected: &str) -> Result<()> {
         Some(actual) if actual == expected => Ok(()),
         _ => Err(TheurgyError::new(format!("expected {key} = {expected}")).into()),
     }
+}
+
+fn expect_and_return_value_string(value: &Value, key: &str, expected: &str) -> Result<String> {
+    expect_value_string(value, key, expected)?;
+    Ok(expected.to_string())
 }
 
 fn validate_json_params(raw: &str) -> Result<()> {
@@ -6357,6 +6402,26 @@ mod tests {
             Some("deployments-state/v1")
         );
         assert_eq!(generated.persistence_truth, "file-first");
+        assert_eq!(generated.adapter_runtime_transport, "local-process-json");
+        assert_eq!(generated.runtime_status_schema, "theurgy-runtime-status/v1");
+        assert_eq!(
+            generated.runtime_action_request_schema,
+            "theurgy-runtime-action-request/v1"
+        );
+        assert_eq!(
+            generated.runtime_action_result_schema,
+            "theurgy-runtime-action-result/v1"
+        );
+        assert_eq!(
+            generated.operation_status_schema,
+            "theurgy-operation-status/v1"
+        );
+        assert_eq!(
+            generated.operation_history_schema,
+            "theurgy-operation-history/v1"
+        );
+        assert_eq!(generated.surface_schema, "theurgy-desktop-surface-ir/v1");
+        assert_eq!(generated.surface_target, "linux");
         assert_eq!(
             runtime_json
                 .get("productPersistenceTruth")
@@ -6779,6 +6844,27 @@ mod tests {
 
         let runtime = fs::read_to_string(out.join("theurgy-runtime.json")).unwrap();
         let runtime_json: Value = serde_json::from_str(&runtime).unwrap();
+        let generated = validate_generated_runtime(&runtime).unwrap();
+        assert_eq!(generated.adapter_runtime_transport, "local-process-json");
+        assert_eq!(generated.runtime_status_schema, "theurgy-runtime-status/v1");
+        assert_eq!(
+            generated.runtime_action_request_schema,
+            "theurgy-runtime-action-request/v1"
+        );
+        assert_eq!(
+            generated.runtime_action_result_schema,
+            "theurgy-runtime-action-result/v1"
+        );
+        assert_eq!(
+            generated.operation_status_schema,
+            "theurgy-operation-status/v1"
+        );
+        assert_eq!(
+            generated.operation_history_schema,
+            "theurgy-operation-history/v1"
+        );
+        assert_eq!(generated.surface_schema, "theurgy-desktop-surface-ir/v1");
+        assert_eq!(generated.surface_target, "desktop");
         assert_eq!(
             runtime_json.get("protocol").and_then(Value::as_str),
             Some("deployments-runtime/v1")
@@ -7524,6 +7610,33 @@ mod tests {
             &fs::read_to_string(ios_root.join("theurgy-runtime.json")).unwrap(),
         )
         .unwrap();
+        let ios_generated = validate_generated_runtime(
+            &fs::read_to_string(ios_root.join("theurgy-runtime.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(ios_generated.adapter_runtime_transport, "external-json-abi");
+        assert_eq!(
+            ios_generated.runtime_status_schema,
+            "theurgy-runtime-status/v1"
+        );
+        assert_eq!(
+            ios_generated.runtime_action_request_schema,
+            "theurgy-runtime-action-request/v1"
+        );
+        assert_eq!(
+            ios_generated.runtime_action_result_schema,
+            "theurgy-runtime-action-result/v1"
+        );
+        assert_eq!(
+            ios_generated.operation_status_schema,
+            "theurgy-operation-status/v1"
+        );
+        assert_eq!(
+            ios_generated.operation_history_schema,
+            "theurgy-operation-history/v1"
+        );
+        assert_eq!(ios_generated.surface_schema, "theurgy-mobile-surface-ir/v1");
+        assert_eq!(ios_generated.surface_target, "ios");
         assert_eq!(
             ios_runtime
                 .get("runtimeStatusSchema")
@@ -7657,6 +7770,39 @@ mod tests {
             &fs::read_to_string(android_root.join("theurgy-runtime.json")).unwrap(),
         )
         .unwrap();
+        let android_generated = validate_generated_runtime(
+            &fs::read_to_string(android_root.join("theurgy-runtime.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            android_generated.adapter_runtime_transport,
+            "external-json-abi"
+        );
+        assert_eq!(
+            android_generated.runtime_status_schema,
+            "theurgy-runtime-status/v1"
+        );
+        assert_eq!(
+            android_generated.runtime_action_request_schema,
+            "theurgy-runtime-action-request/v1"
+        );
+        assert_eq!(
+            android_generated.runtime_action_result_schema,
+            "theurgy-runtime-action-result/v1"
+        );
+        assert_eq!(
+            android_generated.operation_status_schema,
+            "theurgy-operation-status/v1"
+        );
+        assert_eq!(
+            android_generated.operation_history_schema,
+            "theurgy-operation-history/v1"
+        );
+        assert_eq!(
+            android_generated.surface_schema,
+            "theurgy-mobile-surface-ir/v1"
+        );
+        assert_eq!(android_generated.surface_target, "android");
         assert_eq!(
             android_runtime
                 .get("runtimeStatusSchema")
