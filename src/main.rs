@@ -3942,9 +3942,33 @@ fn compile_android(
     out_dir: &Path,
 ) -> Result<()> {
     fs::create_dir_all(out_dir.join("app/src/main/java/app/theurgy/generated"))?;
+    fs::create_dir_all(out_dir.join("app/src/main"))?;
     write_or_replace(
         &out_dir.join("settings.gradle"),
         &format!("pluginManagement {{ repositories {{ google(); mavenCentral(); gradlePluginPortal() }} }}\ndependencyResolutionManagement {{ repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories {{ google(); mavenCentral() }} }}\nrootProject.name = '{}-theurgy'\ninclude ':app'\n", summary.app_id),
+    )?;
+    write_or_replace(
+        &out_dir.join("build.gradle"),
+        "plugins {\n    id 'com.android.application' version '8.7.3' apply false\n}\n",
+    )?;
+    write_or_replace(
+        &out_dir.join("app/build.gradle"),
+        &format!(
+            "plugins {{\n    id 'com.android.application'\n}}\n\nandroid {{\n    namespace 'app.theurgy.generated'\n    compileSdk 35\n\n    defaultConfig {{\n        applicationId 'app.theurgy.{}'\n        minSdk 26\n        targetSdk 35\n        versionCode 1\n        versionName '0.1.0'\n    }}\n}}\n",
+            summary.app_id.replace('-', "_")
+        ),
+    )?;
+    write_or_replace(
+        &out_dir.join("app/src/main/AndroidManifest.xml"),
+        &format!(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">\n    <application android:theme=\"@style/AppTheme\" android:label=\"{}\">\n        <activity android:name=\".MainActivity\" android:exported=\"true\">\n            <intent-filter>\n                <action android:name=\"android.intent.action.MAIN\" />\n                <category android:name=\"android.intent.category.LAUNCHER\" />\n            </intent-filter>\n        </activity>\n    </application>\n</manifest>\n",
+            xml_escape(&summary.app_name)
+        ),
+    )?;
+    fs::create_dir_all(out_dir.join("app/src/main/res/values"))?;
+    write_or_replace(
+        &out_dir.join("app/src/main/res/values/styles.xml"),
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<resources>\n    <style name=\"AppTheme\" parent=\"android:style/Theme.Material.Light.NoActionBar\" />\n</resources>\n",
     )?;
     write_or_replace(
         &out_dir.join("app/src/main/java/app/theurgy/generated/MainActivity.java"),
@@ -4231,6 +4255,14 @@ fn c_escape(value: &str) -> String {
 
 fn java_escape(value: &str) -> String {
     c_escape(value)
+}
+
+fn xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 fn create_project(kind: ProjectKind, name: &str, path: &Path) -> Result<()> {
@@ -6875,6 +6907,20 @@ mod tests {
         assert!(android.contains("final String[] failureKeys;"));
         assert!(android.contains("final String[][] outputShape;"));
         assert!(!android.contains("new ProductActionContract(\"refresh_state\""));
+        let android_settings = fs::read_to_string(android_root.join("settings.gradle")).unwrap();
+        assert!(android_settings.contains("rootProject.name = 'deployments-theurgy'"));
+        let android_root_gradle = fs::read_to_string(android_root.join("build.gradle")).unwrap();
+        assert!(android_root_gradle.contains("id 'com.android.application' version"));
+        let android_app_gradle = fs::read_to_string(android_root.join("app/build.gradle")).unwrap();
+        assert!(android_app_gradle.contains("namespace 'app.theurgy.generated'"));
+        assert!(android_app_gradle.contains("applicationId 'app.theurgy.deployments'"));
+        let android_manifest =
+            fs::read_to_string(android_root.join("app/src/main/AndroidManifest.xml")).unwrap();
+        assert!(android_manifest.contains("android.intent.action.MAIN"));
+        assert!(android_manifest.contains("android:label=\"Deployments\""));
+        let android_styles =
+            fs::read_to_string(android_root.join("app/src/main/res/values/styles.xml")).unwrap();
+        assert!(android_styles.contains("Theme.Material.Light.NoActionBar"));
 
         fs::remove_dir_all(ios_root).unwrap();
         fs::remove_dir_all(android_root).unwrap();
