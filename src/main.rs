@@ -4011,6 +4011,13 @@ fn ios_adapter_source(
 // Surface: theurgy-surface.json
 import SwiftUI
 
+func loadBundledContract(_ name: String) -> String {
+  guard let url = Bundle.module.url(forResource: name, withExtension: "json") else {
+    return "\(name).json missing"
+  }
+  return (try? String(contentsOf: url, encoding: .utf8)) ?? "\(name).json unreadable"
+}
+
 struct ProductActionContract {
   let id: String
   let label: String
@@ -4028,6 +4035,8 @@ struct ProductActionContract {
 }
 
 struct RuntimeContract {
+  let runtimeMetadata = loadBundledContract("theurgy-runtime")
+  let surfaceMetadata = loadBundledContract("theurgy-surface")
   let protocolName = "__PROTOCOL__"
   let stateCommand = __STATE_COMMAND__
   let statusCommand = __STATUS_COMMAND__
@@ -4051,6 +4060,8 @@ struct RuntimeContractView: View {
       List {
         Section("Runtime") {
           Text(contract.protocolName)
+          Text("Runtime metadata: \(contract.runtimeMetadata.prefix(120))")
+          Text("Surface metadata: \(contract.surfaceMetadata.prefix(120))")
           Text(contract.stateCommand.joined(separator: " "))
           Text(contract.statusCommand.joined(separator: " "))
           Text(contract.subscribeStatusCommand.joined(separator: " "))
@@ -4132,6 +4143,10 @@ fn android_adapter_source(
 import android.app.Activity;
 import android.os.Bundle;
 import android.widget.TextView;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 
 public final class MainActivity extends Activity {
   private static final String PROTOCOL = "__PROTOCOL__";
@@ -4184,11 +4199,29 @@ public final class MainActivity extends Activity {
     return command;
   }
 
+  private String loadBundledContract(String name) {
+    try (InputStream input = getAssets().open(name)) {
+      ByteArrayOutputStream output = new ByteArrayOutputStream();
+      byte[] buffer = new byte[4096];
+      int read;
+      while ((read = input.read(buffer)) != -1) {
+        output.write(buffer, 0, read);
+      }
+      return output.toString(StandardCharsets.UTF_8.name());
+    } catch (IOException error) {
+      return name + " missing";
+    }
+  }
+
   @Override public void onCreate(Bundle state) {
     super.onCreate(state);
     TextView view = new TextView(this);
+    String runtimeMetadata = loadBundledContract("theurgy-runtime.json");
+    String surfaceMetadata = loadBundledContract("theurgy-surface.json");
     StringBuilder text = new StringBuilder();
     text.append("__APP_NAME__\nRuntime: ").append(PROTOCOL)
+      .append("\nRuntime metadata: ").append(runtimeMetadata.substring(0, Math.min(120, runtimeMetadata.length())))
+      .append("\nSurface metadata: ").append(surfaceMetadata.substring(0, Math.min(120, surfaceMetadata.length())))
       .append("\nState: ").append(String.join(" ", STATE_COMMAND))
       .append("\nStatus: ").append(String.join(" ", STATUS_COMMAND))
       .append("\nSubscribe: ").append(String.join(" ", SUBSCRIBE_STATUS_COMMAND))
@@ -6876,6 +6909,9 @@ mod tests {
         let ios = fs::read_to_string(ios_root.join("Host/App.swift")).unwrap();
         assert!(ios.contains("theurgy-runtime.json"));
         assert!(ios.contains("theurgy-runtime-action/v1"));
+        assert!(ios.contains("Bundle.module.url(forResource: name, withExtension: \"json\")"));
+        assert!(ios.contains("let runtimeMetadata = loadBundledContract(\"theurgy-runtime\")"));
+        assert!(ios.contains("let surfaceMetadata = loadBundledContract(\"theurgy-surface\")"));
         assert!(ios.contains("\"deployments-core\", \"runtime-state\""));
         assert!(ios.contains("\"deployments-core\", \"runtime-status\""));
         assert!(
@@ -6917,6 +6953,9 @@ mod tests {
         )
         .unwrap();
         assert!(android.contains("theurgy-runtime-action/v1"));
+        assert!(android.contains("getAssets().open(name)"));
+        assert!(android.contains("loadBundledContract(\"theurgy-runtime.json\")"));
+        assert!(android.contains("loadBundledContract(\"theurgy-surface.json\")"));
         assert!(android.contains("new String[] {\"deployments-core\", \"runtime-action\"}"));
         assert!(android.contains("new String[] {\"deployments-core\", \"runtime-status\"}"));
         assert!(android.contains(
