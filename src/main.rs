@@ -636,7 +636,12 @@ fn run_manifest_action(runtime: &RuntimeContract, action_id: &str, params: &str)
         &[action_id.to_string(), params.to_string()],
         "action",
     )?;
-    validate_manifest_action_output(&runtime.app_id, action_id, &output)?;
+    validate_manifest_action_output(
+        &runtime.app_id,
+        action_id,
+        &output,
+        runtime.product_action_contracts.as_deref(),
+    )?;
     Ok(output)
 }
 
@@ -644,6 +649,7 @@ fn validate_manifest_action_output(
     expected_app: &str,
     action_id: &str,
     output: &str,
+    contracts: Option<&[ActionContract]>,
 ) -> Result<()> {
     let value = parse_json(output)?;
     let result = manifest_payload_or_raw(&value);
@@ -654,6 +660,9 @@ fn validate_manifest_action_output(
             summary.action_id
         ))
         .into());
+    }
+    if let Some(contracts) = contracts {
+        validate_runtime_action_result_keys(action_id, result, contracts)?;
     }
     validate_runtime_output_app("runtime action result", expected_app, &summary.app_id)
 }
@@ -724,6 +733,38 @@ fn validate_runtime_action_params(
         {
             return Err(TheurgyError::new(format!(
                 "runtime action param not declared in Product IR input for {action_id}: {key}"
+            ))
+            .into());
+        }
+    }
+    Ok(())
+}
+
+fn validate_runtime_action_result_keys(
+    action_id: &str,
+    result: &Value,
+    contracts: &[ActionContract],
+) -> Result<()> {
+    let Some(contract) = contracts.iter().find(|contract| contract.id == action_id) else {
+        return Err(TheurgyError::new(format!(
+            "runtime action not declared in Product IR: {action_id}"
+        ))
+        .into());
+    };
+    let Some(object) = result.get("result").and_then(Value::as_object) else {
+        return Err(TheurgyError::new(format!(
+            "runtime action result must be a JSON object for Product IR action: {action_id}"
+        ))
+        .into());
+    };
+    for key in object.keys() {
+        if !contract
+            .output_keys
+            .iter()
+            .any(|declared_key| declared_key == key)
+        {
+            return Err(TheurgyError::new(format!(
+                "runtime action result key not declared in Product IR output for {action_id}: {key}"
             ))
             .into());
         }
@@ -3320,7 +3361,8 @@ mod tests {
             "\"action\": \"refresh_state\"",
         );
         let error =
-            validate_manifest_action_output("deployments", "publish_changes", &output).unwrap_err();
+            validate_manifest_action_output("deployments", "publish_changes", &output, None)
+                .unwrap_err();
         assert_eq!(
             error.to_string(),
             "runtime action result action mismatch: expected publish_changes, got refresh_state"
@@ -3332,7 +3374,8 @@ mod tests {
         let output = sample_runtime_action_result()
             .replace("\"app\": \"deployments\"", "\"app\": \"other-app\"");
         let error =
-            validate_manifest_action_output("deployments", "publish_changes", &output).unwrap_err();
+            validate_manifest_action_output("deployments", "publish_changes", &output, None)
+                .unwrap_err();
         assert_eq!(
             error.to_string(),
             "runtime action result app mismatch: expected deployments, got other-app"
@@ -3363,6 +3406,25 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "runtime action param not declared in Product IR input for refresh_state: unexpected"
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn run_action_with_manifest_rejects_undeclared_result_key() {
+        let root = runtime_fixture_root("run-action-undeclared-result");
+        write_or_replace(
+            &root.join("app-blueprint/product.ir.json"),
+            &sample_product().replace("\"output\": {\"params\": \"object\"}", "\"output\": {}"),
+        )
+        .unwrap();
+        let manifest = root.join("runtime.manifest.json");
+
+        let error = run_action_output("refresh_state", "{}", Some(&manifest)).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "runtime action result key not declared in Product IR output for refresh_state: params"
         );
 
         fs::remove_dir_all(root).unwrap();
@@ -3919,7 +3981,7 @@ mod tests {
         assert!(ios.contains("actionCommand + [action.id, json]"));
         assert!(ios.contains("id: \"publish_changes\""));
         assert!(ios.contains("inputKeys: [\"deployment\"]"));
-        assert!(ios.contains("outputKeys: []"));
+        assert!(ios.contains("outputKeys: [\"params\"]"));
         assert!(ios.contains("failureKeys: []"));
         assert!(!ios.contains("id: \"refresh_state\""));
 
@@ -3941,6 +4003,7 @@ mod tests {
             "new ProductActionContract(\"publish_changes\", \"Push to Production\", \"release\""
         ));
         assert!(android.contains("new String[] {\"deployment\"}"));
+        assert!(android.contains("new String[] {\"params\"}"));
         assert!(android.contains("final String[] outputKeys;"));
         assert!(android.contains("final String[] failureKeys;"));
         assert!(!android.contains("new ProductActionContract(\"refresh_state\""));
@@ -3950,7 +4013,7 @@ mod tests {
     }
 
     fn sample_product() -> String {
-        "{\n  \"version\": \"theurgy-product-ir/v1\",\n  \"format\": \"json\",\n  \"app\": {\n    \"id\": \"deployments\",\n    \"name\": \"Deployments\",\n    \"targets\": [\"macos\", \"linux\"],\n    \"capabilities\": [\"native-desktop\", \"runtime-actions\"],\n    \"permissions\": [\"files\"]\n  },\n  \"domain\": {\n    \"objects\": [\n      {\"id\": \"server\", \"label\": \"Server\"},\n      {\"id\": \"deployment\", \"label\": \"Deployment\"}\n    ]\n  },\n  \"actions\": [\n    {\"id\": \"refresh_state\", \"label\": \"Refresh\", \"input\": {}, \"output\": {}, \"effect\": \"read\", \"failure\": {}, \"safe\": true, \"mutating\": false, \"longRunning\": false, \"privileged\": false},\n    {\"id\": \"publish_changes\", \"label\": \"Push to Production\", \"input\": {\"deployment\": \"string\"}, \"output\": {}, \"effect\": \"release\", \"failure\": {}, \"safe\": false, \"mutating\": true, \"longRunning\": true, \"privileged\": true}\n  ],\n  \"state\": {\n    \"snapshotSchema\": \"deployments-state/v1\",\n    \"roots\": [{\"id\": \"headquarters-workspace\", \"kind\": \"xdg-state\"}]\n  },\n  \"backgroundJobs\": [\n    {\"id\": \"server-queue\", \"label\": \"Server Queue\"}\n  ],\n  \"releaseTargets\": [\n    {\"id\": \"macos-app\", \"target\": \"macos\"}\n  ],\n  \"audit\": {\n    \"operationHistory\": true,\n    \"cliParity\": true\n  }\n}".to_string()
+        "{\n  \"version\": \"theurgy-product-ir/v1\",\n  \"format\": \"json\",\n  \"app\": {\n    \"id\": \"deployments\",\n    \"name\": \"Deployments\",\n    \"targets\": [\"macos\", \"linux\"],\n    \"capabilities\": [\"native-desktop\", \"runtime-actions\"],\n    \"permissions\": [\"files\"]\n  },\n  \"domain\": {\n    \"objects\": [\n      {\"id\": \"server\", \"label\": \"Server\"},\n      {\"id\": \"deployment\", \"label\": \"Deployment\"}\n    ]\n  },\n  \"actions\": [\n    {\"id\": \"refresh_state\", \"label\": \"Refresh\", \"input\": {}, \"output\": {\"params\": \"object\"}, \"effect\": \"read\", \"failure\": {}, \"safe\": true, \"mutating\": false, \"longRunning\": false, \"privileged\": false},\n    {\"id\": \"publish_changes\", \"label\": \"Push to Production\", \"input\": {\"deployment\": \"string\"}, \"output\": {\"params\": \"object\"}, \"effect\": \"release\", \"failure\": {}, \"safe\": false, \"mutating\": true, \"longRunning\": true, \"privileged\": true}\n  ],\n  \"state\": {\n    \"snapshotSchema\": \"deployments-state/v1\",\n    \"roots\": [{\"id\": \"headquarters-workspace\", \"kind\": \"xdg-state\"}]\n  },\n  \"backgroundJobs\": [\n    {\"id\": \"server-queue\", \"label\": \"Server Queue\"}\n  ],\n  \"releaseTargets\": [\n    {\"id\": \"macos-app\", \"target\": \"macos\"}\n  ],\n  \"audit\": {\n    \"operationHistory\": true,\n    \"cliParity\": true\n  }\n}".to_string()
     }
 
     fn sample_mobile_product() -> String {
