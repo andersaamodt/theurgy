@@ -23,6 +23,8 @@ A Rust-backed native desktop app can be solid in a way that an app backed by man
 
 - well-named spells backed by `theurgy-runtime`
 - project scaffolding for native desktop apps and enterprise web apps
+- first canonical schemas for Product IR, Desktop Surface IR, Mobile Surface IR, Action IR, State Snapshot IR, and Runtime Manifest
+- product runtime/compiler commands for validation, surface projection, native adapter emission, app inspection, and JSON action envelopes
 - a first-phase enterprise web runtime harness contract for CGI/HTTP/FastCGI migration
 - file-first project manifests
 - release adapters for signing, notarization, TestFlight, App Store, and Play Store flows
@@ -37,6 +39,9 @@ spells/capture-theurgy-cgi-context
 spells/conjure-native-desktop sample-desktop
 spells/conjure-enterprise-website sample-website
 spells/inspect-theurgy-project sample-desktop
+cargo run --bin theurgy-runtime -- validate-product-ir product.ir.json
+cargo run --bin theurgy-runtime -- project-surface product.ir.json --target macos
+cargo run --bin theurgy-runtime -- compile-native product.ir.json --target linux --out /tmp/theurgy-linux
 ```
 
 Install locally:
@@ -76,6 +81,8 @@ Theurgy is the quarantine layer for parts of professional app development that d
 
 Theurgy should contain institutional complexity without normalizing it. Keep wizardry pure where possible. Keep wizardry-apps script-first and free of direct Rust, Cargo, Swift, signing, notarization, app verification/policing, special app-publish keys, and Apple-specific implementation machinery. Put unavoidable platform-specific or enterprise-specific machinery in theurgy, wrap it with spells, keep source files plain, prefer free/open alternatives, and document the compromise.
 
+Theurgy is an opt-in escalation path. Existing wizardry-apps projects must remain able to build and run through their current shell-first flows without requiring theurgy. The product runtime/compiler track is for apps that explicitly choose a higher-integration native or enterprise runtime.
+
 Apple-specific code is the obvious example. Professional macOS apps may need SwiftUI, bundle metadata, signing, launch behavior, lifecycle hooks, verification, notarization, review gates, and publishing keys. The Apple adapter belongs in theurgy behind a narrow boundary; the app's durable project truth should remain file-first and portable where possible.
 
 ## Wizardry Compromises
@@ -90,6 +97,7 @@ Theurgy makes these compromises against pure shell-first wizardry. Keep this tab
 | Build artifacts and caches | Compiled and indexed systems create `target/`, caches, and runtime outputs. | Undesired; keep ignored or outside source trees |
 | Rust toolchain requirement | Development needs Rust rather than only POSIX sh and small system tools. | Settled for now |
 | Stronger schemas and typed contracts | Enterprise support needs stable manifests, structured snapshots, and typed actions. | Settled; keep formats plain and hand-editable |
+| Product IR plus surface IRs | Shared product semantics should compile to platform-native desktop and mobile surfaces without pretending one widget tree fits every target. | Initial schemas landed |
 | Generated native code | Desktop support may emit SwiftUI, GTK, or other platform-native sources. | Necessary |
 | Platform-specific adapters | Native quality requires platform-owned behavior for windows, menus, IPC, and app lifecycle. | Necessary |
 | Apple-language and closed-platform accommodation | Professional macOS support may require Swift, SwiftUI, bundle metadata, signing, and notarization. | Forced external; quarantine aggressively |

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wizardry.app/schemas/theurgy-mobile-surface-ir-v1.json",
+  "title": "Theurgy Mobile Surface IR v1",
+  "type": "object",
+  "required": ["version", "format", "product", "target", "screens"],
+  "properties": {
+    "version": { "const": "theurgy-mobile-surface-ir/v1" },
+    "format": { "const": "json" },
+    "product": { "type": "string", "minLength": 1 },
+    "target": { "enum": ["ios", "android"] },
+    "screens": { "type": "array", "items": { "$ref": "#/$defs/screen" }, "minItems": 1 },
+    "actions": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "screen": {
+      "type": "object",
+      "required": ["id", "title", "node"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "node": { "type": "object" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

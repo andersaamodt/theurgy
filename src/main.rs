@@ -66,13 +66,18 @@ fn run(args: Vec<String>) -> Result<()> {
         Some("conjure-native-desktop") => command_conjure(ProjectKind::Desktop, &args[2..]),
         Some("conjure-enterprise-website") => command_conjure(ProjectKind::Website, &args[2..]),
         Some("inspect") => command_inspect(&args[2..]),
+        Some("validate-product-ir") => command_validate_product_ir(&args[2..]),
+        Some("project-surface") => command_project_surface(&args[2..]),
+        Some("compile-native") => command_compile_native(&args[2..]),
+        Some("inspect-app") => command_inspect_app(&args[2..]),
+        Some("run-action") => command_run_action(&args[2..]),
         Some(other) => Err(TheurgyError::new(format!("unknown command: {other}")).into()),
     }
 }
 
 fn print_usage() {
     println!(
-        "Internal runtime. Use spells/assay-theurgy, spells/check-theurgy-web-runtime, spells/capture-theurgy-cgi-context, spells/conjure-native-desktop, spells/conjure-enterprise-website, or spells/inspect-theurgy-project."
+        "Internal runtime. Use spells/assay-theurgy, spells/check-theurgy-web-runtime, spells/capture-theurgy-cgi-context, spells/conjure-native-desktop, spells/conjure-enterprise-website, spells/inspect-theurgy-project, or the product runtime/compiler commands."
     );
 }
 
@@ -153,6 +158,509 @@ fn command_inspect(args: &[String]) -> Result<()> {
     println!("source_root={}", summary.source_root);
     println!("truth=file-first");
     Ok(())
+}
+
+fn command_validate_product_ir(args: &[String]) -> Result<()> {
+    if args.len() != 1 {
+        return Err(TheurgyError::new("usage: validate-product-ir PATH").into());
+    }
+    let value = read_json(Path::new(&args[0]))?;
+    let summary = validate_product_ir(&value)?;
+    println!("status=ok");
+    println!("schema=theurgy-product-ir/v1");
+    println!("app={}", summary.app_id);
+    println!("actions={}", summary.actions);
+    println!("targets={}", summary.targets.join(","));
+    Ok(())
+}
+
+fn command_project_surface(args: &[String]) -> Result<()> {
+    let (path, target) = parse_product_target_args(args, "usage: project-surface PRODUCT_IR --target TARGET")?;
+    let product = read_json(path)?;
+    validate_product_ir(&product)?;
+    let surface = project_surface(&product, target)?;
+    println!("{surface}");
+    Ok(())
+}
+
+fn command_compile_native(args: &[String]) -> Result<()> {
+    let (product_path, target, out_dir) = parse_compile_args(args)?;
+    let product = read_json(product_path)?;
+    validate_product_ir(&product)?;
+    compile_native(&product, target, out_dir)?;
+    println!("status=ok");
+    println!("target={target}");
+    println!("out={}", out_dir.display());
+    Ok(())
+}
+
+fn command_inspect_app(args: &[String]) -> Result<()> {
+    if args.len() > 1 {
+        return Err(TheurgyError::new("usage: inspect-app [PATH]").into());
+    }
+    let path = args
+        .first()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    command_inspect(&[path.display().to_string()])?;
+    let manifest = fs::read_to_string(path.join("theurgy.project.toml")).unwrap_or_default();
+    for key in ["product_ir", "desktop_surface_ir", "mobile_surface_ir", "runtime_manifest"] {
+        if let Ok(value) = manifest_value(&manifest, key) {
+            println!("{key}={value}");
+        }
+    }
+    Ok(())
+}
+
+fn command_run_action(args: &[String]) -> Result<()> {
+    if args.is_empty() {
+        return Err(TheurgyError::new("usage: run-action ACTION_ID --json PARAMS").into());
+    }
+    let action_id = &args[0];
+    let mut params = "{}".to_string();
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--json" => {
+                let raw = args
+                    .get(index + 1)
+                    .ok_or_else(|| TheurgyError::new("run-action --json requires PARAMS"))?;
+                validate_json_params(raw)?;
+                params = raw.to_string();
+                index += 2;
+            }
+            other => {
+                return Err(TheurgyError::new(format!("unknown run-action option: {other}")).into())
+            }
+        }
+    }
+    println!(
+        "{{\n  \"success\": true,\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"action\": \"{}\",\n  \"operation\": {{\n    \"id\": \"op-{}\",\n    \"status\": \"accepted\",\n    \"progress\": 0,\n    \"longRunning\": false\n  }},\n  \"params\": {}\n}}",
+        json_escape(action_id),
+        json_escape(action_id),
+        params
+    );
+    Ok(())
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct ProductSummary {
+    app_id: String,
+    app_name: String,
+    targets: Vec<String>,
+    action_ids: Vec<String>,
+    actions: usize,
+}
+
+fn read_json(path: &Path) -> Result<String> {
+    let text = fs::read_to_string(path).map_err(|error| {
+        TheurgyError::new(format!("could not read {}: {error}", path.display()))
+    })?;
+    validate_json_params(&text)?;
+    Ok(text)
+}
+
+fn validate_product_ir(text: &str) -> Result<ProductSummary> {
+    expect_json_string(text, "version", "theurgy-product-ir/v1")?;
+    expect_json_string(text, "format", "json")?;
+    let app = json_object_for_key(text, "app")?;
+    let app_id = json_string_value(app, "id")
+        .filter(|id| valid_slug(id))
+        .ok_or_else(|| TheurgyError::new("product IR app.id must be a lowercase slug"))?;
+    let app_name = json_string_value(app, "name")
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| TheurgyError::new("product IR app.name required"))?;
+    let targets = json_string_array(app, "targets")?;
+    if targets.is_empty() {
+        return Err(TheurgyError::new("product IR app.targets required").into());
+    }
+    for target in &targets {
+        if !matches!(target.as_str(), "macos" | "linux" | "ios" | "android") {
+            return Err(TheurgyError::new(
+                "product IR target must be macos, linux, ios, or android",
+            )
+            .into());
+        }
+    }
+    let actions_array = json_array_for_key(text, "actions")?;
+    let action_objects = top_level_objects(actions_array);
+    if action_objects.is_empty() {
+        return Err(TheurgyError::new("product IR actions required").into());
+    }
+    let mut action_ids = Vec::new();
+    for action in &action_objects {
+        action_ids.push(validate_action(action)?);
+    }
+    let state = json_object_for_key(text, "state")?;
+    json_string_value(state, "snapshotSchema")
+        .filter(|schema| !schema.is_empty())
+        .ok_or_else(|| TheurgyError::new("product IR state.snapshotSchema required"))?;
+    Ok(ProductSummary {
+        app_id,
+        app_name,
+        targets,
+        actions: action_objects.len(),
+        action_ids,
+    })
+}
+
+fn validate_action(action: &str) -> Result<String> {
+    let id = json_string_value(action, "id")
+        .filter(|id| valid_action_id(id))
+        .ok_or_else(|| TheurgyError::new("product IR action.id must be a stable action id"))?;
+    json_string_value(action, "label")
+        .filter(|label| !label.is_empty())
+        .ok_or_else(|| TheurgyError::new("product IR action.label required"))?;
+    for key in ["input", "output", "failure"] {
+        json_object_for_key(action, key)
+            .map_err(|_| TheurgyError::new(format!("product IR action.{key} object required")))?;
+    }
+    let effect = json_string_value(action, "effect")
+        .ok_or_else(|| TheurgyError::new("product IR action.effect invalid"))?;
+    if !matches!(
+        effect.as_str(),
+        "read" | "write" | "background" | "external" | "release"
+    ) {
+        return Err(TheurgyError::new("product IR action.effect invalid").into());
+    }
+    for key in ["safe", "mutating", "longRunning", "privileged"] {
+        json_bool_value(action, key).ok_or_else(|| {
+            TheurgyError::new(format!("product IR action.{key} boolean required"))
+        })?;
+    }
+    Ok(id)
+}
+
+fn expect_json_string(text: &str, key: &str, expected: &str) -> Result<()> {
+    match json_string_value(text, key) {
+        Some(actual) if actual == expected => Ok(()),
+        _ => Err(TheurgyError::new(format!("expected {key} = {expected}")).into()),
+    }
+}
+
+fn validate_json_params(raw: &str) -> Result<()> {
+    let trimmed = raw.trim();
+    let looks_like_json =
+        (trimmed.starts_with('{') && trimmed.ends_with('}')) || (trimmed.starts_with('[') && trimmed.ends_with(']'));
+    if looks_like_json {
+        Ok(())
+    } else {
+        Err(TheurgyError::new("expected a JSON object or array literal").into())
+    }
+}
+
+fn json_string_value(text: &str, key: &str) -> Option<String> {
+    let marker = format!("\"{key}\"");
+    let start = text.find(&marker)? + marker.len();
+    let after_colon = text[start..].find(':')? + start + 1;
+    let bytes = text.as_bytes();
+    let mut index = after_colon;
+    while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+        index += 1;
+    }
+    if bytes.get(index) != Some(&b'"') {
+        return None;
+    }
+    index += 1;
+    let mut out = String::new();
+    let mut escaped = false;
+    for character in text[index..].chars() {
+        if escaped {
+            out.push(character);
+            escaped = false;
+        } else if character == '\\' {
+            escaped = true;
+        } else if character == '"' {
+            return Some(out);
+        } else {
+            out.push(character);
+        }
+    }
+    None
+}
+
+fn json_bool_value(text: &str, key: &str) -> Option<bool> {
+    let marker = format!("\"{key}\"");
+    let start = text.find(&marker)? + marker.len();
+    let after_colon = text[start..].find(':')? + start + 1;
+    let rest = text[after_colon..].trim_start();
+    if rest.starts_with("true") {
+        Some(true)
+    } else if rest.starts_with("false") {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+fn json_object_for_key<'a>(text: &'a str, key: &str) -> Result<&'a str> {
+    json_balanced_for_key(text, key, '{', '}')
+}
+
+fn json_array_for_key<'a>(text: &'a str, key: &str) -> Result<&'a str> {
+    json_balanced_for_key(text, key, '[', ']')
+}
+
+fn json_balanced_for_key<'a>(text: &'a str, key: &str, open: char, close: char) -> Result<&'a str> {
+    let marker = format!("\"{key}\"");
+    let start = text
+        .find(&marker)
+        .ok_or_else(|| TheurgyError::new(format!("missing JSON key: {key}")))?
+        + marker.len();
+    let after_colon = text[start..]
+        .find(':')
+        .ok_or_else(|| TheurgyError::new(format!("missing JSON key colon: {key}")))?
+        + start
+        + 1;
+    let relative_open = text[after_colon..]
+        .find(open)
+        .ok_or_else(|| TheurgyError::new(format!("missing JSON value for key: {key}")))?;
+    let value_start = after_colon + relative_open;
+    let value_end = balanced_end(text, value_start, open, close)?;
+    Ok(&text[value_start..=value_end])
+}
+
+fn balanced_end(text: &str, start: usize, open: char, close: char) -> Result<usize> {
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (offset, character) in text[start..].char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if character == '\\' {
+            escaped = in_string;
+            continue;
+        }
+        if character == '"' {
+            in_string = !in_string;
+            continue;
+        }
+        if in_string {
+            continue;
+        }
+        if character == open {
+            depth += 1;
+        } else if character == close {
+            depth = depth.saturating_sub(1);
+            if depth == 0 {
+                return Ok(start + offset);
+            }
+        }
+    }
+    Err(TheurgyError::new("unterminated JSON object or array").into())
+}
+
+fn json_string_array(text: &str, key: &str) -> Result<Vec<String>> {
+    let array = json_array_for_key(text, key)?;
+    let mut values = Vec::new();
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut current = String::new();
+    for character in array.chars() {
+        if escaped {
+            if in_string {
+                current.push(character);
+            }
+            escaped = false;
+        } else if character == '\\' {
+            escaped = in_string;
+        } else if character == '"' {
+            if in_string {
+                values.push(current.clone());
+                current.clear();
+            }
+            in_string = !in_string;
+        } else if in_string {
+            current.push(character);
+        }
+    }
+    Ok(values)
+}
+
+fn top_level_objects(array: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut index = 0usize;
+    while let Some(relative) = array[index..].find('{') {
+        let start = index + relative;
+        if let Ok(end) = balanced_end(array, start, '{', '}') {
+            out.push(array[start..=end].to_string());
+            index = end + 1;
+        } else {
+            break;
+        }
+    }
+    out
+}
+
+fn json_string_array_literal(values: &[String]) -> String {
+    let items = values
+        .iter()
+        .map(|value| format!("\"{}\"", json_escape(value)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("[{items}]")
+}
+
+fn valid_slug(value: &str) -> bool {
+    validate_name(value).is_ok()
+}
+
+fn valid_action_id(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_' | b'.'))
+}
+
+fn parse_product_target_args<'a>(args: &'a [String], usage: &str) -> Result<(&'a Path, &'a str)> {
+    if args.len() != 3 || args.get(1).map(String::as_str) != Some("--target") {
+        return Err(TheurgyError::new(usage).into());
+    }
+    let target = args[2].as_str();
+    if !matches!(target, "macos" | "linux" | "ios" | "android") {
+        return Err(TheurgyError::new("target must be macos, linux, ios, or android").into());
+    }
+    Ok((Path::new(&args[0]), target))
+}
+
+fn parse_compile_args<'a>(args: &'a [String]) -> Result<(&'a Path, &'a str, &'a Path)> {
+    if args.len() != 5 || args.get(1).map(String::as_str) != Some("--target") || args.get(3).map(String::as_str) != Some("--out") {
+        return Err(TheurgyError::new("usage: compile-native PRODUCT_IR --target TARGET --out OUT_DIR").into());
+    }
+    let target = args[2].as_str();
+    if !matches!(target, "macos" | "linux" | "ios" | "android") {
+        return Err(TheurgyError::new("target must be macos, linux, ios, or android").into());
+    }
+    Ok((Path::new(&args[0]), target, Path::new(&args[4])))
+}
+
+fn project_surface(product: &str, target: &str) -> Result<String> {
+    let summary = validate_product_ir(product)?;
+    if !summary.targets.iter().any(|candidate| candidate == target) {
+        return Err(TheurgyError::new(format!("product IR does not declare target: {target}")).into());
+    }
+    let action_ids = json_string_array_literal(&summary.action_ids);
+    if matches!(target, "macos" | "linux") {
+        Ok(format!(
+            "{{\n  \"version\": \"theurgy-desktop-surface-ir/v1\",\n  \"format\": \"json\",\n  \"product\": \"{}\",\n  \"target\": \"{}\",\n  \"actions\": {},\n  \"window\": {{\n    \"id\": \"window.main\",\n    \"type\": \"Window\",\n    \"title\": \"{}\",\n    \"role\": \"native-product-root\",\n    \"child\": {{\n      \"id\": \"split.main\",\n      \"type\": \"SplitPane\",\n      \"role\": \"left-list-detail\",\n      \"children\": [\n        {{\"id\": \"list.primary\", \"type\": \"TreeList\", \"role\": \"product-navigation\"}},\n        {{\"id\": \"detail.primary\", \"type\": \"Detail\", \"role\": \"product-detail\"}}\n      ]\n    }}\n  }}\n}}",
+            json_escape(&summary.app_id),
+            json_escape(target),
+            action_ids,
+            json_escape(&summary.app_name)
+        ))
+    } else {
+        Ok(format!(
+            "{{\n  \"version\": \"theurgy-mobile-surface-ir/v1\",\n  \"format\": \"json\",\n  \"product\": \"{}\",\n  \"target\": \"{}\",\n  \"actions\": {},\n  \"screens\": [\n    {{\n      \"id\": \"overview\",\n      \"title\": \"{}\",\n      \"node\": {{\"id\": \"screen.overview\", \"type\": \"NavigationStack\", \"role\": \"status-overview\"}}\n    }},\n    {{\n      \"id\": \"detail\",\n      \"title\": \"Detail\",\n      \"node\": {{\"id\": \"screen.detail\", \"type\": \"Screen\", \"role\": \"focused-action-detail\"}}\n    }}\n  ]\n}}",
+            json_escape(&summary.app_id),
+            json_escape(target),
+            action_ids,
+            json_escape(&summary.app_name)
+        ))
+    }
+}
+
+fn compile_native(product: &str, target: &str, out_dir: &Path) -> Result<()> {
+    let summary = validate_product_ir(product)?;
+    let surface = project_surface(product, target)?;
+    fs::create_dir_all(out_dir)?;
+    write_or_replace(
+        &out_dir.join("theurgy-surface.json"),
+        &format!("{surface}\n"),
+    )?;
+    match target {
+        "macos" => compile_macos(&summary, out_dir),
+        "linux" => compile_linux(&summary, out_dir),
+        "ios" => compile_ios(&summary, out_dir),
+        "android" => compile_android(&summary, out_dir),
+        _ => Err(TheurgyError::new("unsupported target").into()),
+    }
+}
+
+fn compile_macos(summary: &ProductSummary, out_dir: &Path) -> Result<()> {
+    fs::create_dir_all(out_dir.join("Sources/App"))?;
+    write_or_replace(
+        &out_dir.join("Package.swift"),
+        &format!(
+            "// Generated by theurgy-runtime compile-native.\n// swift-tools-version: 6.0\nimport PackageDescription\n\nlet package = Package(name: \"{}\", platforms: [.macOS(.v13)], products: [.executable(name: \"{}\", targets: [\"App\"])], targets: [.executableTarget(name: \"App\", path: \"Sources/App\")])\n",
+            summary.app_id, summary.app_id
+        ),
+    )?;
+    write_or_replace(
+        &out_dir.join("Sources/App/App.swift"),
+        &format!(
+            "import SwiftUI\n\n@main\nstruct TheurgyNativeApp: App {{\n  var body: some Scene {{\n    WindowGroup(\"{}\") {{\n      Text(\"{}\")\n        .frame(minWidth: 960, minHeight: 640)\n    }}\n  }}\n}}\n",
+            swift_escape(&summary.app_name),
+            swift_escape(&summary.app_name)
+        ),
+    )
+}
+
+fn compile_linux(summary: &ProductSummary, out_dir: &Path) -> Result<()> {
+    fs::create_dir_all(out_dir.join("src"))?;
+    write_or_replace(
+        &out_dir.join("meson.build"),
+        &format!(
+            "project('{}', 'c', version: '0.1.0')\ngtk = dependency('gtk4')\nexecutable('{}', 'src/main.c', dependencies: gtk, install: true)\n",
+            summary.app_id, summary.app_id
+        ),
+    )?;
+    write_or_replace(
+        &out_dir.join("src/main.c"),
+        &format!(
+            "#include <gtk/gtk.h>\n\nstatic void activate(GtkApplication *app, gpointer user_data) {{\n  (void)user_data;\n  GtkWidget *window = gtk_application_window_new(app);\n  gtk_window_set_title(GTK_WINDOW(window), \"{}\");\n  gtk_window_set_default_size(GTK_WINDOW(window), 960, 640);\n  gtk_window_set_child(GTK_WINDOW(window), gtk_label_new(\"{}\"));\n  gtk_window_present(GTK_WINDOW(window));\n}}\n\nint main(int argc, char **argv) {{\n  GtkApplication *app = gtk_application_new(\"app.theurgy.{}\", G_APPLICATION_DEFAULT_FLAGS);\n  g_signal_connect(app, \"activate\", G_CALLBACK(activate), NULL);\n  int status = g_application_run(G_APPLICATION(app), argc, argv);\n  g_object_unref(app);\n  return status;\n}}\n",
+            c_escape(&summary.app_name),
+            c_escape(&summary.app_name),
+            summary.app_id.replace('-', "_")
+        ),
+    )
+}
+
+fn compile_ios(summary: &ProductSummary, out_dir: &Path) -> Result<()> {
+    fs::create_dir_all(out_dir.join("Host"))?;
+    write_or_replace(
+        &out_dir.join("Host/App.swift"),
+        &format!(
+            "import SwiftUI\n\n@main\nstruct TheurgyMobileApp: App {{\n  var body: some Scene {{\n    WindowGroup {{\n      NavigationStack {{ Text(\"{}\") }}\n    }}\n  }}\n}}\n",
+            swift_escape(&summary.app_name)
+        ),
+    )
+}
+
+fn compile_android(summary: &ProductSummary, out_dir: &Path) -> Result<()> {
+    fs::create_dir_all(out_dir.join("app/src/main/java/app/theurgy/generated"))?;
+    write_or_replace(
+        &out_dir.join("settings.gradle"),
+        &format!("pluginManagement {{ repositories {{ google(); mavenCentral(); gradlePluginPortal() }} }}\ndependencyResolutionManagement {{ repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories {{ google(); mavenCentral() }} }}\nrootProject.name = '{}-theurgy'\ninclude ':app'\n", summary.app_id),
+    )?;
+    write_or_replace(
+        &out_dir.join("app/src/main/java/app/theurgy/generated/MainActivity.java"),
+        &format!(
+            "package app.theurgy.generated;\n\nimport android.app.Activity;\nimport android.os.Bundle;\nimport android.widget.TextView;\n\npublic final class MainActivity extends Activity {{\n  @Override public void onCreate(Bundle state) {{\n    super.onCreate(state);\n    TextView view = new TextView(this);\n    view.setText(\"{}\");\n    setContentView(view);\n  }}\n}}\n",
+            java_escape(&summary.app_name)
+        ),
+    )
+}
+
+fn write_or_replace(path: &Path, contents: &str) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, contents)?;
+    Ok(())
+}
+
+fn swift_escape(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn c_escape(value: &str) -> String {
+    swift_escape(value).replace('\n', "\\n")
+}
+
+fn java_escape(value: &str) -> String {
+    c_escape(value)
 }
 
 fn create_project(kind: ProjectKind, name: &str, path: &Path) -> Result<()> {
@@ -538,5 +1046,45 @@ mod tests {
         assert!(root.join("default-app/theurgy.project.toml").exists());
         env::set_current_dir(cwd).unwrap();
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn validates_product_ir_contract() {
+        let product = sample_product();
+        let summary = validate_product_ir(&product).unwrap();
+        assert_eq!(summary.app_id, "deployments");
+        assert_eq!(summary.targets, vec!["macos".to_string(), "linux".to_string()]);
+        assert_eq!(summary.actions, 2);
+    }
+
+    #[test]
+    fn projects_desktop_surface_from_product_ir() {
+        let surface = project_surface(&sample_product(), "macos").unwrap();
+        assert!(surface.contains("\"version\": \"theurgy-desktop-surface-ir/v1\""));
+        assert!(surface.contains("\"product\": \"deployments\""));
+        assert!(surface.contains("\"role\": \"left-list-detail\""));
+    }
+
+    #[test]
+    fn projects_mobile_surface_from_product_ir() {
+        let product = "{\n  \"version\": \"theurgy-product-ir/v1\",\n  \"format\": \"json\",\n  \"app\": {\"id\": \"deployments\", \"name\": \"Deployments\", \"targets\": [\"ios\"]},\n  \"actions\": [{\"id\": \"refresh_state\", \"label\": \"Refresh\", \"input\": {}, \"output\": {}, \"effect\": \"read\", \"failure\": {}, \"safe\": true, \"mutating\": false, \"longRunning\": false, \"privileged\": false}],\n  \"state\": {\"snapshotSchema\": \"deployments-state/v1\"}\n}".to_string();
+        let surface = project_surface(&product, "ios").unwrap();
+        assert!(surface.contains("\"version\": \"theurgy-mobile-surface-ir/v1\""));
+        assert!(surface.contains("\"role\": \"status-overview\""));
+    }
+
+    #[test]
+    fn compile_native_emits_deterministic_adapter_files() {
+        let root = test_root("compile-native");
+        compile_native(&sample_product(), "linux", &root).unwrap();
+        assert!(root.join("theurgy-surface.json").exists());
+        let main_c = fs::read_to_string(root.join("src/main.c")).unwrap();
+        assert!(main_c.contains("gtk_application_window_new"));
+        assert!(main_c.contains("Deployments"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    fn sample_product() -> String {
+        "{\n  \"version\": \"theurgy-product-ir/v1\",\n  \"format\": \"json\",\n  \"app\": {\n    \"id\": \"deployments\",\n    \"name\": \"Deployments\",\n    \"targets\": [\"macos\", \"linux\"],\n    \"capabilities\": [\"native-desktop\", \"runtime-actions\"]\n  },\n  \"domain\": {\n    \"objects\": [\n      {\"id\": \"server\", \"label\": \"Server\"},\n      {\"id\": \"deployment\", \"label\": \"Deployment\"}\n    ]\n  },\n  \"actions\": [\n    {\"id\": \"refresh_state\", \"label\": \"Refresh\", \"input\": {}, \"output\": {}, \"effect\": \"read\", \"failure\": {}, \"safe\": true, \"mutating\": false, \"longRunning\": false, \"privileged\": false},\n    {\"id\": \"publish_changes\", \"label\": \"Push to Production\", \"input\": {}, \"output\": {}, \"effect\": \"release\", \"failure\": {}, \"safe\": false, \"mutating\": true, \"longRunning\": true, \"privileged\": true}\n  ],\n  \"state\": {\n    \"snapshotSchema\": \"deployments-state/v1\",\n    \"roots\": [{\"id\": \"headquarters-workspace\", \"kind\": \"xdg-state\"}]\n  }\n}".to_string()
     }
 }

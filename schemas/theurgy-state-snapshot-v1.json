@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wizardry.app/schemas/theurgy-state-snapshot-v1.json",
+  "title": "Theurgy State Snapshot v1",
+  "type": "object",
+  "required": ["schema", "app", "generatedAt", "data"],
+  "properties": {
+    "schema": { "const": "theurgy-state-snapshot/v1" },
+    "app": { "type": "string", "minLength": 1 },
+    "generatedAt": { "type": "string", "minLength": 1 },
+    "data": { "type": "object" }
+  },
+  "additionalProperties": true
+}

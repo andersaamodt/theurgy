@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wizardry.app/schemas/theurgy-runtime-manifest-v1.json",
+  "title": "Theurgy Runtime Manifest v1",
+  "type": "object",
+  "required": ["version", "app", "productIr", "runtime"],
+  "properties": {
+    "version": { "const": "theurgy-runtime-manifest/v1" },
+    "app": { "type": "string", "minLength": 1 },
+    "productIr": { "type": "string", "minLength": 1 },
+    "runtime": {
+      "type": "object",
+      "required": ["stateCommand", "actionCommand"],
+      "properties": {
+        "stateCommand": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "actionCommand": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

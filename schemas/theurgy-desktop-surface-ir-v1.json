@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wizardry.app/schemas/theurgy-desktop-surface-ir-v1.json",
+  "title": "Theurgy Desktop Surface IR v1",
+  "type": "object",
+  "required": ["version", "format", "product", "target", "window"],
+  "properties": {
+    "version": { "const": "theurgy-desktop-surface-ir/v1" },
+    "format": { "const": "json" },
+    "product": { "type": "string", "minLength": 1 },
+    "target": { "enum": ["macos", "linux"] },
+    "window": { "$ref": "#/$defs/node" },
+    "actions": { "type": "array", "items": { "type": "string" } }
+  },
+  "$defs": {
+    "node": {
+      "type": "object",
+      "required": ["id", "type"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": {
+          "enum": ["Window", "MenuBar", "Toolbar", "SplitPane", "TreeList", "Detail", "DetailDrawer", "StatusBar", "ActionMenu", "ProgressModal", "Modal", "Text", "Button", "Toggle", "ToggleGroup"]
+        },
+        "role": { "type": "string" },
+        "children": { "type": "array", "items": { "$ref": "#/$defs/node" } },
+        "child": { "$ref": "#/$defs/node" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

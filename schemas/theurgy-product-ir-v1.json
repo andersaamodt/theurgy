@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wizardry.app/schemas/theurgy-product-ir-v1.json",
+  "title": "Theurgy Product IR v1",
+  "type": "object",
+  "required": ["version", "format", "app", "actions", "state"],
+  "properties": {
+    "version": { "const": "theurgy-product-ir/v1" },
+    "format": { "const": "json" },
+    "app": {
+      "type": "object",
+      "required": ["id", "name", "targets"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "name": { "type": "string", "minLength": 1 },
+        "targets": {
+          "type": "array",
+          "items": { "enum": ["macos", "linux", "ios", "android"] },
+          "uniqueItems": true,
+          "minItems": 1
+        },
+        "capabilities": { "type": "array", "items": { "type": "string" } },
+        "permissions": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    },
+    "domain": {
+      "type": "object",
+      "properties": {
+        "objects": { "type": "array", "items": { "type": "object" } }
+      },
+      "additionalProperties": true
+    },
+    "actions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/action" },
+      "minItems": 1
+    },
+    "state": {
+      "type": "object",
+      "required": ["snapshotSchema"],
+      "properties": {
+        "snapshotSchema": { "type": "string", "minLength": 1 },
+        "roots": { "type": "array", "items": { "type": "object" } }
+      },
+      "additionalProperties": true
+    },
+    "persistence": { "type": "object", "additionalProperties": true },
+    "backgroundJobs": { "type": "array", "items": { "type": "object" } },
+    "audit": { "type": "object", "additionalProperties": true },
+    "surfaces": { "type": "object", "additionalProperties": true }
+  },
+  "$defs": {
+    "action": {
+      "type": "object",
+      "required": ["id", "label", "input", "output", "effect", "failure", "safe", "mutating", "longRunning", "privileged"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
+        "label": { "type": "string", "minLength": 1 },
+        "input": { "type": "object" },
+        "output": { "type": "object" },
+        "effect": { "enum": ["read", "write", "background", "external", "release"] },
+        "failure": { "type": "object" },
+        "safe": { "type": "boolean" },
+        "mutating": { "type": "boolean" },
+        "longRunning": { "type": "boolean" },
+        "privileged": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

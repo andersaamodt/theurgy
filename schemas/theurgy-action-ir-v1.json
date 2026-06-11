@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wizardry.app/schemas/theurgy-action-ir-v1.json",
+  "title": "Theurgy Action IR v1",
+  "type": "object",
+  "required": ["version", "actions"],
+  "properties": {
+    "version": { "const": "theurgy-action-ir/v1" },
+    "actions": {
+      "type": "array",
+      "items": { "type": "object" },
+      "minItems": 1
+    }
+  },
+  "additionalProperties": true
+}

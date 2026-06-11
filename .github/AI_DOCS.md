@@ -14,6 +14,7 @@
 - Theurgy extends wizardry; it does not replace wizardry.
 - Use Rust for integrated runtime work that would otherwise fan out through many shell processes.
 - The enterprise web runtime harness integrates existing free software components through explicit Wizardry contracts; do not introduce a full static-site generator or CMS as the Gazeta/Desk-class runtime core.
+- The Product IR/native compiler track is opt-in; do not make existing shell-first wizardry-apps require theurgy to build or run.
 - Keep plain files as durable truth unless a documented transaction or scale requirement justifies more.
 - Keep Wizardry-facing names lowercase unless quoting a formal project name.
 - Generated blank projects use AGPL-3.0-or-later plus Wizardry Addendum.
