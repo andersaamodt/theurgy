@@ -1335,38 +1335,9 @@ fn validate_runtime_action_params(
     params: &str,
     contracts: &[ActionContract],
 ) -> Result<()> {
-    let Some(contract) = contracts.iter().find(|contract| contract.id == action_id) else {
-        return Err(TheurgyError::new(format!(
-            "runtime action not declared in Product IR: {action_id}"
-        ))
-        .into());
-    };
-    let value = parse_json(params)?;
-    let Some(object) = value.as_object() else {
-        return Err(TheurgyError::new(format!(
-            "runtime action params must be a JSON object for Product IR action: {action_id}"
-        ))
-        .into());
-    };
-    for key in object.keys() {
-        if !contract
-            .input_keys
-            .iter()
-            .any(|declared_key| declared_key == key)
-        {
-            return Err(TheurgyError::new(format!(
-                "runtime action param not declared in Product IR input for {action_id}: {key}"
-            ))
-            .into());
-        }
-    }
-    validate_shape_object(
-        &contract.input_shape,
-        object,
-        "runtime action param",
-        action_id,
-    )?;
-    Ok(())
+    let contracts = product_action_contracts_from_cli(contracts);
+    product_runtime::validate_runtime_action_params_text(action_id, params, &contracts)
+        .map_err(Into::into)
 }
 
 fn validate_runtime_action_result_keys(
@@ -1374,37 +1345,9 @@ fn validate_runtime_action_result_keys(
     result: &Value,
     contracts: &[ActionContract],
 ) -> Result<()> {
-    let Some(contract) = contracts.iter().find(|contract| contract.id == action_id) else {
-        return Err(TheurgyError::new(format!(
-            "runtime action not declared in Product IR: {action_id}"
-        ))
-        .into());
-    };
-    let Some(object) = result.get("result").and_then(Value::as_object) else {
-        return Err(TheurgyError::new(format!(
-            "runtime action result must be a JSON object for Product IR action: {action_id}"
-        ))
-        .into());
-    };
-    for key in object.keys() {
-        if !contract
-            .output_keys
-            .iter()
-            .any(|declared_key| declared_key == key)
-        {
-            return Err(TheurgyError::new(format!(
-                "runtime action result key not declared in Product IR output for {action_id}: {key}"
-            ))
-            .into());
-        }
-    }
-    validate_shape_object(
-        &contract.output_shape,
-        object,
-        "runtime action result",
-        action_id,
-    )?;
-    Ok(())
+    let contracts = product_action_contracts_from_cli(contracts);
+    product_runtime::validate_runtime_action_result_contract_value(action_id, result, &contracts)
+        .map_err(Into::into)
 }
 
 fn validate_runtime_action_operation_contract(
@@ -1412,20 +1355,13 @@ fn validate_runtime_action_operation_contract(
     actual_long_running: bool,
     contracts: &[ActionContract],
 ) -> Result<()> {
-    let Some(contract) = contracts.iter().find(|contract| contract.id == action_id) else {
-        return Err(TheurgyError::new(format!(
-            "runtime action not declared in Product IR: {action_id}"
-        ))
-        .into());
-    };
-    if actual_long_running != contract.long_running {
-        return Err(TheurgyError::new(format!(
-            "runtime action operation.longRunning mismatch for {action_id}: expected {}, got {}",
-            contract.long_running, actual_long_running
-        ))
-        .into());
-    }
-    Ok(())
+    let contracts = product_action_contracts_from_cli(contracts);
+    product_runtime::validate_runtime_action_operation_contract(
+        action_id,
+        actual_long_running,
+        &contracts,
+    )
+    .map_err(Into::into)
 }
 
 fn validate_runtime_action_failure_keys(
@@ -1433,91 +1369,9 @@ fn validate_runtime_action_failure_keys(
     output: &str,
     contracts: &[ActionContract],
 ) -> Result<()> {
-    let Ok(value) = parse_json(output) else {
-        return Ok(());
-    };
-    if value.get("success").and_then(Value::as_bool) != Some(false) {
-        return Ok(());
-    }
-    let Some(contract) = contracts.iter().find(|contract| contract.id == action_id) else {
-        return Err(TheurgyError::new(format!(
-            "runtime action not declared in Product IR: {action_id}"
-        ))
-        .into());
-    };
-    let Some(object) = value.as_object() else {
-        return Ok(());
-    };
-    for key in object.keys().filter(|key| key.as_str() != "success") {
-        if !contract
-            .failure_keys
-            .iter()
-            .any(|declared_key| declared_key == key)
-        {
-            return Err(TheurgyError::new(format!(
-                "runtime action failure key not declared in Product IR failure for {action_id}: {key}"
-            ))
-            .into());
-        }
-    }
-    let failure_object = object
-        .iter()
-        .filter(|(key, _)| key.as_str() != "success")
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect::<serde_json::Map<_, _>>();
-    validate_shape_object(
-        &contract.failure_shape,
-        &failure_object,
-        "runtime action failure",
-        action_id,
-    )?;
-    Ok(())
-}
-
-fn validate_shape_object(
-    shape: &BTreeMap<String, String>,
-    object: &serde_json::Map<String, Value>,
-    label: &str,
-    action_id: &str,
-) -> Result<()> {
-    for (key, descriptor) in shape {
-        if descriptor.ends_with('?') && !object.contains_key(key) {
-            continue;
-        }
-        let Some(value) = object.get(key) else {
-            continue;
-        };
-        if !value_matches_shape(value, descriptor) {
-            return Err(TheurgyError::new(format!(
-                "{label} type mismatch for {action_id}.{key}: expected {descriptor}"
-            ))
-            .into());
-        }
-    }
-    Ok(())
-}
-
-fn value_matches_shape(value: &Value, descriptor: &str) -> bool {
-    if value.is_null() {
-        return descriptor.ends_with('?');
-    }
-    let required = descriptor.strip_suffix('?').unwrap_or(descriptor);
-    if required.contains('|') {
-        return value
-            .as_str()
-            .map(|actual| required.split('|').any(|variant| variant == actual))
-            .unwrap_or(false);
-    }
-    match required {
-        "string" => value.is_string(),
-        "boolean" => value.is_boolean(),
-        "number" => value.is_number(),
-        "integer" => value.as_i64().is_some() || value.as_u64().is_some(),
-        "array" => value.is_array(),
-        "object" => value.is_object(),
-        "json" => true,
-        _ => false,
-    }
+    let contracts = product_action_contracts_from_cli(contracts);
+    product_runtime::validate_runtime_action_failure_contract_text(action_id, output, &contracts)
+        .map_err(Into::into)
 }
 
 fn structured_failure_message(output: &str) -> Option<String> {
@@ -2034,6 +1888,30 @@ fn action_contract_from_library(
         output_shape: contract.output_shape,
         failure_shape: contract.failure_shape,
     }
+}
+
+fn product_action_contracts_from_cli(
+    contracts: &[ActionContract],
+) -> Vec<product_runtime::ProductActionContract> {
+    contracts
+        .iter()
+        .map(|contract| product_runtime::ProductActionContract {
+            id: contract.id.clone(),
+            label: contract.label.clone(),
+            effect: contract.effect.clone(),
+            safe: contract.safe,
+            mutating: contract.mutating,
+            long_running: contract.long_running,
+            privileged: contract.privileged,
+            command: contract.command.clone(),
+            input_keys: contract.input_keys.clone(),
+            output_keys: contract.output_keys.clone(),
+            failure_keys: contract.failure_keys.clone(),
+            input_shape: contract.input_shape.clone(),
+            output_shape: contract.output_shape.clone(),
+            failure_shape: contract.failure_shape.clone(),
+        })
+        .collect()
 }
 
 fn validate_runtime_manifest_value(value: &Value) -> Result<RuntimeManifestSummary> {

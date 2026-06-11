@@ -312,6 +312,138 @@ pub mod product_runtime {
         })
     }
 
+    pub fn validate_runtime_action_params_text(
+        action_id: &str,
+        params: &str,
+        contracts: &[ProductActionContract],
+    ) -> ContractResult<()> {
+        let value: Value = serde_json::from_str(params)
+            .map_err(|error| ContractError::new(format!("invalid JSON: {error}")))?;
+        validate_runtime_action_params_value(action_id, &value, contracts)
+    }
+
+    pub fn validate_runtime_action_params_value(
+        action_id: &str,
+        params: &Value,
+        contracts: &[ProductActionContract],
+    ) -> ContractResult<()> {
+        let contract = runtime_action_contract(action_id, contracts)?;
+        let Some(object) = params.as_object() else {
+            return Err(ContractError::new(format!(
+                "runtime action params must be a JSON object for Product IR action: {action_id}"
+            )));
+        };
+        for key in object.keys() {
+            if !contract
+                .input_keys
+                .iter()
+                .any(|declared_key| declared_key == key)
+            {
+                return Err(ContractError::new(format!(
+                    "runtime action param not declared in Product IR input for {action_id}: {key}"
+                )));
+            }
+        }
+        validate_shape_object(
+            &contract.input_shape,
+            object,
+            "runtime action param",
+            action_id,
+        )
+    }
+
+    pub fn validate_runtime_action_result_contract_value(
+        action_id: &str,
+        result: &Value,
+        contracts: &[ProductActionContract],
+    ) -> ContractResult<()> {
+        let contract = runtime_action_contract(action_id, contracts)?;
+        let Some(object) = result.get("result").and_then(Value::as_object) else {
+            return Err(ContractError::new(format!(
+                "runtime action result must be a JSON object for Product IR action: {action_id}"
+            )));
+        };
+        for key in object.keys() {
+            if !contract
+                .output_keys
+                .iter()
+                .any(|declared_key| declared_key == key)
+            {
+                return Err(ContractError::new(format!(
+                    "runtime action result key not declared in Product IR output for {action_id}: {key}"
+                )));
+            }
+        }
+        validate_shape_object(
+            &contract.output_shape,
+            object,
+            "runtime action result",
+            action_id,
+        )
+    }
+
+    pub fn validate_runtime_action_operation_contract(
+        action_id: &str,
+        actual_long_running: bool,
+        contracts: &[ProductActionContract],
+    ) -> ContractResult<()> {
+        let contract = runtime_action_contract(action_id, contracts)?;
+        if actual_long_running != contract.long_running {
+            return Err(ContractError::new(format!(
+                "runtime action operation.longRunning mismatch for {action_id}: expected {}, got {}",
+                contract.long_running, actual_long_running
+            )));
+        }
+        Ok(())
+    }
+
+    pub fn validate_runtime_action_failure_contract_text(
+        action_id: &str,
+        output: &str,
+        contracts: &[ProductActionContract],
+    ) -> ContractResult<()> {
+        let Ok(value) = serde_json::from_str::<Value>(output) else {
+            return Ok(());
+        };
+        validate_runtime_action_failure_contract_value(action_id, &value, contracts)
+    }
+
+    pub fn validate_runtime_action_failure_contract_value(
+        action_id: &str,
+        output: &Value,
+        contracts: &[ProductActionContract],
+    ) -> ContractResult<()> {
+        if output.get("success").and_then(Value::as_bool) != Some(false) {
+            return Ok(());
+        }
+        let contract = runtime_action_contract(action_id, contracts)?;
+        let Some(object) = output.as_object() else {
+            return Ok(());
+        };
+        for key in object.keys().filter(|key| key.as_str() != "success") {
+            if !contract
+                .failure_keys
+                .iter()
+                .any(|declared_key| declared_key == key)
+            {
+                return Err(ContractError::new(format!(
+                    "runtime action failure key not declared in Product IR failure for {action_id}: {key}"
+                )));
+            }
+        }
+        let failure_object = object
+            .iter()
+            .filter(|(key, _)| key.as_str() != "success")
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect::<serde_json::Map<_, _>>();
+        validate_shape_object(
+            &contract.failure_shape,
+            &failure_object,
+            "runtime action failure",
+            action_id,
+        )
+    }
+
     pub fn validate_operation_status_value(value: &Value) -> ContractResult<OperationStatus> {
         expect_value_string(value, "schema", OPERATION_STATUS_SCHEMA)?;
         let app_id = value_string(value, "app")
@@ -1059,6 +1191,65 @@ pub mod product_runtime {
             .and_then(Value::as_bool)
             .ok_or_else(|| ContractError::new("runtime operation.longRunning boolean required"))?;
         Ok((id, long_running))
+    }
+
+    fn runtime_action_contract<'a>(
+        action_id: &str,
+        contracts: &'a [ProductActionContract],
+    ) -> ContractResult<&'a ProductActionContract> {
+        contracts
+            .iter()
+            .find(|contract| contract.id == action_id)
+            .ok_or_else(|| {
+                ContractError::new(format!(
+                    "runtime action not declared in Product IR: {action_id}"
+                ))
+            })
+    }
+
+    fn validate_shape_object(
+        shape: &BTreeMap<String, String>,
+        object: &serde_json::Map<String, Value>,
+        label: &str,
+        action_id: &str,
+    ) -> ContractResult<()> {
+        for (key, descriptor) in shape {
+            if descriptor.ends_with('?') && !object.contains_key(key) {
+                continue;
+            }
+            let Some(value) = object.get(key) else {
+                continue;
+            };
+            if !value_matches_shape(value, descriptor) {
+                return Err(ContractError::new(format!(
+                    "{label} type mismatch for {action_id}.{key}: expected {descriptor}"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn value_matches_shape(value: &Value, descriptor: &str) -> bool {
+        if value.is_null() {
+            return descriptor.ends_with('?');
+        }
+        let required = descriptor.strip_suffix('?').unwrap_or(descriptor);
+        if required.contains('|') {
+            return value
+                .as_str()
+                .map(|actual| required.split('|').any(|variant| variant == actual))
+                .unwrap_or(false);
+        }
+        match required {
+            "string" => value.is_string(),
+            "boolean" => value.is_boolean(),
+            "number" => value.is_number(),
+            "integer" => value.as_i64().is_some() || value.as_u64().is_some(),
+            "array" => value.is_array(),
+            "object" => value.is_object(),
+            "json" => true,
+            _ => false,
+        }
     }
 
     fn expect_value_string(value: &Value, key: &str, expected: &str) -> ContractResult<()> {
@@ -2271,6 +2462,82 @@ mod tests {
         assert_eq!(
             error,
             "generated runtime adapterRuntimeTransport must match target family"
+        );
+    }
+
+    #[test]
+    fn product_runtime_validates_runtime_action_contract_payloads() {
+        let contract = product_runtime::ProductActionContract {
+            id: "publish_changes".to_string(),
+            label: "Push to Production".to_string(),
+            effect: "release".to_string(),
+            safe: false,
+            mutating: true,
+            long_running: true,
+            privileged: true,
+            command: Vec::new(),
+            input_keys: vec!["deployment".to_string()],
+            output_keys: vec!["params".to_string()],
+            failure_keys: vec!["error".to_string()],
+            input_shape: [("deployment".to_string(), "string".to_string())]
+                .into_iter()
+                .collect(),
+            output_shape: [("params".to_string(), "object".to_string())]
+                .into_iter()
+                .collect(),
+            failure_shape: [("error".to_string(), "string".to_string())]
+                .into_iter()
+                .collect(),
+        };
+        let contracts = vec![contract];
+
+        product_runtime::validate_runtime_action_params_text(
+            "publish_changes",
+            "{\"deployment\":\"site-one\"}",
+            &contracts,
+        )
+        .unwrap();
+        product_runtime::validate_runtime_action_operation_contract(
+            "publish_changes",
+            true,
+            &contracts,
+        )
+        .unwrap();
+        product_runtime::validate_runtime_action_result_contract_value(
+            "publish_changes",
+            &serde_json::json!({"result": {"params": {}}}),
+            &contracts,
+        )
+        .unwrap();
+        product_runtime::validate_runtime_action_failure_contract_text(
+            "publish_changes",
+            "{\"success\":false,\"error\":\"failed\"}",
+            &contracts,
+        )
+        .unwrap();
+
+        let error = product_runtime::validate_runtime_action_params_text(
+            "publish_changes",
+            "{\"deployment\":false}",
+            &contracts,
+        )
+        .unwrap_err()
+        .to_string();
+        assert_eq!(
+            error,
+            "runtime action param type mismatch for publish_changes.deployment: expected string"
+        );
+
+        let error = product_runtime::validate_runtime_action_failure_contract_text(
+            "publish_changes",
+            "{\"success\":false,\"error\":false}",
+            &contracts,
+        )
+        .unwrap_err()
+        .to_string();
+        assert_eq!(
+            error,
+            "runtime action failure type mismatch for publish_changes.error: expected string"
         );
     }
 }
