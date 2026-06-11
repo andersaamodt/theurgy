@@ -283,6 +283,18 @@ fn command_validate_runtime_manifest(args: &[String]) -> Result<()> {
     println!("app={}", summary.app_id);
     println!("product_ir={}", summary.product_ir);
     println!("protocol={}", summary.protocol);
+    println!(
+        "compatibility_wizardry_apps_shell_first={}",
+        summary
+            .compatibility
+            .wizardry_apps_shell_first_still_supported
+    );
+    println!(
+        "compatibility_theurgy_required_for_legacy_wizardry_apps={}",
+        summary
+            .compatibility
+            .theurgy_required_for_legacy_wizardry_apps
+    );
     if let Some(path) = summary.desktop_surface_ir {
         println!("desktop_surface_ir={path}");
     }
@@ -1614,6 +1626,7 @@ struct RuntimeManifestSummary {
     mobile_surface_ir: Option<String>,
     legacy_native_desktop_ir: Option<String>,
     protocol: String,
+    compatibility: RuntimeCompatibility,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -1647,6 +1660,7 @@ struct RuntimeContract {
     runtime_manifest: String,
     source_surface_ir: String,
     legacy_native_desktop_ir: Option<String>,
+    compatibility: RuntimeCompatibility,
     state_command: Vec<String>,
     status_command: Vec<String>,
     subscribe_status_command: Vec<String>,
@@ -1656,6 +1670,21 @@ struct RuntimeContract {
     daemon_command: Vec<String>,
     product_action_ids: Option<Vec<String>>,
     product_action_contracts: Option<Vec<ActionContract>>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RuntimeCompatibility {
+    wizardry_apps_shell_first_still_supported: bool,
+    theurgy_required_for_legacy_wizardry_apps: bool,
+}
+
+impl RuntimeCompatibility {
+    fn shell_first_default() -> Self {
+        Self {
+            wizardry_apps_shell_first_still_supported: true,
+            theurgy_required_for_legacy_wizardry_apps: false,
+        }
+    }
 }
 
 impl RuntimeContract {
@@ -1721,6 +1750,16 @@ fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
         "legacyNativeDesktopIr",
         "generated runtime legacyNativeDesktopIr",
     )?;
+    value_bool(&value, "compatibilityWizardryAppsShellFirstStillSupported").ok_or_else(|| {
+        TheurgyError::new(
+            "generated runtime compatibilityWizardryAppsShellFirstStillSupported boolean required",
+        )
+    })?;
+    value_bool(&value, "compatibilityTheurgyRequiredForLegacyWizardryApps").ok_or_else(|| {
+        TheurgyError::new(
+            "generated runtime compatibilityTheurgyRequiredForLegacyWizardryApps boolean required",
+        )
+    })?;
     let state_snapshot_schema = value_string(&value, "productStateSnapshotSchema")
         .filter(|schema| !schema.is_empty())
         .ok_or_else(|| {
@@ -1917,6 +1956,7 @@ fn runtime_contract_from_manifest(text: &str) -> Result<RuntimeContract> {
         runtime_manifest: "theurgy-runtime.manifest.json".to_string(),
         source_surface_ir: "theurgy-surface.json".to_string(),
         legacy_native_desktop_ir: summary.legacy_native_desktop_ir,
+        compatibility: summary.compatibility,
         state_command: value_string_array(runtime, "stateCommand")?,
         status_command: value_string_array(runtime, "statusCommand").unwrap_or_default(),
         subscribe_status_command: optional_string_array(
@@ -2207,7 +2247,7 @@ fn validate_runtime_manifest_value(value: &Value) -> Result<RuntimeManifestSumma
         .ok_or_else(|| TheurgyError::new("runtime manifest productIr required"))?;
     let (desktop_surface_ir, mobile_surface_ir, legacy_native_desktop_ir) =
         runtime_manifest_surface_paths(value)?;
-    validate_runtime_manifest_compatibility(value)?;
+    let compatibility = validate_runtime_manifest_compatibility(value)?;
     let runtime = value_object(value, "runtime")?;
     let state_command = value_string_array(runtime, "stateCommand")?;
     let action_command = value_string_array(runtime, "actionCommand")?;
@@ -2244,6 +2284,7 @@ fn validate_runtime_manifest_value(value: &Value) -> Result<RuntimeManifestSumma
         mobile_surface_ir,
         legacy_native_desktop_ir,
         protocol,
+        compatibility,
     })
 }
 
@@ -2267,26 +2308,28 @@ fn runtime_manifest_surface_paths(
     ))
 }
 
-fn validate_runtime_manifest_compatibility(value: &Value) -> Result<()> {
+fn validate_runtime_manifest_compatibility(value: &Value) -> Result<RuntimeCompatibility> {
     let Some(compatibility) = value.get("compatibility") else {
-        return Ok(());
+        return Ok(RuntimeCompatibility::shell_first_default());
     };
     let compatibility = compatibility
         .as_object()
         .ok_or_else(|| TheurgyError::new("runtime manifest compatibility must be an object"))?;
-    for key in [
-        "wizardryAppsShellFirstStillSupported",
-        "theurgyRequiredForLegacyWizardryApps",
-    ] {
-        if let Some(value) = compatibility.get(key) {
-            value.as_bool().ok_or_else(|| {
-                TheurgyError::new(format!(
-                    "runtime manifest compatibility.{key} must be boolean"
-                ))
-            })?;
-        }
-    }
-    Ok(())
+    let defaults = RuntimeCompatibility::shell_first_default();
+    Ok(RuntimeCompatibility {
+        wizardry_apps_shell_first_still_supported: optional_object_bool(
+            compatibility,
+            "wizardryAppsShellFirstStillSupported",
+            "runtime manifest compatibility.wizardryAppsShellFirstStillSupported",
+        )?
+        .unwrap_or(defaults.wizardry_apps_shell_first_still_supported),
+        theurgy_required_for_legacy_wizardry_apps: optional_object_bool(
+            compatibility,
+            "theurgyRequiredForLegacyWizardryApps",
+            "runtime manifest compatibility.theurgyRequiredForLegacyWizardryApps",
+        )?
+        .unwrap_or(defaults.theurgy_required_for_legacy_wizardry_apps),
+    })
 }
 
 fn product_surface_paths(value: &Value) -> Result<(Option<String>, Option<String>)> {
@@ -2505,6 +2548,21 @@ fn value_string(value: &Value, key: &str) -> Option<String> {
 
 fn value_bool(value: &Value, key: &str) -> Option<bool> {
     value.get(key)?.as_bool()
+}
+
+fn optional_object_bool(
+    object: &serde_json::Map<String, Value>,
+    key: &str,
+    label: &str,
+) -> Result<Option<bool>> {
+    object
+        .get(key)
+        .map(|value| {
+            value
+                .as_bool()
+                .ok_or_else(|| TheurgyError::new(format!("{label} must be boolean")).into())
+        })
+        .transpose()
 }
 
 fn value_object<'a>(value: &'a Value, key: &str) -> Result<&'a Value> {
@@ -3065,6 +3123,7 @@ fn compile_native(product: &str, target: &str, out_dir: &Path) -> Result<()> {
         runtime_manifest: "generated-runtime-manifest".to_string(),
         source_surface_ir: "projected-surface-ir".to_string(),
         legacy_native_desktop_ir: None,
+        compatibility: RuntimeCompatibility::shell_first_default(),
         state_command: vec![
             format!("{}-core", summary.app_id),
             "runtime-state".to_string(),
@@ -3205,6 +3264,22 @@ fn generated_runtime_metadata(
             Value::String(legacy_native_desktop_ir.clone()),
         );
     }
+    object.insert(
+        "compatibilityWizardryAppsShellFirstStillSupported".to_string(),
+        Value::Bool(
+            runtime
+                .compatibility
+                .wizardry_apps_shell_first_still_supported,
+        ),
+    );
+    object.insert(
+        "compatibilityTheurgyRequiredForLegacyWizardryApps".to_string(),
+        Value::Bool(
+            runtime
+                .compatibility
+                .theurgy_required_for_legacy_wizardry_apps,
+        ),
+    );
     object.insert(
         "productTargets".to_string(),
         string_vec_value(&summary.targets),
@@ -5130,6 +5205,12 @@ mod tests {
         assert!(top_level_required
             .iter()
             .any(|value| value.as_str() == Some("sourceSurfaceIr")));
+        assert!(top_level_required.iter().any(|value| {
+            value.as_str() == Some("compatibilityWizardryAppsShellFirstStillSupported")
+        }));
+        assert!(top_level_required.iter().any(|value| {
+            value.as_str() == Some("compatibilityTheurgyRequiredForLegacyWizardryApps")
+        }));
         assert!(top_level_required
             .iter()
             .any(|value| value.as_str() == Some("productStateSnapshotSchema")));
@@ -5147,6 +5228,18 @@ mod tests {
                 .pointer("/properties/legacyNativeDesktopIr/minLength")
                 .and_then(Value::as_i64),
             Some(1)
+        );
+        assert_eq!(
+            schema
+                .pointer("/properties/compatibilityWizardryAppsShellFirstStillSupported/type")
+                .and_then(Value::as_str),
+            Some("boolean")
+        );
+        assert_eq!(
+            schema
+                .pointer("/properties/compatibilityTheurgyRequiredForLegacyWizardryApps/type")
+                .and_then(Value::as_str),
+            Some("boolean")
         );
         assert_eq!(
             schema
@@ -5707,6 +5800,18 @@ mod tests {
                 .and_then(Value::as_str),
             Some("file-first")
         );
+        assert_eq!(
+            runtime_json
+                .get("compatibilityWizardryAppsShellFirstStillSupported")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            runtime_json
+                .get("compatibilityTheurgyRequiredForLegacyWizardryApps")
+                .and_then(Value::as_bool),
+            Some(false)
+        );
         assert_eq!(generated.actions, 2);
         assert_eq!(generated.product_actions, 2);
         assert_eq!(generated.surface_actions, 2);
@@ -5878,6 +5983,14 @@ mod tests {
             (
                 "productPersistenceTruth",
                 "productPersistenceTruth required",
+            ),
+            (
+                "compatibilityWizardryAppsShellFirstStillSupported",
+                "compatibilityWizardryAppsShellFirstStillSupported boolean required",
+            ),
+            (
+                "compatibilityTheurgyRequiredForLegacyWizardryApps",
+                "compatibilityTheurgyRequiredForLegacyWizardryApps boolean required",
             ),
         ] {
             let root = test_root(&format!("generated-runtime-source-{key}"));
@@ -6080,6 +6193,18 @@ mod tests {
                 .get("legacyNativeDesktopIr")
                 .and_then(Value::as_str),
             Some("app-blueprint/app.ir.yaml")
+        );
+        assert_eq!(
+            runtime_json
+                .get("compatibilityWizardryAppsShellFirstStillSupported")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            runtime_json
+                .get("compatibilityTheurgyRequiredForLegacyWizardryApps")
+                .and_then(Value::as_bool),
+            Some(false)
         );
         assert_eq!(
             runtime_json.get("statusCommand").unwrap(),
@@ -6733,6 +6858,7 @@ mod tests {
             runtime_manifest: "app-blueprint/runtime.manifest.json".to_string(),
             source_surface_ir: "app-blueprint/desktop.surface.ir.json".to_string(),
             legacy_native_desktop_ir: Some("app-blueprint/app.ir.yaml".to_string()),
+            compatibility: RuntimeCompatibility::shell_first_default(),
             state_command: vec!["deployments-core".to_string(), "runtime-state".to_string()],
             status_command: vec!["deployments-core".to_string(), "runtime-status".to_string()],
             subscribe_status_command: vec![
