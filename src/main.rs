@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde_json::Value;
+use theurgy::product_runtime;
 
 const AGPL_NOTICE: &str = "GNU AGPL-3.0-or-later\n";
 const WIZARDRY_ADDENDUM: &str = "Wizardry Addendum 1.0\n\nAdditional terms under GNU AGPL version 3,\nsection 7, apply to this project.\n\n1. No permission is granted to use the names\n\"Wizardry\" or \"Open Wizardry\", or any project\ntrade names, trademarks, or service marks,\nexcept for reasonable descriptive reference.\n\n2. Those names may not be used in advertising,\npublicity, product naming, or public statements\nin any way that misrepresents the origin of the\nsoftware or implies endorsement, sponsorship,\nofficial status, or association.\n\n3. Modified versions and derivative works must\nnot present themselves as the original Wizardry\nproject or as officially associated with it.\n\n4. Truthful descriptive references are allowed,\nincluding statements that a work was generated\nwith, built with, or adapted from Wizardry,\nprovided those statements do not imply\nendorsement, sponsorship, official status,\nor association.\n";
@@ -242,7 +243,7 @@ fn command_validate_runtime_action_result(args: &[String]) -> Result<()> {
     let value = read_json(Path::new(&args[0]))?;
     let summary = validate_runtime_action_result(&value)?;
     println!("status=ok");
-    println!("protocol=theurgy-runtime-action/v1");
+    println!("protocol={}", product_runtime::RUNTIME_ACTION_PROTOCOL);
     println!("app={}", summary.app_id);
     println!("action={}", summary.action_id);
     println!("operation={}", summary.operation_id);
@@ -292,7 +293,7 @@ fn command_validate_runtime_action_request(args: &[String]) -> Result<()> {
         validate_runtime_action_request_against_runtime(&summary, &parsed, &runtime)?;
     }
     println!("status=ok");
-    println!("protocol=theurgy-runtime-action/v1");
+    println!("protocol={}", product_runtime::RUNTIME_ACTION_PROTOCOL);
     println!("app={}", summary.app_id);
     println!("action={}", summary.action_id);
     Ok(())
@@ -1191,7 +1192,8 @@ fn run_action_output(
         return run_manifest_action(&runtime, action_id, params);
     }
     Ok(format!(
-        "{{\n  \"success\": true,\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"theurgy-runtime\",\n  \"action\": \"{}\",\n  \"operation\": {{\n    \"id\": \"op-{}\",\n    \"status\": \"accepted\",\n    \"progress\": 0,\n    \"longRunning\": false\n  }},\n  \"params\": {}\n}}",
+        "{{\n  \"success\": true,\n  \"protocol\": \"{}\",\n  \"app\": \"theurgy-runtime\",\n  \"action\": \"{}\",\n  \"operation\": {{\n    \"id\": \"op-{}\",\n    \"status\": \"accepted\",\n    \"progress\": 0,\n    \"longRunning\": false\n  }},\n  \"params\": {}\n}}",
+        product_runtime::RUNTIME_ACTION_PROTOCOL,
         json_escape(action_id),
         json_escape(action_id),
         params
@@ -1814,7 +1816,7 @@ fn validate_runtime_manifest(text: &str) -> Result<RuntimeManifestSummary> {
 
 fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
     let value = parse_json(text)?;
-    expect_value_string(&value, "version", "theurgy-generated-runtime/v1")?;
+    expect_value_string(&value, "version", product_runtime::GENERATED_RUNTIME_SCHEMA)?;
     let app_id = value_string(&value, "app")
         .filter(|id| valid_slug(id))
         .ok_or_else(|| TheurgyError::new("generated runtime app must be a lowercase slug"))?;
@@ -1826,27 +1828,30 @@ fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
     value_string(&value, "protocol")
         .filter(|protocol| !protocol.is_empty())
         .ok_or_else(|| TheurgyError::new("generated runtime protocol required"))?;
-    let runtime_status_schema =
-        expect_and_return_value_string(&value, "runtimeStatusSchema", "theurgy-runtime-status/v1")?;
+    let runtime_status_schema = expect_and_return_value_string(
+        &value,
+        "runtimeStatusSchema",
+        product_runtime::RUNTIME_STATUS_SCHEMA,
+    )?;
     let runtime_action_request_schema = expect_and_return_value_string(
         &value,
         "runtimeActionRequestSchema",
-        "theurgy-runtime-action-request/v1",
+        product_runtime::RUNTIME_ACTION_REQUEST_SCHEMA,
     )?;
     let runtime_action_result_schema = expect_and_return_value_string(
         &value,
         "runtimeActionResultSchema",
-        "theurgy-runtime-action-result/v1",
+        product_runtime::RUNTIME_ACTION_RESULT_SCHEMA,
     )?;
     let operation_status_schema = expect_and_return_value_string(
         &value,
         "operationStatusSchema",
-        "theurgy-operation-status/v1",
+        product_runtime::OPERATION_STATUS_SCHEMA,
     )?;
     let operation_history_schema = expect_and_return_value_string(
         &value,
         "operationHistorySchema",
-        "theurgy-operation-history/v1",
+        product_runtime::OPERATION_HISTORY_SCHEMA,
     )?;
     value_string(&value, "productIr")
         .filter(|path| !path.is_empty())
@@ -1883,8 +1888,8 @@ fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
     let adapter_runtime_transport = value_string(&value, "adapterRuntimeTransport")
         .ok_or_else(|| TheurgyError::new("generated runtime adapterRuntimeTransport required"))?;
     match (target.as_str(), adapter_runtime_transport.as_str()) {
-        ("macos" | "linux", "local-process-json") => {}
-        ("ios" | "android", "external-json-abi") => {}
+        ("macos" | "linux", product_runtime::DESKTOP_ADAPTER_TRANSPORT) => {}
+        ("ios" | "android", product_runtime::MOBILE_ADAPTER_TRANSPORT) => {}
         _ => {
             return Err(TheurgyError::new(
                 "generated runtime adapterRuntimeTransport must match target family",
@@ -2033,15 +2038,12 @@ fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
         .ok_or_else(|| TheurgyError::new("generated runtime surfaceSchema required"))?;
     if !matches!(
         surface_schema.as_str(),
-        "theurgy-desktop-surface-ir/v1" | "theurgy-mobile-surface-ir/v1"
+        product_runtime::DESKTOP_SURFACE_IR_SCHEMA | product_runtime::MOBILE_SURFACE_IR_SCHEMA
     ) {
         return Err(TheurgyError::new("generated runtime surfaceSchema invalid").into());
     }
-    let expected_surface_schema = if matches!(target.as_str(), "macos" | "linux") {
-        "theurgy-desktop-surface-ir/v1"
-    } else {
-        "theurgy-mobile-surface-ir/v1"
-    };
+    let expected_surface_schema = product_runtime::surface_schema_for_target(target.as_str())
+        .ok_or_else(|| TheurgyError::new("generated runtime target invalid"))?;
     if surface_schema != expected_surface_schema {
         return Err(TheurgyError::new("generated runtime surfaceSchema invalid for target").into());
     }
@@ -2115,7 +2117,7 @@ fn validate_surface_ir(text: &str) -> Result<SurfaceSummary> {
         .ok_or_else(|| TheurgyError::new("surface IR version required"))?;
     if !matches!(
         schema.as_str(),
-        "theurgy-desktop-surface-ir/v1" | "theurgy-mobile-surface-ir/v1"
+        product_runtime::DESKTOP_SURFACE_IR_SCHEMA | product_runtime::MOBILE_SURFACE_IR_SCHEMA
     ) {
         return Err(TheurgyError::new("surface IR version invalid").into());
     }
@@ -2128,7 +2130,7 @@ fn validate_surface_ir(text: &str) -> Result<SurfaceSummary> {
         .ok_or_else(|| TheurgyError::new("surface IR target required"))?;
     let action_ids = surface_action_ids(&value)?;
     let mut roles = Vec::new();
-    if schema == "theurgy-desktop-surface-ir/v1" {
+    if schema == product_runtime::DESKTOP_SURFACE_IR_SCHEMA {
         if !matches!(target.as_str(), "desktop" | "macos" | "linux") {
             return Err(TheurgyError::new("desktop surface IR target invalid").into());
         }
@@ -2162,7 +2164,7 @@ fn validate_product_ir(text: &str) -> Result<ProductSummary> {
 
 fn validate_action_ir(text: &str) -> Result<ActionSummary> {
     let value = parse_json(text)?;
-    expect_value_string(&value, "version", "theurgy-action-ir/v1")?;
+    expect_value_string(&value, "version", product_runtime::ACTION_IR_SCHEMA)?;
     let action_values = value_array(&value, "actions")?;
     if action_values.is_empty() {
         return Err(TheurgyError::new("action IR actions required").into());
@@ -2189,7 +2191,7 @@ fn validate_runtime_status(text: &str) -> Result<RuntimeStatusSummary> {
 }
 
 fn validate_state_snapshot_value(value: &Value) -> Result<StateSnapshotSummary> {
-    expect_value_string(value, "schema", "theurgy-state-snapshot/v1")?;
+    expect_value_string(value, "schema", product_runtime::STATE_SNAPSHOT_SCHEMA)?;
     let app_id = value_string(value, "app")
         .filter(|id| valid_slug(id))
         .ok_or_else(|| TheurgyError::new("state snapshot app must be a lowercase slug"))?;
@@ -2201,7 +2203,7 @@ fn validate_state_snapshot_value(value: &Value) -> Result<StateSnapshotSummary> 
 }
 
 fn validate_runtime_status_value(value: &Value) -> Result<RuntimeStatusSummary> {
-    expect_value_string(value, "schema", "theurgy-runtime-status/v1")?;
+    expect_value_string(value, "schema", product_runtime::RUNTIME_STATUS_SCHEMA)?;
     let app_id = value_string(value, "app")
         .filter(|id| valid_slug(id))
         .ok_or_else(|| TheurgyError::new("runtime status app must be a lowercase slug"))?;
@@ -2226,7 +2228,7 @@ fn validate_runtime_action_request(text: &str) -> Result<RuntimeActionRequestSum
 }
 
 fn validate_runtime_action_request_value(value: &Value) -> Result<RuntimeActionRequestSummary> {
-    expect_value_string(value, "protocol", "theurgy-runtime-action/v1")?;
+    expect_value_string(value, "protocol", product_runtime::RUNTIME_ACTION_PROTOCOL)?;
     let app_id = value_string(value, "app")
         .filter(|id| valid_slug(id))
         .ok_or_else(|| TheurgyError::new("runtime action request app must be a lowercase slug"))?;
@@ -2269,7 +2271,7 @@ fn validate_runtime_action_request_against_runtime(
 }
 
 fn validate_runtime_action_result_value(value: &Value) -> Result<RuntimeActionResultSummary> {
-    expect_value_string(value, "protocol", "theurgy-runtime-action/v1")?;
+    expect_value_string(value, "protocol", product_runtime::RUNTIME_ACTION_PROTOCOL)?;
     let app_id = value_string(value, "app")
         .filter(|id| valid_slug(id))
         .ok_or_else(|| TheurgyError::new("runtime action result app must be a lowercase slug"))?;
@@ -2297,7 +2299,7 @@ fn validate_operation_status(text: &str) -> Result<OperationStatusSummary> {
 }
 
 fn validate_operation_status_value(value: &Value) -> Result<OperationStatusSummary> {
-    expect_value_string(value, "schema", "theurgy-operation-status/v1")?;
+    expect_value_string(value, "schema", product_runtime::OPERATION_STATUS_SCHEMA)?;
     let app_id = value_string(value, "app")
         .filter(|id| valid_slug(id))
         .ok_or_else(|| TheurgyError::new("operation status app must be a lowercase slug"))?;
@@ -2319,7 +2321,7 @@ fn validate_operation_history(text: &str) -> Result<OperationHistorySummary> {
 }
 
 fn validate_operation_history_value(value: &Value) -> Result<OperationHistorySummary> {
-    expect_value_string(value, "schema", "theurgy-operation-history/v1")?;
+    expect_value_string(value, "schema", product_runtime::OPERATION_HISTORY_SCHEMA)?;
     let app_id = value_string(value, "app")
         .filter(|id| valid_slug(id))
         .ok_or_else(|| TheurgyError::new("operation history app must be a lowercase slug"))?;
@@ -2334,7 +2336,7 @@ fn validate_operation_history_value(value: &Value) -> Result<OperationHistorySum
 }
 
 fn validate_product_ir_value(value: &Value) -> Result<ProductSummary> {
-    expect_value_string(value, "version", "theurgy-product-ir/v1")?;
+    expect_value_string(value, "version", product_runtime::PRODUCT_IR_SCHEMA)?;
     expect_value_string(value, "format", "json")?;
     let app = value_object(value, "app")?;
     let app_id = value_string(app, "id")
@@ -2418,7 +2420,7 @@ fn validate_product_ir_value(value: &Value) -> Result<ProductSummary> {
 }
 
 fn validate_runtime_manifest_value(value: &Value) -> Result<RuntimeManifestSummary> {
-    expect_value_string(value, "version", "theurgy-runtime-manifest/v1")?;
+    expect_value_string(value, "version", product_runtime::RUNTIME_MANIFEST_SCHEMA)?;
     let app_id = value_string(value, "app")
         .filter(|id| valid_slug(id))
         .ok_or_else(|| TheurgyError::new("runtime manifest app must be a lowercase slug"))?;
@@ -3279,7 +3281,7 @@ fn project_surface(product: &str, target: &str) -> Result<String> {
         );
     }
     let action_ids = json_string_array_literal(&summary.action_ids);
-    if matches!(target, "macos" | "linux") {
+    if product_runtime::is_desktop_target(target) {
         Ok(format!(
             "{{\n  \"version\": \"theurgy-desktop-surface-ir/v1\",\n  \"format\": \"json\",\n  \"product\": \"{}\",\n  \"target\": \"{}\",\n  \"actions\": {},\n  \"window\": {{\n    \"id\": \"window.main\",\n    \"type\": \"Window\",\n    \"title\": \"{}\",\n    \"role\": \"native-product-root\",\n    \"child\": {{\n      \"id\": \"split.main\",\n      \"type\": \"SplitPane\",\n      \"role\": \"left-list-detail\",\n      \"children\": [\n        {{\"id\": \"list.primary\", \"type\": \"TreeList\", \"role\": \"product-navigation\"}},\n        {{\"id\": \"detail.primary\", \"type\": \"Detail\", \"role\": \"product-detail\"}}\n      ]\n    }}\n  }}\n}}",
             json_escape(&summary.app_id),
@@ -3303,7 +3305,7 @@ fn compile_native(product: &str, target: &str, out_dir: &Path) -> Result<()> {
     let surface = project_surface(product, target)?;
     let runtime = RuntimeContract {
         app_id: summary.app_id.clone(),
-        protocol: "theurgy-runtime-action/v1".to_string(),
+        protocol: product_runtime::RUNTIME_ACTION_PROTOCOL.to_string(),
         product_ir: "direct-product-ir".to_string(),
         runtime_manifest: "generated-runtime-manifest".to_string(),
         source_surface_ir: "projected-surface-ir".to_string(),
@@ -3360,16 +3362,10 @@ fn compile_native_with_contract(
     if surface_summary.product != summary.app_id {
         return Err(TheurgyError::new("surface IR product does not match product IR app").into());
     }
-    let expected_surface_target = if matches!(target, "macos" | "linux") {
-        "desktop"
-    } else {
-        "mobile"
-    };
-    let expected_surface_schema = if matches!(target, "macos" | "linux") {
-        "theurgy-desktop-surface-ir/v1"
-    } else {
-        "theurgy-mobile-surface-ir/v1"
-    };
+    let expected_surface_target = product_runtime::surface_family_for_target(target)
+        .ok_or_else(|| TheurgyError::new("unsupported target"))?;
+    let expected_surface_schema = product_runtime::surface_schema_for_target(target)
+        .ok_or_else(|| TheurgyError::new("unsupported target"))?;
     if release_target.surface != expected_surface_target {
         return Err(TheurgyError::new(format!(
             "product IR release target surface for {target} must be {expected_surface_target}"
@@ -3409,7 +3405,7 @@ fn compile_native_with_contract(
     validate_generated_runtime(&runtime_metadata)?;
     write_or_replace(&out_dir.join("theurgy-runtime.json"), &runtime_metadata)?;
     if preserve_existing_legacy_desktop_adapter
-        && matches!(target, "macos" | "linux")
+        && product_runtime::is_desktop_target(target)
         && desktop_adapter_source_exists(target, out_dir)
     {
         return Ok(());
@@ -3444,7 +3440,7 @@ fn generated_runtime_metadata(
     let mut object = serde_json::Map::new();
     object.insert(
         "version".to_string(),
-        Value::String("theurgy-generated-runtime/v1".to_string()),
+        Value::String(product_runtime::GENERATED_RUNTIME_SCHEMA.to_string()),
     );
     object.insert("app".to_string(), Value::String(runtime.app_id.clone()));
     object.insert("target".to_string(), Value::String(target.to_string()));
@@ -3520,7 +3516,7 @@ fn generated_runtime_metadata(
     );
     object.insert(
         "adapterRuntimeTransport".to_string(),
-        Value::String(adapter_runtime_transport(target).to_string()),
+        Value::String(product_runtime::adapter_runtime_transport(target).to_string()),
     );
     object.insert(
         "productBackgroundJobs".to_string(),
@@ -3548,23 +3544,23 @@ fn generated_runtime_metadata(
     );
     object.insert(
         "runtimeStatusSchema".to_string(),
-        Value::String("theurgy-runtime-status/v1".to_string()),
+        Value::String(product_runtime::RUNTIME_STATUS_SCHEMA.to_string()),
     );
     object.insert(
         "runtimeActionRequestSchema".to_string(),
-        Value::String("theurgy-runtime-action-request/v1".to_string()),
+        Value::String(product_runtime::RUNTIME_ACTION_REQUEST_SCHEMA.to_string()),
     );
     object.insert(
         "runtimeActionResultSchema".to_string(),
-        Value::String("theurgy-runtime-action-result/v1".to_string()),
+        Value::String(product_runtime::RUNTIME_ACTION_RESULT_SCHEMA.to_string()),
     );
     object.insert(
         "operationStatusSchema".to_string(),
-        Value::String("theurgy-operation-status/v1".to_string()),
+        Value::String(product_runtime::OPERATION_STATUS_SCHEMA.to_string()),
     );
     object.insert(
         "operationHistorySchema".to_string(),
-        Value::String("theurgy-operation-history/v1".to_string()),
+        Value::String(product_runtime::OPERATION_HISTORY_SCHEMA.to_string()),
     );
     object.insert(
         "stateCommand".to_string(),
@@ -3627,14 +3623,6 @@ fn generated_runtime_metadata(
         "{}\n",
         serde_json::to_string_pretty(&Value::Object(object)).expect("runtime metadata serializes")
     )
-}
-
-fn adapter_runtime_transport(target: &str) -> &'static str {
-    if matches!(target, "macos" | "linux") {
-        "local-process-json"
-    } else {
-        "external-json-abi"
-    }
 }
 
 fn release_target_ids(summary: &ProductSummary) -> Vec<String> {
