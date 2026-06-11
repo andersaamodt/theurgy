@@ -8,8 +8,27 @@
     "version": { "const": "theurgy-action-ir/v1" },
     "actions": {
       "type": "array",
-      "items": { "type": "object" },
+      "items": { "$ref": "#/$defs/action" },
       "minItems": 1
+    }
+  },
+  "$defs": {
+    "action": {
+      "type": "object",
+      "required": ["id", "label", "input", "output", "effect", "failure", "safe", "mutating", "longRunning", "privileged"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
+        "label": { "type": "string", "minLength": 1 },
+        "input": { "type": "object" },
+        "output": { "type": "object" },
+        "effect": { "enum": ["read", "write", "background", "external", "release"] },
+        "failure": { "type": "object" },
+        "safe": { "type": "boolean" },
+        "mutating": { "type": "boolean" },
+        "longRunning": { "type": "boolean" },
+        "privileged": { "type": "boolean" }
+      },
+      "additionalProperties": true
     }
   },
   "additionalProperties": true

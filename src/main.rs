@@ -1668,6 +1668,61 @@ mod tests {
     }
 
     #[test]
+    fn action_ir_schema_declares_typed_action_contract() {
+        let schema: Value =
+            serde_json::from_str(include_str!("../schemas/theurgy-action-ir-v1.json")).unwrap();
+        assert_eq!(
+            schema
+                .pointer("/properties/actions/items/$ref")
+                .and_then(Value::as_str),
+            Some("#/$defs/action")
+        );
+        let required = schema
+            .pointer("/$defs/action/required")
+            .and_then(Value::as_array)
+            .unwrap();
+        for key in [
+            "id",
+            "label",
+            "input",
+            "output",
+            "effect",
+            "failure",
+            "safe",
+            "mutating",
+            "longRunning",
+            "privileged",
+        ] {
+            assert!(required.iter().any(|value| value.as_str() == Some(key)));
+        }
+        assert_eq!(
+            schema
+                .pointer("/$defs/action/properties/safe/type")
+                .and_then(Value::as_str),
+            Some("boolean")
+        );
+    }
+
+    #[test]
+    fn state_snapshot_schema_uses_product_app_slug() {
+        let schema: Value =
+            serde_json::from_str(include_str!("../schemas/theurgy-state-snapshot-v1.json"))
+                .unwrap();
+        assert_eq!(
+            schema
+                .pointer("/properties/app/pattern")
+                .and_then(Value::as_str),
+            Some("^[a-z][a-z0-9-]*$")
+        );
+        assert_eq!(
+            schema
+                .pointer("/properties/data/type")
+                .and_then(Value::as_str),
+            Some("object")
+        );
+    }
+
+    #[test]
     fn runtime_manifest_validation_requires_string_arrays() {
         let manifest = sample_runtime_manifest().replace(
             "\"stateCommand\": [\"custom-core\", \"state\"]",
