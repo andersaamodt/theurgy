@@ -21,6 +21,8 @@ Theurgy is a higher-integration layer for wizardry-family apps.
 - Plain files remain canonical for content and configuration.
 - Indexes and caches are derived artifacts.
 - Deployment should remain compatible with Headquarters-managed source checkouts when used for websites.
+- The first runtime boundary is a harness, not a framework takeover: Web Wizardry keeps lifecycle flows, the web server remains an adapter, and Rust normalizes requests before site modules replace hot shell paths.
+- Prefer integrating existing free software components such as axum, Rust FastCGI adapters, serde, tera, and tantivy over implementing basic routing, serialization, templating, or search engines from scratch.
 
 ## Source File Standards
 

@@ -1,0 +1,20 @@
+#!/bin/sh
+# Emit the typed Theurgy CGI compatibility request context as JSON.
+
+case "${1-}" in
+--help|--usage|-h)
+  cat <<'USAGE'
+Usage: capture-theurgy-cgi-context
+
+Reads standard CGI environment variables and prints the normalized Theurgy web
+request context as JSON. This is the compatibility adapter used before a site
+moves to a resident HTTP or FastCGI handler.
+USAGE
+  exit 0
+  ;;
+esac
+
+set -eu
+
+repo_dir=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd -P)
+exec cargo run --quiet --manifest-path "$repo_dir/Cargo.toml" --bin theurgy-runtime -- capture-cgi-context

@@ -23,6 +23,7 @@ A Rust-backed native desktop app can be solid in a way that an app backed by man
 
 - well-named spells backed by `theurgy-runtime`
 - project scaffolding for native desktop apps and enterprise web apps
+- a first-phase enterprise web runtime harness contract for CGI/HTTP/FastCGI migration
 - file-first project manifests
 - release adapters for signing, notarization, TestFlight, App Store, and Play Store flows
 - architecture docs for desktop, web, databases, and wizardry integration
@@ -31,6 +32,8 @@ Run:
 
 ```sh
 spells/assay-theurgy
+spells/check-theurgy-web-runtime
+spells/capture-theurgy-cgi-context
 spells/conjure-native-desktop sample-desktop
 spells/conjure-enterprise-website sample-website
 spells/inspect-theurgy-project sample-desktop

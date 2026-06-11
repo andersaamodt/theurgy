@@ -10,3 +10,13 @@ name = "theurgy-runtime"
 path = "src/main.rs"
 
 [dependencies]
+
+[package.metadata.theurgy.web_runtime]
+phase = "contract-and-adapter"
+front_doors = ["nginx", "lighttpd"]
+adapters = ["http", "fastcgi", "cgi-compat"]
+router = "axum"
+serialization = "serde"
+templates = "tera"
+search = "tantivy"
+zola_core_runtime = false
