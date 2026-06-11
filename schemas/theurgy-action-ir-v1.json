@@ -19,16 +19,24 @@
       "properties": {
         "id": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
         "label": { "type": "string", "minLength": 1 },
-        "input": { "type": "object" },
-        "output": { "type": "object" },
+        "input": { "$ref": "#/$defs/shape" },
+        "output": { "$ref": "#/$defs/shape" },
         "effect": { "enum": ["read", "write", "background", "external", "release"] },
-        "failure": { "type": "object" },
+        "failure": { "$ref": "#/$defs/shape" },
         "safe": { "type": "boolean" },
         "mutating": { "type": "boolean" },
         "longRunning": { "type": "boolean" },
         "privileged": { "type": "boolean" }
       },
       "additionalProperties": true
+    },
+    "shape": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/shapeDescriptor" }
+    },
+    "shapeDescriptor": {
+      "type": "string",
+      "pattern": "^([a-z][a-z0-9_-]*(\\|[a-z][a-z0-9_-]*)*\\??)$"
     }
   },
   "additionalProperties": true

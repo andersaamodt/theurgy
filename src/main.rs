@@ -3379,6 +3379,48 @@ mod tests {
                 .and_then(Value::as_str),
             Some("boolean")
         );
+        assert_eq!(
+            schema
+                .pointer("/$defs/action/properties/input/$ref")
+                .and_then(Value::as_str),
+            Some("#/$defs/shape")
+        );
+        assert_eq!(
+            schema
+                .pointer("/$defs/shape/additionalProperties/$ref")
+                .and_then(Value::as_str),
+            Some("#/$defs/shapeDescriptor")
+        );
+        assert_eq!(
+            schema
+                .pointer("/$defs/shapeDescriptor/type")
+                .and_then(Value::as_str),
+            Some("string")
+        );
+    }
+
+    #[test]
+    fn product_ir_schema_declares_shape_descriptors() {
+        let schema: Value =
+            serde_json::from_str(include_str!("../schemas/theurgy-product-ir-v1.json")).unwrap();
+        assert_eq!(
+            schema
+                .pointer("/$defs/action/properties/output/$ref")
+                .and_then(Value::as_str),
+            Some("#/$defs/shape")
+        );
+        assert_eq!(
+            schema
+                .pointer("/$defs/action/properties/failure/$ref")
+                .and_then(Value::as_str),
+            Some("#/$defs/shape")
+        );
+        assert_eq!(
+            schema
+                .pointer("/$defs/shape/additionalProperties/$ref")
+                .and_then(Value::as_str),
+            Some("#/$defs/shapeDescriptor")
+        );
     }
 
     #[test]
