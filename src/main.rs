@@ -72,6 +72,10 @@ fn run(args: Vec<String>) -> Result<()> {
         Some("validate-product-ir") => command_validate_product_ir(&args[2..]),
         Some("validate-action-ir") => command_validate_action_ir(&args[2..]),
         Some("validate-state-snapshot") => command_validate_state_snapshot(&args[2..]),
+        Some("validate-runtime-action-result") => {
+            command_validate_runtime_action_result(&args[2..])
+        }
+        Some("validate-operation-history") => command_validate_operation_history(&args[2..]),
         Some("validate-runtime-manifest") => command_validate_runtime_manifest(&args[2..]),
         Some("validate-surface-ir") => command_validate_surface_ir(&args[2..]),
         Some("project-surface") => command_project_surface(&args[2..]),
@@ -207,6 +211,32 @@ fn command_validate_state_snapshot(args: &[String]) -> Result<()> {
     println!("status=ok");
     println!("schema=theurgy-state-snapshot/v1");
     println!("app={}", summary.app_id);
+    Ok(())
+}
+
+fn command_validate_runtime_action_result(args: &[String]) -> Result<()> {
+    if args.len() != 1 {
+        return Err(TheurgyError::new("usage: validate-runtime-action-result PATH").into());
+    }
+    let value = read_json(Path::new(&args[0]))?;
+    let summary = validate_runtime_action_result(&value)?;
+    println!("status=ok");
+    println!("protocol=theurgy-runtime-action/v1");
+    println!("action={}", summary.action_id);
+    println!("operation={}", summary.operation_id);
+    Ok(())
+}
+
+fn command_validate_operation_history(args: &[String]) -> Result<()> {
+    if args.len() != 1 {
+        return Err(TheurgyError::new("usage: validate-operation-history PATH").into());
+    }
+    let value = read_json(Path::new(&args[0]))?;
+    let summary = validate_operation_history(&value)?;
+    println!("status=ok");
+    println!("schema=theurgy-operation-history/v1");
+    println!("app={}", summary.app_id);
+    println!("entries={}", summary.entries);
     Ok(())
 }
 
@@ -573,6 +603,18 @@ struct StateSnapshotSummary {
 }
 
 #[derive(Debug, Eq, PartialEq)]
+struct RuntimeActionResultSummary {
+    action_id: String,
+    operation_id: String,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct OperationHistorySummary {
+    app_id: String,
+    entries: usize,
+}
+
+#[derive(Debug, Eq, PartialEq)]
 struct RuntimeManifestSummary {
     app_id: String,
     protocol: String,
@@ -704,6 +746,41 @@ fn validate_state_snapshot(text: &str) -> Result<StateSnapshotSummary> {
     Ok(StateSnapshotSummary { app_id })
 }
 
+fn validate_runtime_action_result(text: &str) -> Result<RuntimeActionResultSummary> {
+    let value = parse_json(text)?;
+    expect_value_string(&value, "protocol", "theurgy-runtime-action/v1")?;
+    let action_id = value_string(&value, "action")
+        .filter(|id| valid_action_id(id))
+        .ok_or_else(|| {
+            TheurgyError::new("runtime action result action must be a stable action id")
+        })?;
+    let operation = value_object(&value, "operation")?;
+    let operation_id = validate_operation_record(operation)?;
+    if value.get("result").is_none() {
+        return Err(TheurgyError::new("runtime action result result required").into());
+    }
+    Ok(RuntimeActionResultSummary {
+        action_id,
+        operation_id,
+    })
+}
+
+fn validate_operation_history(text: &str) -> Result<OperationHistorySummary> {
+    let value = parse_json(text)?;
+    expect_value_string(&value, "schema", "theurgy-operation-history/v1")?;
+    let app_id = value_string(&value, "app")
+        .filter(|id| valid_slug(id))
+        .ok_or_else(|| TheurgyError::new("operation history app must be a lowercase slug"))?;
+    value_string(&value, "generatedAt")
+        .filter(|generated_at| !generated_at.is_empty())
+        .ok_or_else(|| TheurgyError::new("operation history generatedAt required"))?;
+    let entries = value_array(&value, "data")?;
+    Ok(OperationHistorySummary {
+        app_id,
+        entries: entries.len(),
+    })
+}
+
 fn validate_product_ir_value(value: &Value) -> Result<ProductSummary> {
     expect_value_string(value, "version", "theurgy-product-ir/v1")?;
     expect_value_string(value, "format", "json")?;
@@ -791,6 +868,30 @@ fn validate_action(action: &Value) -> Result<String> {
             TheurgyError::new(format!("product IR action.{key} boolean required"))
         })?;
     }
+    Ok(id)
+}
+
+fn validate_operation_record(operation: &Value) -> Result<String> {
+    let id = value_string(operation, "id")
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| TheurgyError::new("runtime operation.id required"))?;
+    let status = value_string(operation, "status")
+        .ok_or_else(|| TheurgyError::new("runtime operation.status required"))?;
+    if !matches!(
+        status.as_str(),
+        "accepted" | "running" | "completed" | "failed" | "cancelled"
+    ) {
+        return Err(TheurgyError::new("runtime operation.status invalid").into());
+    }
+    let progress = operation
+        .get("progress")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| TheurgyError::new("runtime operation.progress integer required"))?;
+    if progress > 100 {
+        return Err(TheurgyError::new("runtime operation.progress must be 0..100").into());
+    }
+    value_bool(operation, "longRunning")
+        .ok_or_else(|| TheurgyError::new("runtime operation.longRunning boolean required"))?;
     Ok(id)
 }
 
@@ -1971,6 +2072,50 @@ mod tests {
     }
 
     #[test]
+    fn validates_runtime_action_result_contract() {
+        let result = sample_runtime_action_result();
+        let summary = validate_runtime_action_result(&result).unwrap();
+        assert_eq!(summary.action_id, "publish_changes");
+        assert_eq!(summary.operation_id, "deployments-publish_changes-123");
+    }
+
+    #[test]
+    fn runtime_action_result_validation_requires_typed_operation() {
+        let result = sample_runtime_action_result()
+            .replace("\"longRunning\": true", "\"long_running\": true");
+        let error = validate_runtime_action_result(&result)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("operation.longRunning boolean required"));
+        let result =
+            sample_runtime_action_result().replace("\"progress\": 100", "\"progress\": 101");
+        let error = validate_runtime_action_result(&result)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("progress must be 0..100"));
+    }
+
+    #[test]
+    fn validates_operation_history_contract() {
+        let history = sample_operation_history();
+        let summary = validate_operation_history(&history).unwrap();
+        assert_eq!(summary.app_id, "deployments");
+        assert_eq!(summary.entries, 1);
+    }
+
+    #[test]
+    fn operation_history_validation_requires_array_data() {
+        let history = sample_operation_history().replace("\"data\": [", "\"data\": {");
+        assert!(validate_operation_history(&history).is_err());
+        let history =
+            sample_operation_history().replace("\"generatedAt\": \"2026-06-11T00:00:00Z\",", "");
+        let error = validate_operation_history(&history)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("generatedAt required"));
+    }
+
+    #[test]
     fn action_ir_schema_declares_typed_action_contract() {
         let schema: Value =
             serde_json::from_str(include_str!("../schemas/theurgy-action-ir-v1.json")).unwrap();
@@ -2022,6 +2167,45 @@ mod tests {
                 .pointer("/properties/data/type")
                 .and_then(Value::as_str),
             Some("object")
+        );
+    }
+
+    #[test]
+    fn runtime_action_result_schema_declares_operation_contract() {
+        let schema: Value = serde_json::from_str(include_str!(
+            "../schemas/theurgy-runtime-action-result-v1.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            schema
+                .pointer("/properties/operation/$ref")
+                .and_then(Value::as_str),
+            Some("#/$defs/operation")
+        );
+        assert_eq!(
+            schema
+                .pointer("/$defs/operation/properties/longRunning/type")
+                .and_then(Value::as_str),
+            Some("boolean")
+        );
+        assert_eq!(
+            schema
+                .pointer("/$defs/operation/properties/progress/maximum")
+                .and_then(Value::as_u64),
+            Some(100)
+        );
+    }
+
+    #[test]
+    fn operation_history_schema_uses_array_data() {
+        let schema: Value =
+            serde_json::from_str(include_str!("../schemas/theurgy-operation-history-v1.json"))
+                .unwrap();
+        assert_eq!(
+            schema
+                .pointer("/properties/data/type")
+                .and_then(Value::as_str),
+            Some("array")
         );
     }
 
@@ -2342,6 +2526,14 @@ mod tests {
 
     fn sample_state_snapshot() -> String {
         "{\n  \"schema\": \"theurgy-state-snapshot/v1\",\n  \"app\": \"deployments\",\n  \"generatedAt\": \"2026-06-11T00:00:00Z\",\n  \"data\": {\n    \"servers\": [],\n    \"deployments\": []\n  }\n}".to_string()
+    }
+
+    fn sample_runtime_action_result() -> String {
+        "{\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"action\": \"publish_changes\",\n  \"operation\": {\n    \"id\": \"deployments-publish_changes-123\",\n    \"status\": \"completed\",\n    \"progress\": 100,\n    \"longRunning\": true\n  },\n  \"result\": {\"message\": \"published\"}\n}".to_string()
+    }
+
+    fn sample_operation_history() -> String {
+        "{\n  \"schema\": \"theurgy-operation-history/v1\",\n  \"app\": \"deployments\",\n  \"generatedAt\": \"2026-06-11T00:00:00Z\",\n  \"data\": [\n    {\"action\": \"publish\", \"status\": \"completed\"}\n  ]\n}".to_string()
     }
 
     fn runtime_fixture_root(label: &str) -> PathBuf {

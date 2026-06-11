@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wizardry.app/schemas/theurgy-runtime-action-result-v1.json",
+  "title": "Theurgy Runtime Action Result v1",
+  "type": "object",
+  "required": ["protocol", "action", "operation", "result"],
+  "properties": {
+    "protocol": { "const": "theurgy-runtime-action/v1" },
+    "action": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
+    "operation": { "$ref": "#/$defs/operation" },
+    "result": true
+  },
+  "$defs": {
+    "operation": {
+      "type": "object",
+      "required": ["id", "status", "progress", "longRunning"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["accepted", "running", "completed", "failed", "cancelled"] },
+        "progress": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "longRunning": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}
