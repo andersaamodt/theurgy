@@ -2164,19 +2164,10 @@ fn validate_product_ir(text: &str) -> Result<ProductSummary> {
 
 fn validate_action_ir(text: &str) -> Result<ActionSummary> {
     let value = parse_json(text)?;
-    expect_value_string(&value, "version", product_runtime::ACTION_IR_SCHEMA)?;
-    let action_values = value_array(&value, "actions")?;
-    if action_values.is_empty() {
-        return Err(TheurgyError::new("action IR actions required").into());
-    }
-    let mut action_ids = Vec::new();
-    for action in action_values {
-        let contract = validate_action_contract(action)?;
-        action_ids.push(contract.id.clone());
-    }
+    let action_ir = product_runtime::validate_action_ir_value(&value)?;
     Ok(ActionSummary {
-        actions: action_values.len(),
-        action_ids,
+        actions: action_ir.actions,
+        action_ids: action_ir.action_ids,
     })
 }
 

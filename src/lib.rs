@@ -1,4 +1,5 @@
 pub mod product_runtime {
+    use std::collections::BTreeMap;
     use std::error::Error;
     use std::fmt;
     use std::fs;
@@ -105,6 +106,31 @@ pub mod product_runtime {
         pub legacy_native_desktop_ir: Option<String>,
         pub protocol: String,
         pub compatibility: RuntimeCompatibility,
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct ProductActionContract {
+        pub id: String,
+        pub label: String,
+        pub effect: String,
+        pub safe: bool,
+        pub mutating: bool,
+        pub long_running: bool,
+        pub privileged: bool,
+        pub command: Vec<String>,
+        pub input_keys: Vec<String>,
+        pub output_keys: Vec<String>,
+        pub failure_keys: Vec<String>,
+        pub input_shape: BTreeMap<String, String>,
+        pub output_shape: BTreeMap<String, String>,
+        pub failure_shape: BTreeMap<String, String>,
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct ActionIr {
+        pub action_ids: Vec<String>,
+        pub action_contracts: Vec<ProductActionContract>,
+        pub actions: usize,
     }
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -311,6 +337,76 @@ pub mod product_runtime {
         validate_runtime_manifest_value(&value)
     }
 
+    pub fn validate_action_ir_value(value: &Value) -> ContractResult<ActionIr> {
+        expect_value_string(value, "version", ACTION_IR_SCHEMA)?;
+        let action_values = value_array(value, "actions")?;
+        if action_values.is_empty() {
+            return Err(ContractError::new("action IR actions required"));
+        }
+        let mut action_ids = Vec::new();
+        let mut action_contracts = Vec::new();
+        for action in action_values {
+            let contract = validate_product_action_contract(action)?;
+            action_ids.push(contract.id.clone());
+            action_contracts.push(contract);
+        }
+        Ok(ActionIr {
+            actions: action_values.len(),
+            action_ids,
+            action_contracts,
+        })
+    }
+
+    pub fn validate_product_action_contract(
+        action: &Value,
+    ) -> ContractResult<ProductActionContract> {
+        let id = value_string(action, "id")
+            .filter(|id| valid_action_id(id))
+            .ok_or_else(|| ContractError::new("product IR action.id must be a stable action id"))?;
+        let label = value_string(action, "label")
+            .filter(|label| !label.is_empty())
+            .ok_or_else(|| ContractError::new("product IR action.label required"))?;
+        let input = value_object(action, "input")
+            .map_err(|_| ContractError::new("product IR action.input object required"))?;
+        let output = value_object(action, "output")
+            .map_err(|_| ContractError::new("product IR action.output object required"))?;
+        let failure = value_object(action, "failure")
+            .map_err(|_| ContractError::new("product IR action.failure object required"))?;
+        let effect = value_string(action, "effect")
+            .ok_or_else(|| ContractError::new("product IR action.effect invalid"))?;
+        if !matches!(
+            effect.as_str(),
+            "read" | "write" | "background" | "external" | "release"
+        ) {
+            return Err(ContractError::new("product IR action.effect invalid"));
+        }
+        for key in ["safe", "mutating", "longRunning", "privileged"] {
+            value_bool(action, key).ok_or_else(|| {
+                ContractError::new(format!("product IR action.{key} boolean required"))
+            })?;
+        }
+        let command = optional_string_array(action, "command", "product IR action.command")?;
+        if action.get("command").is_some() && command.is_empty() {
+            return Err(ContractError::new("product IR action.command required"));
+        }
+        Ok(ProductActionContract {
+            id,
+            label,
+            effect,
+            safe: value_bool(action, "safe").unwrap_or(false),
+            mutating: value_bool(action, "mutating").unwrap_or(false),
+            long_running: value_bool(action, "longRunning").unwrap_or(false),
+            privileged: value_bool(action, "privileged").unwrap_or(false),
+            command,
+            input_keys: object_keys(input),
+            output_keys: object_keys(output),
+            failure_keys: object_keys(failure),
+            input_shape: object_shape(input, "product IR action.input")?,
+            output_shape: object_shape(output, "product IR action.output")?,
+            failure_shape: object_shape(failure, "product IR action.failure")?,
+        })
+    }
+
     fn runtime_manifest_surface_paths(
         value: &Value,
     ) -> ContractResult<(Option<String>, Option<String>, Option<String>)> {
@@ -398,6 +494,10 @@ pub mod product_runtime {
         value.get(key)?.as_str().map(String::from)
     }
 
+    fn value_bool(value: &Value, key: &str) -> Option<bool> {
+        value.get(key)?.as_bool()
+    }
+
     fn value_object<'a>(value: &'a Value, key: &str) -> ContractResult<&'a Value> {
         value
             .get(key)
@@ -474,6 +574,64 @@ pub mod product_runtime {
                     .ok_or_else(|| ContractError::new(format!("{label} must be boolean")))
             })
             .transpose()
+    }
+
+    fn object_shape(value: &Value, label: &str) -> ContractResult<BTreeMap<String, String>> {
+        let Some(object) = value.as_object() else {
+            return Err(ContractError::new(format!("{label} must be an object")));
+        };
+        let mut shape = BTreeMap::new();
+        for (key, raw) in object {
+            let Some(type_name) = raw.as_str().filter(|type_name| !type_name.is_empty()) else {
+                return Err(ContractError::new(format!(
+                    "{label}.{key} must be a non-empty type string"
+                )));
+            };
+            validate_shape_descriptor(type_name, &format!("{label}.{key}"))?;
+            shape.insert(key.clone(), type_name.to_string());
+        }
+        Ok(shape)
+    }
+
+    fn validate_shape_descriptor(descriptor: &str, label: &str) -> ContractResult<()> {
+        let required = descriptor.strip_suffix('?').unwrap_or(descriptor);
+        if required.is_empty() {
+            return Err(ContractError::new(format!("{label} shape type required")));
+        }
+        if required.contains('|') {
+            for variant in required.split('|') {
+                if variant.is_empty()
+                    || !variant.bytes().all(|byte| {
+                        byte.is_ascii_lowercase()
+                            || byte.is_ascii_digit()
+                            || matches!(byte, b'-' | b'_')
+                    })
+                {
+                    return Err(ContractError::new(format!(
+                        "{label} enum shape contains invalid variant"
+                    )));
+                }
+            }
+            return Ok(());
+        }
+        if matches!(
+            required,
+            "string" | "boolean" | "number" | "integer" | "array" | "object" | "json"
+        ) {
+            return Ok(());
+        }
+        Err(ContractError::new(format!(
+            "{label} unsupported shape type: {descriptor}"
+        )))
+    }
+
+    fn object_keys(value: &Value) -> Vec<String> {
+        let Some(object) = value.as_object() else {
+            return Vec::new();
+        };
+        let mut keys = object.keys().cloned().collect::<Vec<_>>();
+        keys.sort();
+        keys
     }
 
     fn valid_slug(value: &str) -> bool {
@@ -776,5 +934,76 @@ mod tests {
         assert_eq!(manifest.app_id, "deployments");
         assert_eq!(manifest.product_ir, "app-blueprint/product.ir.json");
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn product_runtime_validates_action_ir_contracts() {
+        let action_ir = serde_json::json!({
+            "version": product_runtime::ACTION_IR_SCHEMA,
+            "actions": [
+                {
+                    "id": "refresh_state",
+                    "label": "Refresh",
+                    "input": {},
+                    "output": {"state": "object"},
+                    "effect": "read",
+                    "failure": {"error": "string?"},
+                    "safe": true,
+                    "mutating": false,
+                    "longRunning": false,
+                    "privileged": false
+                },
+                {
+                    "id": "publish_changes",
+                    "label": "Push to Production",
+                    "input": {"deployment": "string"},
+                    "output": {"mode": "queued|parallel"},
+                    "effect": "release",
+                    "failure": {},
+                    "safe": false,
+                    "mutating": true,
+                    "longRunning": true,
+                    "privileged": true,
+                    "command": ["deployments-core", "runtime-action"]
+                }
+            ]
+        });
+        let summary = product_runtime::validate_action_ir_value(&action_ir).unwrap();
+        assert_eq!(summary.actions, 2);
+        assert_eq!(
+            summary.action_ids,
+            vec!["refresh_state".to_string(), "publish_changes".to_string()]
+        );
+        assert_eq!(
+            summary.action_contracts[1]
+                .input_shape
+                .get("deployment")
+                .map(String::as_str),
+            Some("string")
+        );
+        assert!(summary.action_contracts[1].long_running);
+
+        let invalid = serde_json::json!({
+            "version": product_runtime::ACTION_IR_SCHEMA,
+            "actions": [{
+                "id": "publish_changes",
+                "label": "Push to Production",
+                "input": {"deployment": "String"},
+                "output": {},
+                "effect": "release",
+                "failure": {},
+                "safe": false,
+                "mutating": true,
+                "longRunning": true,
+                "privileged": true
+            }]
+        });
+        let error = product_runtime::validate_action_ir_value(&invalid)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            "product IR action.input.deployment unsupported shape type: String"
+        );
     }
 }
