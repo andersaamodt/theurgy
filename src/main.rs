@@ -1760,6 +1760,14 @@ fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
     ) {
         return Err(TheurgyError::new("generated runtime surfaceSchema invalid").into());
     }
+    let expected_surface_schema = if matches!(target.as_str(), "macos" | "linux") {
+        "theurgy-desktop-surface-ir/v1"
+    } else {
+        "theurgy-mobile-surface-ir/v1"
+    };
+    if surface_schema != expected_surface_schema {
+        return Err(TheurgyError::new("generated runtime surfaceSchema invalid for target").into());
+    }
     let surface_target = value_string(&value, "surfaceTarget")
         .ok_or_else(|| TheurgyError::new("generated runtime surfaceTarget required"))?;
     let expected_surface_target = if matches!(target.as_str(), "macos" | "linux") {
@@ -5543,6 +5551,46 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("inputKeys must match inputShape keys"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn generated_runtime_validation_requires_source_identity() {
+        for (key, message) in [
+            ("productIr", "productIr required"),
+            ("runtimeManifest", "runtimeManifest required"),
+            ("sourceSurfaceIr", "sourceSurfaceIr required"),
+        ] {
+            let root = test_root(&format!("generated-runtime-source-{key}"));
+            compile_native(&sample_product(), "linux", &root).unwrap();
+            let mut runtime_json: Value = serde_json::from_str(
+                &fs::read_to_string(root.join("theurgy-runtime.json")).unwrap(),
+            )
+            .unwrap();
+            runtime_json.as_object_mut().unwrap().remove(key);
+            let runtime = serde_json::to_string(&runtime_json).unwrap();
+            let error = validate_generated_runtime(&runtime)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(message));
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn generated_runtime_validation_rejects_surface_schema_target_drift() {
+        let root = test_root("generated-runtime-surface-schema-drift");
+        compile_native(&sample_product(), "linux", &root).unwrap();
+        let mut runtime_json: Value =
+            serde_json::from_str(&fs::read_to_string(root.join("theurgy-runtime.json")).unwrap())
+                .unwrap();
+        *runtime_json.pointer_mut("/surfaceSchema").unwrap() =
+            Value::String("theurgy-mobile-surface-ir/v1".to_string());
+        let runtime = serde_json::to_string(&runtime_json).unwrap();
+        let error = validate_generated_runtime(&runtime)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("surfaceSchema invalid for target"));
         fs::remove_dir_all(root).unwrap();
     }
 
