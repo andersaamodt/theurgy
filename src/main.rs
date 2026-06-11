@@ -549,7 +549,9 @@ fn parse_manifest_only_args(args: &[String], usage: &str) -> Result<PathBuf> {
 
 fn run_state_output(manifest_path: &Path) -> Result<String> {
     let runtime = runtime_contract_from_path(manifest_path)?;
-    run_manifest_command(&runtime.state_command, "state")
+    let output = run_manifest_command(&runtime.state_command, "state")?;
+    validate_manifest_state_output(&output)?;
+    Ok(output)
 }
 
 fn run_status_output(manifest_path: &Path) -> Result<String> {
@@ -569,7 +571,9 @@ fn run_history_output(manifest_path: &Path, subject: &str, limit: Option<&str>) 
     if let Some(limit) = limit {
         args.push(limit.to_string());
     }
-    run_manifest_command_with_args(&runtime.history_command, &args, "history")
+    let output = run_manifest_command_with_args(&runtime.history_command, &args, "history")?;
+    validate_manifest_history_output(&output)?;
+    Ok(output)
 }
 
 fn run_action_output(
@@ -616,7 +620,7 @@ fn run_manifest_action(runtime: &RuntimeContract, action_id: &str, params: &str)
 
 fn validate_manifest_action_output(action_id: &str, output: &str) -> Result<()> {
     let value = parse_json(output)?;
-    let result = value.get("data").unwrap_or(&value);
+    let result = manifest_payload_or_raw(&value);
     let summary = validate_runtime_action_result_value(result)?;
     if summary.action_id != action_id {
         return Err(TheurgyError::new(format!(
@@ -626,6 +630,29 @@ fn validate_manifest_action_output(action_id: &str, output: &str) -> Result<()> 
         .into());
     }
     Ok(())
+}
+
+fn validate_manifest_state_output(output: &str) -> Result<()> {
+    let value = parse_json(output)?;
+    let result = manifest_payload_or_raw(&value);
+    validate_state_snapshot_value(result)?;
+    Ok(())
+}
+
+fn validate_manifest_history_output(output: &str) -> Result<()> {
+    let value = parse_json(output)?;
+    let result = manifest_payload_or_raw(&value);
+    validate_operation_history_value(result)?;
+    Ok(())
+}
+
+fn manifest_payload_or_raw(value: &Value) -> &Value {
+    if value.get("success").is_some() {
+        if let Some(data) = value.get("data") {
+            return data;
+        }
+    }
+    value
 }
 
 fn validate_runtime_action_params(
@@ -1027,14 +1054,18 @@ fn validate_action_ir(text: &str) -> Result<ActionSummary> {
 
 fn validate_state_snapshot(text: &str) -> Result<StateSnapshotSummary> {
     let value = parse_json(text)?;
-    expect_value_string(&value, "schema", "theurgy-state-snapshot/v1")?;
-    let app_id = value_string(&value, "app")
+    validate_state_snapshot_value(&value)
+}
+
+fn validate_state_snapshot_value(value: &Value) -> Result<StateSnapshotSummary> {
+    expect_value_string(value, "schema", "theurgy-state-snapshot/v1")?;
+    let app_id = value_string(value, "app")
         .filter(|id| valid_slug(id))
         .ok_or_else(|| TheurgyError::new("state snapshot app must be a lowercase slug"))?;
-    value_string(&value, "generatedAt")
+    value_string(value, "generatedAt")
         .filter(|generated_at| !generated_at.is_empty())
         .ok_or_else(|| TheurgyError::new("state snapshot generatedAt required"))?;
-    value_object(&value, "data")?;
+    value_object(value, "data")?;
     Ok(StateSnapshotSummary { app_id })
 }
 
@@ -1063,14 +1094,18 @@ fn validate_runtime_action_result_value(value: &Value) -> Result<RuntimeActionRe
 
 fn validate_operation_history(text: &str) -> Result<OperationHistorySummary> {
     let value = parse_json(text)?;
-    expect_value_string(&value, "schema", "theurgy-operation-history/v1")?;
-    let app_id = value_string(&value, "app")
+    validate_operation_history_value(&value)
+}
+
+fn validate_operation_history_value(value: &Value) -> Result<OperationHistorySummary> {
+    expect_value_string(value, "schema", "theurgy-operation-history/v1")?;
+    let app_id = value_string(value, "app")
         .filter(|id| valid_slug(id))
         .ok_or_else(|| TheurgyError::new("operation history app must be a lowercase slug"))?;
-    value_string(&value, "generatedAt")
+    value_string(value, "generatedAt")
         .filter(|generated_at| !generated_at.is_empty())
         .ok_or_else(|| TheurgyError::new("operation history generatedAt required"))?;
-    let entries = value_array(&value, "data")?;
+    let entries = value_array(value, "data")?;
     Ok(OperationHistorySummary {
         app_id,
         entries: entries.len(),
@@ -3174,6 +3209,24 @@ mod tests {
     }
 
     #[test]
+    fn manifest_state_output_rejects_untyped_stdout() {
+        let error = validate_manifest_state_output("{\"ok\":true}").unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "expected schema = theurgy-state-snapshot/v1"
+        );
+    }
+
+    #[test]
+    fn manifest_history_output_rejects_untyped_stdout() {
+        let error = validate_manifest_history_output("{\"ok\":true}").unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "expected schema = theurgy-operation-history/v1"
+        );
+    }
+
+    #[test]
     fn compile_app_uses_declared_runtime_manifest_and_surface() {
         let app = test_root("compile-app");
         let out = test_root("compile-app-out");
@@ -3507,7 +3560,7 @@ mod tests {
         let runtime = root.join("runtime-fixture");
         write_executable(
             &runtime,
-            "#!/bin/sh\nset -eu\ncase \"${1-}\" in\n  state) printf '{\"schema\":\"theurgy-state-snapshot/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"data\":{}}\\n' ;;\n  status) printf '{\"schema\":\"theurgy-runtime-status/v1\",\"app\":\"deployments\",\"state_ready\":true}\\n' ;;\n  history) printf '{\"schema\":\"theurgy-operation-history/v1\",\"app\":\"deployments\",\"subject\":\"%s\",\"limit\":\"%s\"}\\n' \"${2-}\" \"${3-}\" ;;\n  action) printf '{\"success\":true,\"data\":{\"protocol\":\"theurgy-runtime-action/v1\",\"action\":\"%s\",\"operation\":{\"id\":\"op-%s\",\"status\":\"completed\",\"progress\":100,\"longRunning\":false},\"result\":{\"params\":%s}}}\\n' \"${2-}\" \"${2-}\" \"${3-}\" ;;\n  *) printf 'unknown fixture command\\n' >&2; exit 2 ;;\nesac\n",
+            "#!/bin/sh\nset -eu\ncase \"${1-}\" in\n  state) printf '{\"schema\":\"theurgy-state-snapshot/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"data\":{}}\\n' ;;\n  status) printf '{\"schema\":\"theurgy-runtime-status/v1\",\"app\":\"deployments\",\"state_ready\":true}\\n' ;;\n  history) printf '{\"schema\":\"theurgy-operation-history/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"data\":[],\"subject\":\"%s\",\"limit\":\"%s\"}\\n' \"${2-}\" \"${3-}\" ;;\n  action) printf '{\"success\":true,\"data\":{\"protocol\":\"theurgy-runtime-action/v1\",\"action\":\"%s\",\"operation\":{\"id\":\"op-%s\",\"status\":\"completed\",\"progress\":100,\"longRunning\":false},\"result\":{\"params\":%s}}}\\n' \"${2-}\" \"${2-}\" \"${3-}\" ;;\n  *) printf 'unknown fixture command\\n' >&2; exit 2 ;;\nesac\n",
         )
         .unwrap();
         write_or_replace(&blueprint.join("product.ir.json"), &sample_product()).unwrap();
