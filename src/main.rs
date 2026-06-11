@@ -1228,6 +1228,30 @@ fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
         )
         .into());
     }
+    for surface_contract in surface_contracts {
+        let surface_id = surface_contract
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let Some(product_contract) = contracts.iter().find(|contract| {
+            contract
+                .get("id")
+                .and_then(Value::as_str)
+                .map(|id| id == surface_id)
+                .unwrap_or(false)
+        }) else {
+            return Err(TheurgyError::new(format!(
+                "generated runtime surfaceActionContracts action missing from productActionContracts: {surface_id}"
+            ))
+            .into());
+        };
+        if product_contract != surface_contract {
+            return Err(TheurgyError::new(format!(
+                "generated runtime surfaceActionContracts must match productActionContracts for {surface_id}"
+            ))
+            .into());
+        }
+    }
     value_string(&value, "surface")
         .filter(|surface| !surface.is_empty())
         .ok_or_else(|| TheurgyError::new("generated runtime surface required"))?;
@@ -4128,6 +4152,26 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("surfaceActionContracts order must match surfaceActions"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn generated_runtime_validation_rejects_surface_contract_body_drift() {
+        let root = test_root("generated-runtime-surface-body-drift");
+        compile_native(&sample_product(), "linux", &root).unwrap();
+        let mut runtime_json: Value =
+            serde_json::from_str(&fs::read_to_string(root.join("theurgy-runtime.json")).unwrap())
+                .unwrap();
+        *runtime_json
+            .pointer_mut("/surfaceActionContracts/1/privileged")
+            .unwrap() = Value::Bool(false);
+        let runtime = serde_json::to_string(&runtime_json).unwrap();
+        let error = validate_generated_runtime(&runtime)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(
+            "surfaceActionContracts must match productActionContracts for publish_changes"
+        ));
         fs::remove_dir_all(root).unwrap();
     }
 
