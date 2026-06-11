@@ -337,6 +337,18 @@ fn command_compile_app(args: &[String]) -> Result<()> {
     if surface_summary.product != product_summary.app_id {
         return Err(TheurgyError::new("surface IR product does not match product IR app").into());
     }
+    for action_id in &surface_summary.action_ids {
+        if !product_summary
+            .action_ids
+            .iter()
+            .any(|product_action| product_action == action_id)
+        {
+            return Err(TheurgyError::new(format!(
+                "surface IR action not declared in Product IR: {action_id}"
+            ))
+            .into());
+        }
+    }
     let expected_surface_target = if matches!(target, "macos" | "linux") {
         "desktop"
     } else {
@@ -625,6 +637,8 @@ struct SurfaceSummary {
     schema: String,
     product: String,
     target: String,
+    action_ids: Vec<String>,
+    roles: Vec<String>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -699,15 +713,26 @@ fn validate_surface_ir(text: &str) -> Result<SurfaceSummary> {
     let target = value_string(&value, "target")
         .filter(|target| !target.is_empty())
         .ok_or_else(|| TheurgyError::new("surface IR target required"))?;
+    let action_ids = surface_action_ids(&value)?;
+    let mut roles = Vec::new();
     if schema == "theurgy-desktop-surface-ir/v1" {
-        value_object(&value, "window")?;
+        let window = value_object(&value, "window")?;
+        collect_surface_roles(window, &mut roles);
     } else {
-        value_array(&value, "screens")?;
+        for screen in value_array(&value, "screens")? {
+            if let Ok(node) = value_object(screen, "node") {
+                collect_surface_roles(node, &mut roles);
+            }
+        }
     }
+    roles.sort();
+    roles.dedup();
     Ok(SurfaceSummary {
         schema,
         product,
         target,
+        action_ids,
+        roles,
     })
 }
 
@@ -893,6 +918,45 @@ fn validate_operation_record(operation: &Value) -> Result<String> {
     value_bool(operation, "longRunning")
         .ok_or_else(|| TheurgyError::new("runtime operation.longRunning boolean required"))?;
     Ok(id)
+}
+
+fn surface_action_ids(value: &Value) -> Result<Vec<String>> {
+    let Some(actions) = value.get("actions") else {
+        return Ok(Vec::new());
+    };
+    let Some(array) = actions.as_array() else {
+        return Err(TheurgyError::new("surface IR actions must be an array").into());
+    };
+    let mut action_ids = Vec::new();
+    for item in array {
+        let Some(action_id) = item.as_str() else {
+            return Err(TheurgyError::new("surface IR actions must contain strings").into());
+        };
+        if !valid_action_id(action_id) {
+            return Err(TheurgyError::new("surface IR action must be a stable action id").into());
+        }
+        action_ids.push(action_id.to_string());
+    }
+    Ok(action_ids)
+}
+
+fn collect_surface_roles(node: &Value, roles: &mut Vec<String>) {
+    if let Some(role) = value_string(node, "role").filter(|role| !role.is_empty()) {
+        roles.push(role);
+    }
+    match node {
+        Value::Object(object) => {
+            for child in object.values() {
+                collect_surface_roles(child, roles);
+            }
+        }
+        Value::Array(children) => {
+            for child in children {
+                collect_surface_roles(child, roles);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn parse_json(text: &str) -> Result<Value> {
@@ -1085,6 +1149,22 @@ fn compile_native_with_contract(
     target: &str,
     out_dir: &Path,
 ) -> Result<()> {
+    let surface_summary = validate_surface_ir(surface)?;
+    if surface_summary.product != summary.app_id {
+        return Err(TheurgyError::new("surface IR product does not match product IR app").into());
+    }
+    for action_id in &surface_summary.action_ids {
+        if !summary
+            .action_ids
+            .iter()
+            .any(|product_action| product_action == action_id)
+        {
+            return Err(TheurgyError::new(format!(
+                "surface IR action not declared in Product IR: {action_id}"
+            ))
+            .into());
+        }
+    }
     fs::create_dir_all(out_dir)?;
     write_or_replace(
         &out_dir.join("theurgy-surface.json"),
@@ -1092,7 +1172,7 @@ fn compile_native_with_contract(
     )?;
     write_or_replace(
         &out_dir.join("theurgy-runtime.json"),
-        &generated_runtime_metadata(runtime, target),
+        &generated_runtime_metadata(runtime, target, &surface_summary),
     )?;
     match target {
         "macos" => compile_macos(summary, runtime, out_dir),
@@ -1103,7 +1183,11 @@ fn compile_native_with_contract(
     }
 }
 
-fn generated_runtime_metadata(runtime: &RuntimeContract, target: &str) -> String {
+fn generated_runtime_metadata(
+    runtime: &RuntimeContract,
+    target: &str,
+    surface: &SurfaceSummary,
+) -> String {
     let mut object = serde_json::Map::new();
     object.insert(
         "version".to_string(),
@@ -1145,6 +1229,19 @@ fn generated_runtime_metadata(runtime: &RuntimeContract, target: &str) -> String
         "surface".to_string(),
         Value::String("theurgy-surface.json".to_string()),
     );
+    object.insert(
+        "surfaceSchema".to_string(),
+        Value::String(surface.schema.clone()),
+    );
+    object.insert(
+        "surfaceTarget".to_string(),
+        Value::String(surface.target.clone()),
+    );
+    object.insert(
+        "surfaceActions".to_string(),
+        string_vec_value(&surface.action_ids),
+    );
+    object.insert("surfaceRoles".to_string(), string_vec_value(&surface.roles));
     format!(
         "{}\n",
         serde_json::to_string_pretty(&Value::Object(object)).expect("runtime metadata serializes")
@@ -2326,6 +2423,13 @@ mod tests {
         assert!(surface.contains("\"version\": \"theurgy-desktop-surface-ir/v1\""));
         assert!(surface.contains("\"product\": \"deployments\""));
         assert!(surface.contains("\"role\": \"left-list-detail\""));
+        let summary = validate_surface_ir(&surface).unwrap();
+        assert_eq!(
+            summary.action_ids,
+            vec!["refresh_state".to_string(), "publish_changes".to_string()]
+        );
+        assert!(summary.roles.contains(&"left-list-detail".to_string()));
+        assert!(summary.roles.contains(&"product-navigation".to_string()));
     }
 
     #[test]
@@ -2334,6 +2438,10 @@ mod tests {
         let surface = project_surface(&product, "ios").unwrap();
         assert!(surface.contains("\"version\": \"theurgy-mobile-surface-ir/v1\""));
         assert!(surface.contains("\"role\": \"status-overview\""));
+        let summary = validate_surface_ir(&surface).unwrap();
+        assert_eq!(summary.action_ids, vec!["refresh_state".to_string()]);
+        assert!(summary.roles.contains(&"status-overview".to_string()));
+        assert!(summary.roles.contains(&"focused-action-detail".to_string()));
     }
 
     #[test]
@@ -2347,6 +2455,23 @@ mod tests {
         assert_eq!(
             runtime_json.get("stateCommand").unwrap(),
             &serde_json::json!(["deployments-core", "runtime-state"])
+        );
+        assert_eq!(
+            runtime_json.get("surfaceSchema").and_then(Value::as_str),
+            Some("theurgy-desktop-surface-ir/v1")
+        );
+        assert_eq!(
+            runtime_json.get("surfaceActions").unwrap(),
+            &serde_json::json!(["refresh_state", "publish_changes"])
+        );
+        assert_eq!(
+            runtime_json.get("surfaceRoles").unwrap(),
+            &serde_json::json!([
+                "left-list-detail",
+                "native-product-root",
+                "product-detail",
+                "product-navigation"
+            ])
         );
         let main_c = fs::read_to_string(root.join("src/main.c")).unwrap();
         assert!(main_c.contains("gtk_application_window_new"));
@@ -2413,6 +2538,18 @@ mod tests {
             runtime_json.get("historyCommand").unwrap(),
             &serde_json::json!(["custom-core", "history"])
         );
+        assert_eq!(
+            runtime_json.get("surfaceTarget").and_then(Value::as_str),
+            Some("desktop")
+        );
+        assert_eq!(
+            runtime_json.get("surfaceActions").unwrap(),
+            &serde_json::json!(["refresh_state", "publish_changes"])
+        );
+        assert_eq!(
+            runtime_json.get("surfaceRoles").unwrap(),
+            &serde_json::json!(["declared-reference-surface"])
+        );
         let main_c = fs::read_to_string(out.join("src/main.c")).unwrap();
         assert!(main_c.contains("\"custom-core\""));
         assert!(main_c.contains("\"state\""));
@@ -2424,6 +2561,49 @@ mod tests {
 
         fs::remove_dir_all(app).unwrap();
         fs::remove_dir_all(out).unwrap();
+    }
+
+    #[test]
+    fn compile_app_rejects_surface_actions_missing_from_product_ir() {
+        let app = test_root("compile-app-surface-action");
+        let out = test_root("compile-app-surface-action-out");
+        fs::create_dir_all(app.join("app-blueprint")).unwrap();
+        write_or_replace(
+            &app.join("theurgy.project.toml"),
+            "name = \"deployments\"\nkind = \"desktop\"\nsource_root = \"src\"\nproduct_ir = \"app-blueprint/product.ir.json\"\ndesktop_surface_ir = \"app-blueprint/desktop.surface.ir.json\"\nruntime_manifest = \"app-blueprint/runtime.manifest.json\"\n",
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/product.ir.json"),
+            &sample_product(),
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/runtime.manifest.json"),
+            &sample_runtime_manifest(),
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/desktop.surface.ir.json"),
+            &sample_desktop_surface().replace(
+                "\"actions\": [\"refresh_state\", \"publish_changes\"]",
+                "\"actions\": [\"refresh_state\", \"delete_everything\"]",
+            ),
+        )
+        .unwrap();
+
+        let error = command_compile_app(&[
+            app.display().to_string(),
+            "--target".to_string(),
+            "linux".to_string(),
+            "--out".to_string(),
+            out.display().to_string(),
+        ])
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("surface IR action not declared in Product IR"));
+
+        fs::remove_dir_all(app).unwrap();
     }
 
     #[test]
