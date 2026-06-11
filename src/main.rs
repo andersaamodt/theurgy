@@ -602,11 +602,47 @@ fn run_manifest_action(runtime: &RuntimeContract, action_id: &str, params: &str)
             .into());
         }
     }
+    if let Some(contracts) = &runtime.product_action_contracts {
+        validate_runtime_action_params(action_id, params, contracts)?;
+    }
     run_manifest_command_with_args(
         &runtime.action_command,
         &[action_id.to_string(), params.to_string()],
         "action",
     )
+}
+
+fn validate_runtime_action_params(
+    action_id: &str,
+    params: &str,
+    contracts: &[ActionContract],
+) -> Result<()> {
+    let Some(contract) = contracts.iter().find(|contract| contract.id == action_id) else {
+        return Err(TheurgyError::new(format!(
+            "runtime action not declared in Product IR: {action_id}"
+        ))
+        .into());
+    };
+    let value = parse_json(params)?;
+    let Some(object) = value.as_object() else {
+        return Err(TheurgyError::new(format!(
+            "runtime action params must be a JSON object for Product IR action: {action_id}"
+        ))
+        .into());
+    };
+    for key in object.keys() {
+        if !contract
+            .input_keys
+            .iter()
+            .any(|declared_key| declared_key == key)
+        {
+            return Err(TheurgyError::new(format!(
+                "runtime action param not declared in Product IR input for {action_id}: {key}"
+            ))
+            .into());
+        }
+    }
+    Ok(())
 }
 
 fn runtime_contract_from_path(path: &Path) -> Result<RuntimeContract> {
@@ -638,6 +674,7 @@ fn runtime_contract_from_path_with_product_actions(path: &Path) -> Result<Runtim
         .into());
     }
     runtime.product_action_ids = Some(product.action_ids);
+    runtime.product_action_contracts = Some(product.action_contracts);
     Ok(runtime)
 }
 
@@ -704,7 +741,7 @@ struct ProductSummary {
     actions: usize,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct ActionContract {
     id: String,
     label: String,
@@ -776,6 +813,7 @@ struct RuntimeContract {
     history_command: Vec<String>,
     daemon_command: Vec<String>,
     product_action_ids: Option<Vec<String>>,
+    product_action_contracts: Option<Vec<ActionContract>>,
 }
 
 fn read_json(path: &Path) -> Result<String> {
@@ -904,6 +942,7 @@ fn runtime_contract_from_manifest(text: &str) -> Result<RuntimeContract> {
         history_command: value_string_array(runtime, "historyCommand").unwrap_or_default(),
         daemon_command: value_string_array(runtime, "daemonCommand").unwrap_or_default(),
         product_action_ids: None,
+        product_action_contracts: None,
     })
 }
 
@@ -1548,6 +1587,7 @@ fn compile_native(product: &str, target: &str, out_dir: &Path) -> Result<()> {
         history_command: Vec::new(),
         daemon_command: Vec::new(),
         product_action_ids: Some(summary.action_ids.clone()),
+        product_action_contracts: Some(summary.action_contracts.clone()),
     };
     compile_native_with_contract(&summary, &surface, &runtime, target, out_dir)
 }
@@ -2868,8 +2908,7 @@ mod tests {
         let root = runtime_fixture_root("run-action");
         let manifest = root.join("runtime.manifest.json");
 
-        let output =
-            run_action_output("refresh_state", "{\"force\":true}", Some(&manifest)).unwrap();
+        let output = run_action_output("refresh_state", "{}", Some(&manifest)).unwrap();
         let value: Value = serde_json::from_str(&output).unwrap();
         assert_eq!(value.get("success").and_then(Value::as_bool), Some(true));
         assert_eq!(
@@ -2877,8 +2916,11 @@ mod tests {
             Some("refresh_state")
         );
         assert_eq!(
-            value.pointer("/params/force").and_then(Value::as_bool),
-            Some(true)
+            value
+                .get("params")
+                .and_then(Value::as_object)
+                .map(|params| params.len()),
+            Some(0)
         );
 
         fs::remove_dir_all(root).unwrap();
@@ -2893,6 +2935,35 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "runtime action not declared in Product IR: delete_everything"
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn run_action_with_manifest_rejects_undeclared_product_param() {
+        let root = runtime_fixture_root("run-action-undeclared-param");
+        let manifest = root.join("runtime.manifest.json");
+
+        let error = run_action_output("refresh_state", "{\"unexpected\":true}", Some(&manifest))
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "runtime action param not declared in Product IR input for refresh_state: unexpected"
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn run_action_with_manifest_requires_object_params_for_product_action() {
+        let root = runtime_fixture_root("run-action-array-param");
+        let manifest = root.join("runtime.manifest.json");
+
+        let error = run_action_output("refresh_state", "[]", Some(&manifest)).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "runtime action params must be a JSON object for Product IR action: refresh_state"
         );
 
         fs::remove_dir_all(root).unwrap();
@@ -3371,6 +3442,11 @@ mod tests {
                 "refresh_state".to_string(),
                 "publish_changes".to_string(),
             ]),
+            product_action_contracts: Some(
+                validate_product_ir(&sample_product())
+                    .unwrap()
+                    .action_contracts,
+            ),
         }
     }
 
