@@ -109,6 +109,28 @@ pub mod product_runtime {
     }
 
     #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct GeneratedRuntime {
+        pub app_id: String,
+        pub target: String,
+        pub release_target: String,
+        pub release_artifact: String,
+        pub state_snapshot_schema: String,
+        pub persistence_truth: String,
+        pub adapter_runtime_transport: String,
+        pub runtime_status_schema: String,
+        pub runtime_action_request_schema: String,
+        pub runtime_action_result_schema: String,
+        pub operation_status_schema: String,
+        pub operation_history_schema: String,
+        pub surface_schema: String,
+        pub surface_target: String,
+        pub actions: usize,
+        pub product_actions: usize,
+        pub surface_actions: usize,
+        pub surface_action_contracts: usize,
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
     pub struct ProductActionContract {
         pub id: String,
         pub label: String,
@@ -382,6 +404,277 @@ pub mod product_runtime {
         let value: Value = serde_json::from_str(&text)
             .map_err(|error| ContractError::new(format!("invalid JSON: {error}")))?;
         validate_runtime_manifest_value(&value)
+    }
+
+    pub fn validate_generated_runtime_text(text: &str) -> ContractResult<GeneratedRuntime> {
+        let value: Value = serde_json::from_str(text)
+            .map_err(|error| ContractError::new(format!("invalid JSON: {error}")))?;
+        validate_generated_runtime_value(&value)
+    }
+
+    pub fn validate_generated_runtime_value(value: &Value) -> ContractResult<GeneratedRuntime> {
+        expect_value_string(value, "version", GENERATED_RUNTIME_SCHEMA)?;
+        let app_id = value_string(value, "app")
+            .filter(|id| valid_slug(id))
+            .ok_or_else(|| ContractError::new("generated runtime app must be a lowercase slug"))?;
+        let target = value_string(value, "target")
+            .filter(|target| matches!(target.as_str(), "macos" | "linux" | "ios" | "android"))
+            .ok_or_else(|| {
+                ContractError::new("generated runtime target must be macos, linux, ios, or android")
+            })?;
+        value_string(value, "protocol")
+            .filter(|protocol| !protocol.is_empty())
+            .ok_or_else(|| ContractError::new("generated runtime protocol required"))?;
+        let runtime_status_schema =
+            expect_and_return_value_string(value, "runtimeStatusSchema", RUNTIME_STATUS_SCHEMA)?;
+        let runtime_action_request_schema = expect_and_return_value_string(
+            value,
+            "runtimeActionRequestSchema",
+            RUNTIME_ACTION_REQUEST_SCHEMA,
+        )?;
+        let runtime_action_result_schema = expect_and_return_value_string(
+            value,
+            "runtimeActionResultSchema",
+            RUNTIME_ACTION_RESULT_SCHEMA,
+        )?;
+        let operation_status_schema = expect_and_return_value_string(
+            value,
+            "operationStatusSchema",
+            OPERATION_STATUS_SCHEMA,
+        )?;
+        let operation_history_schema = expect_and_return_value_string(
+            value,
+            "operationHistorySchema",
+            OPERATION_HISTORY_SCHEMA,
+        )?;
+        value_string(value, "productIr")
+            .filter(|path| !path.is_empty())
+            .ok_or_else(|| ContractError::new("generated runtime productIr required"))?;
+        value_string(value, "runtimeManifest")
+            .filter(|path| !path.is_empty())
+            .ok_or_else(|| ContractError::new("generated runtime runtimeManifest required"))?;
+        value_string(value, "sourceSurfaceIr")
+            .filter(|path| !path.is_empty())
+            .ok_or_else(|| ContractError::new("generated runtime sourceSurfaceIr required"))?;
+        optional_nonempty_string(
+            value,
+            "legacyNativeDesktopIr",
+            "generated runtime legacyNativeDesktopIr",
+        )?;
+        value_bool(value, "compatibilityWizardryAppsShellFirstStillSupported").ok_or_else(|| {
+            ContractError::new(
+                "generated runtime compatibilityWizardryAppsShellFirstStillSupported boolean required",
+            )
+        })?;
+        value_bool(value, "compatibilityTheurgyRequiredForLegacyWizardryApps").ok_or_else(|| {
+            ContractError::new(
+                "generated runtime compatibilityTheurgyRequiredForLegacyWizardryApps boolean required",
+            )
+        })?;
+        let state_snapshot_schema = value_string(value, "productStateSnapshotSchema")
+            .filter(|schema| !schema.is_empty())
+            .ok_or_else(|| {
+                ContractError::new("generated runtime productStateSnapshotSchema required")
+            })?;
+        let persistence_truth = value_string(value, "productPersistenceTruth")
+            .filter(|truth| !truth.is_empty())
+            .ok_or_else(|| {
+                ContractError::new("generated runtime productPersistenceTruth required")
+            })?;
+        let adapter_runtime_transport =
+            value_string(value, "adapterRuntimeTransport").ok_or_else(|| {
+                ContractError::new("generated runtime adapterRuntimeTransport required")
+            })?;
+        match (target.as_str(), adapter_runtime_transport.as_str()) {
+            ("macos" | "linux", DESKTOP_ADAPTER_TRANSPORT) => {}
+            ("ios" | "android", MOBILE_ADAPTER_TRANSPORT) => {}
+            _ => {
+                return Err(ContractError::new(
+                    "generated runtime adapterRuntimeTransport must match target family",
+                ))
+            }
+        }
+        let target_release_target = value_string(value, "targetReleaseTarget")
+            .filter(|release_target| valid_action_id(release_target))
+            .ok_or_else(|| ContractError::new("generated runtime targetReleaseTarget required"))?;
+        let target_release_artifact = value_string(value, "targetReleaseArtifact")
+            .filter(|artifact| !artifact.is_empty())
+            .ok_or_else(|| {
+                ContractError::new("generated runtime targetReleaseArtifact required")
+            })?;
+        for key in ["stateCommand", "subscribeStatusCommand", "actionCommand"] {
+            if value_string_array(value, key)?.is_empty() {
+                return Err(ContractError::new(format!(
+                    "generated runtime {key} must be non-empty"
+                )));
+            }
+        }
+        let operation_status_command = optional_string_array(
+            value,
+            "operationStatusCommand",
+            "generated runtime operationStatusCommand",
+        )?;
+        for key in [
+            "statusCommand",
+            "historyCommand",
+            "daemonCommand",
+            "productTargets",
+            "productActions",
+            "productCapabilities",
+            "productPermissions",
+            "productDomainObjects",
+            "productPersistenceRoots",
+            "productBackgroundJobs",
+            "productReleaseTargets",
+            "productAuditKeys",
+            "surfaceActions",
+            "surfaceRoles",
+        ] {
+            optional_string_array(value, key, &format!("generated runtime {key}"))?;
+        }
+        let product_release_targets = value_string_array(value, "productReleaseTargets")?;
+        if !product_release_targets
+            .iter()
+            .any(|release_target| release_target == &target_release_target)
+        {
+            return Err(ContractError::new(
+                "generated runtime targetReleaseTarget must be listed in productReleaseTargets",
+            ));
+        }
+        let product_actions = value_string_array(value, "productActions")?;
+        if product_actions.is_empty() {
+            return Err(ContractError::new(
+                "generated runtime productActions required",
+            ));
+        }
+        let surface_actions = value_string_array(value, "surfaceActions")?;
+        for action_id in &surface_actions {
+            if !product_actions
+                .iter()
+                .any(|product_action| product_action == action_id)
+            {
+                return Err(ContractError::new(format!(
+                    "generated runtime surface action not declared in productActions: {action_id}"
+                )));
+            }
+        }
+        let contracts = value_array(value, "productActionContracts")?;
+        if contracts.len() != product_actions.len() {
+            return Err(ContractError::new(
+                "generated runtime productActionContracts must match productActions length",
+            ));
+        }
+        let mut contract_ids = Vec::new();
+        let mut has_long_running_action = false;
+        for contract in contracts {
+            contract_ids.push(validate_generated_action_contract(contract)?);
+            if contract
+                .get("longRunning")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                has_long_running_action = true;
+            }
+        }
+        if has_long_running_action && operation_status_command.is_empty() {
+            return Err(ContractError::new(
+                "generated runtime operationStatusCommand required for long-running actions",
+            ));
+        }
+        if contract_ids != product_actions {
+            return Err(ContractError::new(
+                "generated runtime productActionContracts order must match productActions",
+            ));
+        }
+        let surface_contracts = value_array(value, "surfaceActionContracts")?;
+        if surface_contracts.len() != surface_actions.len() {
+            return Err(ContractError::new(
+                "generated runtime surfaceActionContracts must match surfaceActions length",
+            ));
+        }
+        let mut surface_contract_ids = Vec::new();
+        for contract in surface_contracts {
+            surface_contract_ids.push(validate_generated_action_contract(contract)?);
+        }
+        if surface_contract_ids != surface_actions {
+            return Err(ContractError::new(
+                "generated runtime surfaceActionContracts order must match surfaceActions",
+            ));
+        }
+        for surface_contract in surface_contracts {
+            let surface_id = surface_contract
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let Some(product_contract) = contracts.iter().find(|contract| {
+                contract
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .map(|id| id == surface_id)
+                    .unwrap_or(false)
+            }) else {
+                return Err(ContractError::new(format!(
+                    "generated runtime surfaceActionContracts action missing from productActionContracts: {surface_id}"
+                )));
+            };
+            if product_contract != surface_contract {
+                return Err(ContractError::new(format!(
+                    "generated runtime surfaceActionContracts must match productActionContracts for {surface_id}"
+                )));
+            }
+        }
+        value_string(value, "surface")
+            .filter(|surface| !surface.is_empty())
+            .ok_or_else(|| ContractError::new("generated runtime surface required"))?;
+        let surface_schema = value_string(value, "surfaceSchema")
+            .ok_or_else(|| ContractError::new("generated runtime surfaceSchema required"))?;
+        if !matches!(
+            surface_schema.as_str(),
+            DESKTOP_SURFACE_IR_SCHEMA | MOBILE_SURFACE_IR_SCHEMA
+        ) {
+            return Err(ContractError::new(
+                "generated runtime surfaceSchema invalid",
+            ));
+        }
+        let expected_surface_schema = surface_schema_for_target(target.as_str())
+            .ok_or_else(|| ContractError::new("generated runtime target invalid"))?;
+        if surface_schema != expected_surface_schema {
+            return Err(ContractError::new(
+                "generated runtime surfaceSchema invalid for target",
+            ));
+        }
+        let surface_target = value_string(value, "surfaceTarget")
+            .ok_or_else(|| ContractError::new("generated runtime surfaceTarget required"))?;
+        let expected_surface_target = if matches!(target.as_str(), "macos" | "linux") {
+            "desktop"
+        } else {
+            "mobile"
+        };
+        if surface_target != target && surface_target != expected_surface_target {
+            return Err(ContractError::new(
+                "generated runtime surfaceTarget invalid for target",
+            ));
+        }
+        Ok(GeneratedRuntime {
+            app_id,
+            target,
+            release_target: target_release_target,
+            release_artifact: target_release_artifact,
+            state_snapshot_schema,
+            persistence_truth,
+            adapter_runtime_transport,
+            runtime_status_schema,
+            runtime_action_request_schema,
+            runtime_action_result_schema,
+            operation_status_schema,
+            operation_history_schema,
+            surface_schema,
+            surface_target,
+            actions: product_actions.len(),
+            product_actions: product_actions.len(),
+            surface_actions: surface_actions.len(),
+            surface_action_contracts: surface_contracts.len(),
+        })
     }
 
     pub fn validate_product_ir_value(value: &Value) -> ContractResult<ProductIr> {
@@ -773,6 +1066,74 @@ pub mod product_runtime {
             Some(actual) if actual == expected => Ok(()),
             _ => Err(ContractError::new(format!("expected {key} = {expected}"))),
         }
+    }
+
+    fn expect_and_return_value_string(
+        value: &Value,
+        key: &str,
+        expected: &str,
+    ) -> ContractResult<String> {
+        expect_value_string(value, key, expected)?;
+        Ok(expected.to_string())
+    }
+
+    fn validate_generated_action_contract(contract: &Value) -> ContractResult<String> {
+        let id = value_string(contract, "id")
+            .filter(|id| valid_action_id(id))
+            .ok_or_else(|| ContractError::new("generated runtime action contract id invalid"))?;
+        value_string(contract, "label")
+            .filter(|label| !label.is_empty())
+            .ok_or_else(|| {
+                ContractError::new("generated runtime action contract label required")
+            })?;
+        let effect = value_string(contract, "effect").ok_or_else(|| {
+            ContractError::new("generated runtime action contract effect invalid")
+        })?;
+        if !matches!(
+            effect.as_str(),
+            "read" | "write" | "background" | "external" | "release"
+        ) {
+            return Err(ContractError::new(
+                "generated runtime action contract effect invalid",
+            ));
+        }
+        for key in ["safe", "mutating", "longRunning", "privileged"] {
+            value_bool(contract, key).ok_or_else(|| {
+                ContractError::new(format!(
+                    "generated runtime action contract {key} boolean required"
+                ))
+            })?;
+        }
+        for (keys_key, shape_key) in [
+            ("inputKeys", "inputShape"),
+            ("outputKeys", "outputShape"),
+            ("failureKeys", "failureShape"),
+        ] {
+            let keys = value_string_array(contract, keys_key).map_err(|_| {
+                ContractError::new(format!(
+                    "generated runtime action contract {keys_key} must be a string array"
+                ))
+            })?;
+            let shape = value_object(contract, shape_key).map_err(|_| {
+                ContractError::new(format!(
+                    "generated runtime action contract {shape_key} object required"
+                ))
+            })?;
+            object_shape(
+                shape,
+                &format!("generated runtime action contract {shape_key}"),
+            )?;
+            let mut shape_keys = object_keys(shape);
+            let mut sorted_keys = keys;
+            sorted_keys.sort();
+            shape_keys.sort();
+            if sorted_keys != shape_keys {
+                return Err(ContractError::new(format!(
+                    "generated runtime action contract {keys_key} must match {shape_key} keys"
+                )));
+            }
+        }
+        Ok(id)
     }
 
     fn surface_action_ids(value: &Value) -> ContractResult<Vec<String>> {
@@ -1814,5 +2175,102 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert_eq!(error, "product IR does not declare target: android");
+    }
+
+    #[test]
+    fn product_runtime_validates_generated_runtime_contract() {
+        let runtime: serde_json::Value = serde_json::from_str(
+            r#"{
+  "version": "theurgy-generated-runtime/v1",
+  "app": "deployments",
+  "target": "macos",
+  "productIr": "app-blueprint/product.ir.json",
+  "runtimeManifest": "app-blueprint/runtime.manifest.json",
+  "sourceSurfaceIr": "app-blueprint/desktop.surface.ir.json",
+  "compatibilityWizardryAppsShellFirstStillSupported": true,
+  "compatibilityTheurgyRequiredForLegacyWizardryApps": false,
+  "productTargets": ["macos"],
+  "productActions": ["refresh_state"],
+  "productActionContracts": [{
+    "id": "refresh_state",
+    "label": "Refresh",
+    "effect": "read",
+    "safe": true,
+    "mutating": false,
+    "longRunning": false,
+    "privileged": false,
+    "inputKeys": [],
+    "outputKeys": ["params"],
+    "failureKeys": [],
+    "inputShape": {},
+    "outputShape": {"params": "object"},
+    "failureShape": {}
+  }],
+  "productCapabilities": ["native-desktop"],
+  "productPermissions": ["files"],
+  "productDomainObjects": ["deployment"],
+  "productStateSnapshotSchema": "deployments-state/v1",
+  "productPersistenceRoots": ["headquarters-workspace"],
+  "productPersistenceTruth": "file-first",
+  "adapterRuntimeTransport": "local-process-json",
+  "productBackgroundJobs": [],
+  "productReleaseTargets": ["macos-app"],
+  "targetReleaseTarget": "macos-app",
+  "targetReleaseArtifact": "generated/macos",
+  "productAuditKeys": ["cliParity"],
+  "protocol": "theurgy-runtime-action/v1",
+  "runtimeStatusSchema": "theurgy-runtime-status/v1",
+  "runtimeActionRequestSchema": "theurgy-runtime-action-request/v1",
+  "runtimeActionResultSchema": "theurgy-runtime-action-result/v1",
+  "operationStatusSchema": "theurgy-operation-status/v1",
+  "operationHistorySchema": "theurgy-operation-history/v1",
+  "stateCommand": ["deployments-core", "runtime-state"],
+  "statusCommand": ["deployments-core", "runtime-status"],
+  "subscribeStatusCommand": ["deployments-core", "runtime-status"],
+  "actionCommand": ["deployments-core", "runtime-action"],
+  "historyCommand": ["deployments-core", "runtime-history"],
+  "surface": "theurgy-surface.json",
+  "surfaceSchema": "theurgy-desktop-surface-ir/v1",
+  "surfaceTarget": "macos",
+  "surfaceActions": ["refresh_state"],
+  "surfaceActionContracts": [{
+    "id": "refresh_state",
+    "label": "Refresh",
+    "effect": "read",
+    "safe": true,
+    "mutating": false,
+    "longRunning": false,
+    "privileged": false,
+    "inputKeys": [],
+    "outputKeys": ["params"],
+    "failureKeys": [],
+    "inputShape": {},
+    "outputShape": {"params": "object"},
+    "failureShape": {}
+  }],
+  "surfaceRoles": ["left-list-detail"]
+}"#,
+        )
+        .unwrap();
+        let summary = product_runtime::validate_generated_runtime_value(&runtime).unwrap();
+        assert_eq!(summary.app_id, "deployments");
+        assert_eq!(
+            summary.adapter_runtime_transport,
+            product_runtime::DESKTOP_ADAPTER_TRANSPORT
+        );
+        assert_eq!(summary.surface_action_contracts, 1);
+
+        let mut invalid = runtime.clone();
+        invalid.as_object_mut().unwrap().insert(
+            "adapterRuntimeTransport".to_string(),
+            serde_json::json!("wrong"),
+        );
+        let error = product_runtime::validate_generated_runtime_value(&invalid)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            "generated runtime adapterRuntimeTransport must match target family"
+        );
     }
 }
