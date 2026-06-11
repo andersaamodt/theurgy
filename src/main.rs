@@ -67,6 +67,8 @@ fn run(args: Vec<String>) -> Result<()> {
         Some("conjure-enterprise-website") => command_conjure(ProjectKind::Website, &args[2..]),
         Some("inspect") => command_inspect(&args[2..]),
         Some("validate-product-ir") => command_validate_product_ir(&args[2..]),
+        Some("validate-runtime-manifest") => command_validate_runtime_manifest(&args[2..]),
+        Some("validate-surface-ir") => command_validate_surface_ir(&args[2..]),
         Some("project-surface") => command_project_surface(&args[2..]),
         Some("compile-native") => command_compile_native(&args[2..]),
         Some("inspect-app") => command_inspect_app(&args[2..]),
@@ -174,6 +176,32 @@ fn command_validate_product_ir(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+fn command_validate_runtime_manifest(args: &[String]) -> Result<()> {
+    if args.len() != 1 {
+        return Err(TheurgyError::new("usage: validate-runtime-manifest PATH").into());
+    }
+    let value = read_json(Path::new(&args[0]))?;
+    let summary = validate_runtime_manifest(&value)?;
+    println!("status=ok");
+    println!("schema=theurgy-runtime-manifest/v1");
+    println!("app={}", summary.app_id);
+    println!("protocol={}", summary.protocol);
+    Ok(())
+}
+
+fn command_validate_surface_ir(args: &[String]) -> Result<()> {
+    if args.len() != 1 {
+        return Err(TheurgyError::new("usage: validate-surface-ir PATH").into());
+    }
+    let value = read_json(Path::new(&args[0]))?;
+    let summary = validate_surface_ir(&value)?;
+    println!("status=ok");
+    println!("schema={}", summary.schema);
+    println!("product={}", summary.product);
+    println!("target={}", summary.target);
+    Ok(())
+}
+
 fn command_project_surface(args: &[String]) -> Result<()> {
     let (path, target) = parse_product_target_args(args, "usage: project-surface PRODUCT_IR --target TARGET")?;
     let product = read_json(path)?;
@@ -252,12 +280,73 @@ struct ProductSummary {
     actions: usize,
 }
 
+#[derive(Debug, Eq, PartialEq)]
+struct RuntimeManifestSummary {
+    app_id: String,
+    protocol: String,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct SurfaceSummary {
+    schema: String,
+    product: String,
+    target: String,
+}
+
 fn read_json(path: &Path) -> Result<String> {
     let text = fs::read_to_string(path).map_err(|error| {
         TheurgyError::new(format!("could not read {}: {error}", path.display()))
     })?;
     validate_json_params(&text)?;
     Ok(text)
+}
+
+fn validate_runtime_manifest(text: &str) -> Result<RuntimeManifestSummary> {
+    expect_json_string(text, "version", "theurgy-runtime-manifest/v1")?;
+    let app_id = json_string_value(text, "app")
+        .filter(|id| valid_slug(id))
+        .ok_or_else(|| TheurgyError::new("runtime manifest app must be a lowercase slug"))?;
+    json_string_value(text, "productIr")
+        .filter(|path| !path.is_empty())
+        .ok_or_else(|| TheurgyError::new("runtime manifest productIr required"))?;
+    let runtime = json_object_for_key(text, "runtime")?;
+    let state_command = json_string_array(runtime, "stateCommand")?;
+    let action_command = json_string_array(runtime, "actionCommand")?;
+    if state_command.is_empty() || action_command.is_empty() {
+        return Err(TheurgyError::new("runtime manifest commands must be non-empty arrays").into());
+    }
+    let protocol = json_string_value(runtime, "protocol")
+        .filter(|protocol| !protocol.is_empty())
+        .ok_or_else(|| TheurgyError::new("runtime manifest protocol required"))?;
+    Ok(RuntimeManifestSummary { app_id, protocol })
+}
+
+fn validate_surface_ir(text: &str) -> Result<SurfaceSummary> {
+    let schema = json_string_value(text, "version")
+        .ok_or_else(|| TheurgyError::new("surface IR version required"))?;
+    if !matches!(
+        schema.as_str(),
+        "theurgy-desktop-surface-ir/v1" | "theurgy-mobile-surface-ir/v1"
+    ) {
+        return Err(TheurgyError::new("surface IR version invalid").into());
+    }
+    expect_json_string(text, "format", "json")?;
+    let product = json_string_value(text, "product")
+        .filter(|id| valid_slug(id))
+        .ok_or_else(|| TheurgyError::new("surface IR product must be a lowercase slug"))?;
+    let target = json_string_value(text, "target")
+        .filter(|target| !target.is_empty())
+        .ok_or_else(|| TheurgyError::new("surface IR target required"))?;
+    if schema == "theurgy-desktop-surface-ir/v1" {
+        json_object_for_key(text, "window")?;
+    } else {
+        json_array_for_key(text, "screens")?;
+    }
+    Ok(SurfaceSummary {
+        schema,
+        product,
+        target,
+    })
 }
 
 fn validate_product_ir(text: &str) -> Result<ProductSummary> {

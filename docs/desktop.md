@@ -30,6 +30,8 @@ If `PATH` is omitted, the spell uses `NAME`. The generated desktop project is in
 ## Runtime Compiler Track
 
 `theurgy-runtime validate-product-ir PATH` validates the shared product contract.
+`theurgy-runtime validate-runtime-manifest PATH` validates the runtime bridge contract.
+`theurgy-runtime validate-surface-ir PATH` validates a desktop or mobile surface projection.
 `theurgy-runtime project-surface PATH --target macos|linux` emits a desktop surface projection.
 `theurgy-runtime compile-native PATH --target macos|linux --out OUT_DIR` emits a deterministic native adapter root.
 
