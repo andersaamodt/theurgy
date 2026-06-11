@@ -631,10 +631,11 @@ fn run_manifest_action(runtime: &RuntimeContract, action_id: &str, params: &str)
     if let Some(contracts) = &runtime.product_action_contracts {
         validate_runtime_action_params(action_id, params, contracts)?;
     }
-    let output = run_manifest_command_with_args(
+    let output = run_manifest_action_command(
         &runtime.action_command,
         &[action_id.to_string(), params.to_string()],
-        "action",
+        action_id,
+        runtime.product_action_contracts.as_deref(),
     )?;
     validate_manifest_action_output(
         &runtime.app_id,
@@ -643,6 +644,36 @@ fn run_manifest_action(runtime: &RuntimeContract, action_id: &str, params: &str)
         runtime.product_action_contracts.as_deref(),
     )?;
     Ok(output)
+}
+
+fn run_manifest_action_command(
+    command: &[String],
+    extra_args: &[String],
+    action_id: &str,
+    contracts: Option<&[ActionContract]>,
+) -> Result<String> {
+    let Some(executable) = command.first() else {
+        return Err(TheurgyError::new("runtime manifest action command required").into());
+    };
+    let output = Command::new(executable)
+        .args(&command[1..])
+        .args(extra_args)
+        .output()
+        .map_err(|error| TheurgyError::new(format!("could not run action command: {error}")))?;
+    let stdout = String::from_utf8(output.stdout).map_err(|error| {
+        TheurgyError::new(format!("action command output was not UTF-8: {error}"))
+    })?;
+    if !output.status.success() {
+        if let Some(contracts) = contracts {
+            validate_runtime_action_failure_keys(action_id, stdout.trim(), contracts)?;
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let message = structured_failure_message(&stdout)
+            .or_else(|| (!stderr.is_empty()).then_some(stderr))
+            .unwrap_or_else(|| format!("action command exited with {}", output.status));
+        return Err(TheurgyError::new(message).into());
+    }
+    Ok(stdout)
 }
 
 fn validate_manifest_action_output(
@@ -770,6 +801,53 @@ fn validate_runtime_action_result_keys(
         }
     }
     Ok(())
+}
+
+fn validate_runtime_action_failure_keys(
+    action_id: &str,
+    output: &str,
+    contracts: &[ActionContract],
+) -> Result<()> {
+    let Ok(value) = parse_json(output) else {
+        return Ok(());
+    };
+    if value.get("success").and_then(Value::as_bool) != Some(false) {
+        return Ok(());
+    }
+    let Some(contract) = contracts.iter().find(|contract| contract.id == action_id) else {
+        return Err(TheurgyError::new(format!(
+            "runtime action not declared in Product IR: {action_id}"
+        ))
+        .into());
+    };
+    let Some(object) = value.as_object() else {
+        return Ok(());
+    };
+    for key in object.keys().filter(|key| key.as_str() != "success") {
+        if !contract
+            .failure_keys
+            .iter()
+            .any(|declared_key| declared_key == key)
+        {
+            return Err(TheurgyError::new(format!(
+                "runtime action failure key not declared in Product IR failure for {action_id}: {key}"
+            ))
+            .into());
+        }
+    }
+    Ok(())
+}
+
+fn structured_failure_message(output: &str) -> Option<String> {
+    let value = parse_json(output).ok()?;
+    if value.get("success").and_then(Value::as_bool) != Some(false) {
+        return None;
+    }
+    value
+        .get("error")
+        .and_then(Value::as_str)
+        .filter(|error| !error.is_empty())
+        .map(String::from)
 }
 
 fn runtime_contract_from_path(path: &Path) -> Result<RuntimeContract> {
@@ -3428,6 +3506,31 @@ mod tests {
         );
 
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn runtime_action_failure_keys_follow_product_contract() {
+        let contracts = validate_product_ir(
+            &sample_product().replace("\"failure\": {}", "\"failure\": {\"error\": \"string\"}"),
+        )
+        .unwrap()
+        .action_contracts;
+        validate_runtime_action_failure_keys(
+            "refresh_state",
+            "{\"success\":false,\"error\":\"failed\"}",
+            &contracts,
+        )
+        .unwrap();
+        let error = validate_runtime_action_failure_keys(
+            "refresh_state",
+            "{\"success\":false,\"error\":\"failed\",\"extra\":true}",
+            &contracts,
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "runtime action failure key not declared in Product IR failure for refresh_state: extra"
+        );
     }
 
     #[test]
