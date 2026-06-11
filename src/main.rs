@@ -372,7 +372,7 @@ fn command_compile_app(args: &[String]) -> Result<()> {
         ))
     })?;
     let product_path = app_dir.join(&product_ir);
-    let runtime_path = app_dir.join(runtime_manifest);
+    let runtime_path = app_dir.join(&runtime_manifest);
     let surface_path = app_dir.join(&surface_ir);
     let product = read_json(&product_path)?;
     let product_summary = validate_product_ir(&product)?;
@@ -420,6 +420,11 @@ fn command_compile_app(args: &[String]) -> Result<()> {
         .into());
     }
     let runtime_contract = runtime_contract_from_manifest(&runtime_text)?;
+    let runtime_contract = runtime_contract.with_sources(
+        product_ir.clone(),
+        runtime_manifest.clone(),
+        surface_ir.clone(),
+    );
     validate_product_action_commands(&product_summary, &runtime_contract)?;
     let surface = read_json(&surface_path)?;
     let surface_summary = validate_surface_ir(&surface)?;
@@ -1538,6 +1543,9 @@ struct SurfaceSummary {
 struct RuntimeContract {
     app_id: String,
     protocol: String,
+    product_ir: String,
+    runtime_manifest: String,
+    source_surface_ir: String,
     state_command: Vec<String>,
     status_command: Vec<String>,
     subscribe_status_command: Vec<String>,
@@ -1547,6 +1555,20 @@ struct RuntimeContract {
     daemon_command: Vec<String>,
     product_action_ids: Option<Vec<String>>,
     product_action_contracts: Option<Vec<ActionContract>>,
+}
+
+impl RuntimeContract {
+    fn with_sources(
+        mut self,
+        product_ir: String,
+        runtime_manifest: String,
+        source_surface_ir: String,
+    ) -> Self {
+        self.product_ir = product_ir;
+        self.runtime_manifest = runtime_manifest;
+        self.source_surface_ir = source_surface_ir;
+        self
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1584,6 +1606,15 @@ fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
     value_string(&value, "protocol")
         .filter(|protocol| !protocol.is_empty())
         .ok_or_else(|| TheurgyError::new("generated runtime protocol required"))?;
+    value_string(&value, "productIr")
+        .filter(|path| !path.is_empty())
+        .ok_or_else(|| TheurgyError::new("generated runtime productIr required"))?;
+    value_string(&value, "runtimeManifest")
+        .filter(|path| !path.is_empty())
+        .ok_or_else(|| TheurgyError::new("generated runtime runtimeManifest required"))?;
+    value_string(&value, "sourceSurfaceIr")
+        .filter(|path| !path.is_empty())
+        .ok_or_else(|| TheurgyError::new("generated runtime sourceSurfaceIr required"))?;
     let target_release_target = value_string(&value, "targetReleaseTarget")
         .filter(|release_target| valid_action_id(release_target))
         .ok_or_else(|| TheurgyError::new("generated runtime targetReleaseTarget required"))?;
@@ -1758,6 +1789,9 @@ fn runtime_contract_from_manifest(text: &str) -> Result<RuntimeContract> {
     Ok(RuntimeContract {
         app_id: summary.app_id,
         protocol: summary.protocol,
+        product_ir: summary.product_ir,
+        runtime_manifest: "theurgy-runtime.manifest.json".to_string(),
+        source_surface_ir: "theurgy-surface.json".to_string(),
         state_command: value_string_array(runtime, "stateCommand")?,
         status_command: value_string_array(runtime, "statusCommand").unwrap_or_default(),
         subscribe_status_command: optional_string_array(
@@ -2848,6 +2882,9 @@ fn compile_native(product: &str, target: &str, out_dir: &Path) -> Result<()> {
     let runtime = RuntimeContract {
         app_id: summary.app_id.clone(),
         protocol: "theurgy-runtime-action/v1".to_string(),
+        product_ir: "direct-product-ir".to_string(),
+        runtime_manifest: "generated-runtime-manifest".to_string(),
+        source_surface_ir: "projected-surface-ir".to_string(),
         state_command: vec![
             format!("{}-core", summary.app_id),
             "runtime-state".to_string(),
@@ -2960,6 +2997,18 @@ fn generated_runtime_metadata(
     );
     object.insert("app".to_string(), Value::String(runtime.app_id.clone()));
     object.insert("target".to_string(), Value::String(target.to_string()));
+    object.insert(
+        "productIr".to_string(),
+        Value::String(runtime.product_ir.clone()),
+    );
+    object.insert(
+        "runtimeManifest".to_string(),
+        Value::String(runtime.runtime_manifest.clone()),
+    );
+    object.insert(
+        "sourceSurfaceIr".to_string(),
+        Value::String(runtime.source_surface_ir.clone()),
+    );
     object.insert(
         "productTargets".to_string(),
         string_vec_value(&summary.targets),
@@ -4838,6 +4887,15 @@ mod tests {
             .any(|value| value.as_str() == Some("subscribeStatusCommand")));
         assert!(top_level_required
             .iter()
+            .any(|value| value.as_str() == Some("productIr")));
+        assert!(top_level_required
+            .iter()
+            .any(|value| value.as_str() == Some("runtimeManifest")));
+        assert!(top_level_required
+            .iter()
+            .any(|value| value.as_str() == Some("sourceSurfaceIr")));
+        assert!(top_level_required
+            .iter()
             .any(|value| value.as_str() == Some("targetReleaseTarget")));
         assert!(top_level_required
             .iter()
@@ -4847,6 +4905,12 @@ mod tests {
                 .pointer("/properties/targetReleaseTarget/pattern")
                 .and_then(Value::as_str),
             Some("^[a-z][a-z0-9_.-]*$")
+        );
+        assert_eq!(
+            schema
+                .pointer("/properties/productIr/minLength")
+                .and_then(Value::as_u64),
+            Some(1)
         );
         assert_eq!(
             schema
@@ -5312,6 +5376,18 @@ mod tests {
         let generated = validate_generated_runtime(&runtime).unwrap();
         assert_eq!(generated.app_id, "deployments");
         assert_eq!(generated.target, "linux");
+        assert_eq!(
+            runtime_json.get("productIr").and_then(Value::as_str),
+            Some("direct-product-ir")
+        );
+        assert_eq!(
+            runtime_json.get("runtimeManifest").and_then(Value::as_str),
+            Some("generated-runtime-manifest")
+        );
+        assert_eq!(
+            runtime_json.get("sourceSurfaceIr").and_then(Value::as_str),
+            Some("projected-surface-ir")
+        );
         assert_eq!(generated.actions, 2);
         assert_eq!(generated.product_actions, 2);
         assert_eq!(generated.surface_actions, 2);
@@ -6057,6 +6133,9 @@ mod tests {
         RuntimeContract {
             app_id: "deployments".to_string(),
             protocol: "theurgy-runtime-action/v1".to_string(),
+            product_ir: "app-blueprint/product.ir.json".to_string(),
+            runtime_manifest: "app-blueprint/runtime.manifest.json".to_string(),
+            source_surface_ir: "app-blueprint/desktop.surface.ir.json".to_string(),
             state_command: vec!["deployments-core".to_string(), "runtime-state".to_string()],
             status_command: vec!["deployments-core".to_string(), "runtime-status".to_string()],
             subscribe_status_command: vec![
