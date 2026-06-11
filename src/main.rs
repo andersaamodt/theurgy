@@ -249,7 +249,14 @@ fn command_validate_runtime_manifest(args: &[String]) -> Result<()> {
     println!("status=ok");
     println!("schema=theurgy-runtime-manifest/v1");
     println!("app={}", summary.app_id);
+    println!("product_ir={}", summary.product_ir);
     println!("protocol={}", summary.protocol);
+    if let Some(path) = summary.desktop_surface_ir {
+        println!("desktop_surface_ir={path}");
+    }
+    if let Some(path) = summary.mobile_surface_ir {
+        println!("mobile_surface_ir={path}");
+    }
     Ok(())
 }
 
@@ -312,9 +319,9 @@ fn command_compile_app(args: &[String]) -> Result<()> {
             "compile-app requires {surface_key} in theurgy.project.toml for target {target}"
         ))
     })?;
-    let product_path = app_dir.join(product_ir);
+    let product_path = app_dir.join(&product_ir);
     let runtime_path = app_dir.join(runtime_manifest);
-    let surface_path = app_dir.join(surface_ir);
+    let surface_path = app_dir.join(&surface_ir);
     let product = read_json(&product_path)?;
     let product_summary = validate_product_ir(&product)?;
     if !product_summary
@@ -330,6 +337,29 @@ fn command_compile_app(args: &[String]) -> Result<()> {
     let runtime_summary = validate_runtime_manifest(&runtime_text)?;
     if runtime_summary.app_id != product_summary.app_id {
         return Err(TheurgyError::new("runtime manifest app does not match product IR app").into());
+    }
+    if runtime_summary.product_ir != product_ir {
+        return Err(TheurgyError::new(format!(
+            "runtime manifest productIr does not match theurgy.project.toml product_ir: {}",
+            runtime_summary.product_ir
+        ))
+        .into());
+    }
+    let manifest_surface_ir = if matches!(target, "macos" | "linux") {
+        runtime_summary.desktop_surface_ir.as_deref()
+    } else {
+        runtime_summary.mobile_surface_ir.as_deref()
+    }
+    .ok_or_else(|| {
+        TheurgyError::new(format!(
+            "runtime manifest surfaces entry required for target {target}"
+        ))
+    })?;
+    if manifest_surface_ir != surface_ir {
+        return Err(TheurgyError::new(format!(
+            "runtime manifest surface path does not match theurgy.project.toml {surface_key}: {manifest_surface_ir}"
+        ))
+        .into());
     }
     let runtime_contract = runtime_contract_from_manifest(&runtime_text)?;
     let surface = read_json(&surface_path)?;
@@ -629,6 +659,9 @@ struct OperationHistorySummary {
 #[derive(Debug, Eq, PartialEq)]
 struct RuntimeManifestSummary {
     app_id: String,
+    product_ir: String,
+    desktop_surface_ir: Option<String>,
+    mobile_surface_ir: Option<String>,
     protocol: String,
 }
 
@@ -662,23 +695,7 @@ fn read_json(path: &Path) -> Result<String> {
 
 fn validate_runtime_manifest(text: &str) -> Result<RuntimeManifestSummary> {
     let value = parse_json(text)?;
-    expect_value_string(&value, "version", "theurgy-runtime-manifest/v1")?;
-    let app_id = value_string(&value, "app")
-        .filter(|id| valid_slug(id))
-        .ok_or_else(|| TheurgyError::new("runtime manifest app must be a lowercase slug"))?;
-    value_string(&value, "productIr")
-        .filter(|path| !path.is_empty())
-        .ok_or_else(|| TheurgyError::new("runtime manifest productIr required"))?;
-    let runtime = value_object(&value, "runtime")?;
-    let state_command = value_string_array(runtime, "stateCommand")?;
-    let action_command = value_string_array(runtime, "actionCommand")?;
-    if state_command.is_empty() || action_command.is_empty() {
-        return Err(TheurgyError::new("runtime manifest commands must be non-empty arrays").into());
-    }
-    let protocol = value_string(runtime, "protocol")
-        .filter(|protocol| !protocol.is_empty())
-        .ok_or_else(|| TheurgyError::new("runtime manifest protocol required"))?;
-    Ok(RuntimeManifestSummary { app_id, protocol })
+    validate_runtime_manifest_value(&value)
 }
 
 fn runtime_contract_from_manifest(text: &str) -> Result<RuntimeContract> {
@@ -854,9 +871,10 @@ fn validate_runtime_manifest_value(value: &Value) -> Result<RuntimeManifestSumma
     let app_id = value_string(value, "app")
         .filter(|id| valid_slug(id))
         .ok_or_else(|| TheurgyError::new("runtime manifest app must be a lowercase slug"))?;
-    value_string(value, "productIr")
+    let product_ir = value_string(value, "productIr")
         .filter(|path| !path.is_empty())
         .ok_or_else(|| TheurgyError::new("runtime manifest productIr required"))?;
+    let (desktop_surface_ir, mobile_surface_ir) = runtime_manifest_surface_paths(value)?;
     let runtime = value_object(value, "runtime")?;
     let state_command = value_string_array(runtime, "stateCommand")?;
     let action_command = value_string_array(runtime, "actionCommand")?;
@@ -866,7 +884,36 @@ fn validate_runtime_manifest_value(value: &Value) -> Result<RuntimeManifestSumma
     let protocol = value_string(runtime, "protocol")
         .filter(|protocol| !protocol.is_empty())
         .ok_or_else(|| TheurgyError::new("runtime manifest protocol required"))?;
-    Ok(RuntimeManifestSummary { app_id, protocol })
+    Ok(RuntimeManifestSummary {
+        app_id,
+        product_ir,
+        desktop_surface_ir,
+        mobile_surface_ir,
+        protocol,
+    })
+}
+
+fn runtime_manifest_surface_paths(value: &Value) -> Result<(Option<String>, Option<String>)> {
+    let Some(surfaces) = value.get("surfaces") else {
+        return Ok((None, None));
+    };
+    if !surfaces.is_object() {
+        return Err(TheurgyError::new("runtime manifest surfaces must be an object").into());
+    }
+    Ok((
+        optional_nonempty_string(surfaces, "desktop", "runtime manifest surfaces.desktop")?,
+        optional_nonempty_string(surfaces, "mobile", "runtime manifest surfaces.mobile")?,
+    ))
+}
+
+fn optional_nonempty_string(value: &Value, key: &str, label: &str) -> Result<Option<String>> {
+    let Some(raw) = value.get(key) else {
+        return Ok(None);
+    };
+    let Some(text) = raw.as_str().filter(|text| !text.is_empty()) else {
+        return Err(TheurgyError::new(format!("{label} must be a non-empty string")).into());
+    };
+    Ok(Some(text.to_string()))
 }
 
 fn validate_action(action: &Value) -> Result<String> {
@@ -2316,6 +2363,14 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("stateCommand must contain strings"));
+        let manifest = sample_runtime_manifest().replace(
+            "\"desktop\": \"app-blueprint/desktop.surface.ir.json\"",
+            "\"desktop\": []",
+        );
+        let error = runtime_contract_from_manifest(&manifest)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("surfaces.desktop must be a non-empty string"));
     }
 
     #[test]
@@ -2602,6 +2657,92 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(error.contains("surface IR action not declared in Product IR"));
+
+        fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
+    fn compile_app_rejects_runtime_manifest_product_ir_drift() {
+        let app = test_root("compile-app-product-drift");
+        let out = test_root("compile-app-product-drift-out");
+        fs::create_dir_all(app.join("app-blueprint")).unwrap();
+        write_or_replace(
+            &app.join("theurgy.project.toml"),
+            "name = \"deployments\"\nkind = \"desktop\"\nsource_root = \"src\"\nproduct_ir = \"app-blueprint/product.ir.json\"\ndesktop_surface_ir = \"app-blueprint/desktop.surface.ir.json\"\nruntime_manifest = \"app-blueprint/runtime.manifest.json\"\n",
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/product.ir.json"),
+            &sample_product(),
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/runtime.manifest.json"),
+            &sample_runtime_manifest().replace(
+                "\"productIr\": \"app-blueprint/product.ir.json\"",
+                "\"productIr\": \"app-blueprint/other-product.ir.json\"",
+            ),
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/desktop.surface.ir.json"),
+            &sample_desktop_surface(),
+        )
+        .unwrap();
+
+        let error = command_compile_app(&[
+            app.display().to_string(),
+            "--target".to_string(),
+            "linux".to_string(),
+            "--out".to_string(),
+            out.display().to_string(),
+        ])
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("runtime manifest productIr does not match"));
+
+        fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
+    fn compile_app_rejects_runtime_manifest_surface_drift() {
+        let app = test_root("compile-app-surface-drift");
+        let out = test_root("compile-app-surface-drift-out");
+        fs::create_dir_all(app.join("app-blueprint")).unwrap();
+        write_or_replace(
+            &app.join("theurgy.project.toml"),
+            "name = \"deployments\"\nkind = \"desktop\"\nsource_root = \"src\"\nproduct_ir = \"app-blueprint/product.ir.json\"\ndesktop_surface_ir = \"app-blueprint/desktop.surface.ir.json\"\nruntime_manifest = \"app-blueprint/runtime.manifest.json\"\n",
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/product.ir.json"),
+            &sample_product(),
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/runtime.manifest.json"),
+            &sample_runtime_manifest().replace(
+                "\"desktop\": \"app-blueprint/desktop.surface.ir.json\"",
+                "\"desktop\": \"app-blueprint/other.desktop.surface.ir.json\"",
+            ),
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/desktop.surface.ir.json"),
+            &sample_desktop_surface(),
+        )
+        .unwrap();
+
+        let error = command_compile_app(&[
+            app.display().to_string(),
+            "--target".to_string(),
+            "linux".to_string(),
+            "--out".to_string(),
+            out.display().to_string(),
+        ])
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("runtime manifest surface path does not match"));
 
         fs::remove_dir_all(app).unwrap();
     }
