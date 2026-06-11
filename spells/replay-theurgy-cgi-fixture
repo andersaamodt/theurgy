@@ -1,0 +1,51 @@
+#!/bin/sh
+# Replay a captured CGI fixture against a runtime command.
+
+set -eu
+
+usage() {
+  printf '%s\n' 'usage: replay-theurgy-cgi-fixture FIXTURE_DIR -- COMMAND [ARG...]' >&2
+  exit 2
+}
+
+[ "$#" -ge 3 ] || usage
+fixture_dir=$1
+shift
+[ "${1-}" = "--" ] || usage
+shift
+[ "$#" -ge 1 ] || usage
+
+[ -d "$fixture_dir" ] || {
+  printf '%s\n' "fixture directory not found: $fixture_dir" >&2
+  exit 2
+}
+
+env_file="$fixture_dir/env.tsv"
+query_file="$fixture_dir/query.txt"
+body_file="$fixture_dir/body.txt"
+
+if [ -f "$env_file" ]; then
+  while IFS='	' read -r key value || [ -n "$key" ]; do
+    [ -n "$key" ] || continue
+    case "$key" in
+      *[!A-Za-z0-9_]* | [0-9]*)
+        printf '%s\n' "invalid environment key in fixture: $key" >&2
+        exit 2
+        ;;
+    esac
+    export "$key=$value"
+  done < "$env_file"
+fi
+
+if [ -f "$query_file" ]; then
+  QUERY_STRING=$(cat "$query_file")
+  export QUERY_STRING
+fi
+
+if [ -f "$body_file" ]; then
+  CONTENT_LENGTH=$(wc -c < "$body_file" | tr -d ' ')
+  export CONTENT_LENGTH
+  exec "$@" < "$body_file"
+fi
+
+exec "$@"

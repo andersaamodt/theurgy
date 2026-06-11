@@ -34,6 +34,8 @@ Phase 1 establishes the shared contract and installable spells:
 - `check-theurgy-web-runtime` reports the runtime components and policy.
 - `capture-theurgy-cgi-context` converts CGI environment variables into the
   normalized JSON request context.
+- `replay-theurgy-cgi-fixture` replays captured `env.tsv`, `query.txt`, and
+  `body.txt` fixtures against a runtime command with a hard argv boundary.
 - `conjure-enterprise-website` writes `theurgy.web.toml` and a
   `cgi/theurgy-cgi-context` compatibility adapter.
 
@@ -54,4 +56,4 @@ Desk should become the first site module because it is narrow and file-backed:
 ## Boundaries
 
 The harness replaces shell in hot request paths. It does not replace Wizardry
-spells, Headquarters deployments, file-first state, or site-local configuration.
+spells, Deployments actuation, file-first state, or site-local configuration.
