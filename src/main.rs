@@ -1300,7 +1300,10 @@ import SwiftUI
 struct RuntimeContract {
   let protocolName = "__PROTOCOL__"
   let stateCommand = __STATE_COMMAND__
+  let statusCommand = __STATUS_COMMAND__
   let actionCommand = __ACTION_COMMAND__
+  let historyCommand = __HISTORY_COMMAND__
+  let daemonCommand = __DAEMON_COMMAND__
 }
 
 struct RuntimeContractView: View {
@@ -1312,7 +1315,10 @@ struct RuntimeContractView: View {
         Section("Runtime") {
           Text(contract.protocolName)
           Text(contract.stateCommand.joined(separator: " "))
+          Text(contract.statusCommand.joined(separator: " "))
           Text(contract.actionCommand.joined(separator: " "))
+          Text(contract.historyCommand.joined(separator: " "))
+          Text(contract.daemonCommand.joined(separator: " "))
         }
       }
       .navigationTitle("__APP_NAME__")
@@ -1337,8 +1343,20 @@ struct TheurgyMobileApp: App {
             &swift_string_array_literal(&runtime.state_command),
         )
         .replace(
+            "__STATUS_COMMAND__",
+            &swift_string_array_literal(&runtime.status_command),
+        )
+        .replace(
             "__ACTION_COMMAND__",
             &swift_string_array_literal(&runtime.action_command),
+        )
+        .replace(
+            "__HISTORY_COMMAND__",
+            &swift_string_array_literal(&runtime.history_command),
+        )
+        .replace(
+            "__DAEMON_COMMAND__",
+            &swift_string_array_literal(&runtime.daemon_command),
         )
 }
 
@@ -1352,12 +1370,15 @@ import android.widget.TextView;
 public final class MainActivity extends Activity {
   private static final String PROTOCOL = "__PROTOCOL__";
   private static final String[] STATE_COMMAND = __STATE_COMMAND__;
+  private static final String[] STATUS_COMMAND = __STATUS_COMMAND__;
   private static final String[] ACTION_COMMAND = __ACTION_COMMAND__;
+  private static final String[] HISTORY_COMMAND = __HISTORY_COMMAND__;
+  private static final String[] DAEMON_COMMAND = __DAEMON_COMMAND__;
 
   @Override public void onCreate(Bundle state) {
     super.onCreate(state);
     TextView view = new TextView(this);
-    view.setText("__APP_NAME__\nRuntime: " + PROTOCOL + "\nState: " + String.join(" ", STATE_COMMAND) + "\nAction: " + String.join(" ", ACTION_COMMAND));
+    view.setText("__APP_NAME__\nRuntime: " + PROTOCOL + "\nState: " + String.join(" ", STATE_COMMAND) + "\nStatus: " + String.join(" ", STATUS_COMMAND) + "\nAction: " + String.join(" ", ACTION_COMMAND) + "\nHistory: " + String.join(" ", HISTORY_COMMAND) + "\nDaemon: " + String.join(" ", DAEMON_COMMAND));
     setContentView(view);
   }
 }
@@ -1370,8 +1391,20 @@ public final class MainActivity extends Activity {
             &java_string_array_literal(&runtime.state_command),
         )
         .replace(
+            "__STATUS_COMMAND__",
+            &java_string_array_literal(&runtime.status_command),
+        )
+        .replace(
             "__ACTION_COMMAND__",
             &java_string_array_literal(&runtime.action_command),
+        )
+        .replace(
+            "__HISTORY_COMMAND__",
+            &java_string_array_literal(&runtime.history_command),
+        )
+        .replace(
+            "__DAEMON_COMMAND__",
+            &java_string_array_literal(&runtime.daemon_command),
         )
 }
 
@@ -2111,13 +2144,27 @@ mod tests {
         let ios_root = test_root("compile-ios");
         let android_root = test_root("compile-android");
         let product = sample_mobile_product();
-        compile_native(&product, "ios", &ios_root).unwrap();
-        compile_native(&product, "android", &android_root).unwrap();
+        let summary = validate_product_ir(&product).unwrap();
+        let ios_surface = project_surface(&product, "ios").unwrap();
+        let android_surface = project_surface(&product, "android").unwrap();
+        let runtime = sample_full_runtime_contract();
+        compile_native_with_contract(&summary, &ios_surface, &runtime, "ios", &ios_root).unwrap();
+        compile_native_with_contract(
+            &summary,
+            &android_surface,
+            &runtime,
+            "android",
+            &android_root,
+        )
+        .unwrap();
 
         let ios = fs::read_to_string(ios_root.join("Host/App.swift")).unwrap();
         assert!(ios.contains("theurgy-runtime.json"));
         assert!(ios.contains("theurgy-runtime-action/v1"));
         assert!(ios.contains("\"deployments-core\", \"runtime-state\""));
+        assert!(ios.contains("\"deployments-core\", \"runtime-status\""));
+        assert!(ios.contains("\"deployments-core\", \"runtime-history\""));
+        assert!(ios.contains("\"deployments-daemon\""));
 
         let android = fs::read_to_string(
             android_root.join("app/src/main/java/app/theurgy/generated/MainActivity.java"),
@@ -2125,6 +2172,9 @@ mod tests {
         .unwrap();
         assert!(android.contains("theurgy-runtime-action/v1"));
         assert!(android.contains("new String[] {\"deployments-core\", \"runtime-action\"}"));
+        assert!(android.contains("new String[] {\"deployments-core\", \"runtime-status\"}"));
+        assert!(android.contains("new String[] {\"deployments-core\", \"runtime-history\"}"));
+        assert!(android.contains("new String[] {\"deployments-daemon\"}"));
 
         fs::remove_dir_all(ios_root).unwrap();
         fs::remove_dir_all(android_root).unwrap();
@@ -2139,6 +2189,21 @@ mod tests {
             "\"targets\": [\"macos\", \"linux\"]",
             "\"targets\": [\"ios\", \"android\"]",
         )
+    }
+
+    fn sample_full_runtime_contract() -> RuntimeContract {
+        RuntimeContract {
+            app_id: "deployments".to_string(),
+            protocol: "theurgy-runtime-action/v1".to_string(),
+            state_command: vec!["deployments-core".to_string(), "runtime-state".to_string()],
+            status_command: vec!["deployments-core".to_string(), "runtime-status".to_string()],
+            action_command: vec!["deployments-core".to_string(), "runtime-action".to_string()],
+            history_command: vec![
+                "deployments-core".to_string(),
+                "runtime-history".to_string(),
+            ],
+            daemon_command: vec!["deployments-daemon".to_string()],
+        }
     }
 
     fn sample_action_ir() -> String {
