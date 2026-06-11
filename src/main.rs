@@ -204,7 +204,8 @@ fn command_validate_surface_ir(args: &[String]) -> Result<()> {
 }
 
 fn command_project_surface(args: &[String]) -> Result<()> {
-    let (path, target) = parse_product_target_args(args, "usage: project-surface PRODUCT_IR --target TARGET")?;
+    let (path, target) =
+        parse_product_target_args(args, "usage: project-surface PRODUCT_IR --target TARGET")?;
     let product = read_json(path)?;
     validate_product_ir(&product)?;
     let surface = project_surface(&product, target)?;
@@ -232,12 +233,65 @@ fn command_compile_app(args: &[String]) -> Result<()> {
             manifest_path.display()
         ))
     })?;
-    let product_ir = manifest_value(&manifest, "product_ir")
-        .map_err(|_| TheurgyError::new("compile-app requires product_ir in theurgy.project.toml"))?;
+    let product_ir = manifest_value(&manifest, "product_ir").map_err(|_| {
+        TheurgyError::new("compile-app requires product_ir in theurgy.project.toml")
+    })?;
+    let runtime_manifest = manifest_value(&manifest, "runtime_manifest").map_err(|_| {
+        TheurgyError::new("compile-app requires runtime_manifest in theurgy.project.toml")
+    })?;
+    let surface_key = if matches!(target, "macos" | "linux") {
+        "desktop_surface_ir"
+    } else {
+        "mobile_surface_ir"
+    };
+    let surface_ir = manifest_value(&manifest, surface_key).map_err(|_| {
+        TheurgyError::new(format!(
+            "compile-app requires {surface_key} in theurgy.project.toml for target {target}"
+        ))
+    })?;
     let product_path = app_dir.join(product_ir);
+    let runtime_path = app_dir.join(runtime_manifest);
+    let surface_path = app_dir.join(surface_ir);
     let product = read_json(&product_path)?;
-    validate_product_ir(&product)?;
-    compile_native(&product, target, out_dir)?;
+    let product_summary = validate_product_ir(&product)?;
+    if !product_summary
+        .targets
+        .iter()
+        .any(|candidate| candidate == target)
+    {
+        return Err(
+            TheurgyError::new(format!("product IR does not declare target: {target}")).into(),
+        );
+    }
+    let runtime_text = read_json(&runtime_path)?;
+    let runtime_summary = validate_runtime_manifest(&runtime_text)?;
+    if runtime_summary.app_id != product_summary.app_id {
+        return Err(TheurgyError::new("runtime manifest app does not match product IR app").into());
+    }
+    let runtime_contract = runtime_contract_from_manifest(&runtime_text)?;
+    let surface = read_json(&surface_path)?;
+    let surface_summary = validate_surface_ir(&surface)?;
+    if surface_summary.product != product_summary.app_id {
+        return Err(TheurgyError::new("surface IR product does not match product IR app").into());
+    }
+    let expected_surface_target = if matches!(target, "macos" | "linux") {
+        "desktop"
+    } else {
+        "mobile"
+    };
+    if surface_summary.target != target && surface_summary.target != expected_surface_target {
+        return Err(TheurgyError::new(format!(
+            "surface IR target must be {target} or {expected_surface_target}"
+        ))
+        .into());
+    }
+    compile_native_with_contract(
+        &product_summary,
+        &surface,
+        &runtime_contract,
+        target,
+        out_dir,
+    )?;
     println!("status=ok");
     println!("app={}", app_dir.display());
     println!("target={target}");
@@ -255,7 +309,12 @@ fn command_inspect_app(args: &[String]) -> Result<()> {
         .unwrap_or_else(|| PathBuf::from("."));
     command_inspect(&[path.display().to_string()])?;
     let manifest = fs::read_to_string(path.join("theurgy.project.toml")).unwrap_or_default();
-    for key in ["product_ir", "desktop_surface_ir", "mobile_surface_ir", "runtime_manifest"] {
+    for key in [
+        "product_ir",
+        "desktop_surface_ir",
+        "mobile_surface_ir",
+        "runtime_manifest",
+    ] {
         if let Ok(value) = manifest_value(&manifest, key) {
             println!("{key}={value}");
         }
@@ -316,6 +375,16 @@ struct SurfaceSummary {
     target: String,
 }
 
+#[derive(Debug, Eq, PartialEq)]
+struct RuntimeContract {
+    app_id: String,
+    protocol: String,
+    state_command: Vec<String>,
+    action_command: Vec<String>,
+    history_command: Vec<String>,
+    daemon_command: Vec<String>,
+}
+
 fn read_json(path: &Path) -> Result<String> {
     let text = fs::read_to_string(path).map_err(|error| {
         TheurgyError::new(format!("could not read {}: {error}", path.display()))
@@ -342,6 +411,19 @@ fn validate_runtime_manifest(text: &str) -> Result<RuntimeManifestSummary> {
         .filter(|protocol| !protocol.is_empty())
         .ok_or_else(|| TheurgyError::new("runtime manifest protocol required"))?;
     Ok(RuntimeManifestSummary { app_id, protocol })
+}
+
+fn runtime_contract_from_manifest(text: &str) -> Result<RuntimeContract> {
+    let summary = validate_runtime_manifest(text)?;
+    let runtime = json_object_for_key(text, "runtime")?;
+    Ok(RuntimeContract {
+        app_id: summary.app_id,
+        protocol: summary.protocol,
+        state_command: json_string_array(runtime, "stateCommand")?,
+        action_command: json_string_array(runtime, "actionCommand")?,
+        history_command: json_string_array(runtime, "historyCommand").unwrap_or_default(),
+        daemon_command: json_string_array(runtime, "daemonCommand").unwrap_or_default(),
+    })
 }
 
 fn validate_surface_ir(text: &str) -> Result<SurfaceSummary> {
@@ -452,8 +534,8 @@ fn expect_json_string(text: &str, key: &str, expected: &str) -> Result<()> {
 
 fn validate_json_params(raw: &str) -> Result<()> {
     let trimmed = raw.trim();
-    let looks_like_json =
-        (trimmed.starts_with('{') && trimmed.ends_with('}')) || (trimmed.starts_with('[') && trimmed.ends_with(']'));
+    let looks_like_json = (trimmed.starts_with('{') && trimmed.ends_with('}'))
+        || (trimmed.starts_with('[') && trimmed.ends_with(']'));
     if looks_like_json {
         Ok(())
     } else {
@@ -621,9 +703,9 @@ fn valid_slug(value: &str) -> bool {
 
 fn valid_action_id(value: &str) -> bool {
     !value.is_empty()
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_' | b'.'))
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_' | b'.')
+        })
 }
 
 fn parse_product_target_args<'a>(args: &'a [String], usage: &str) -> Result<(&'a Path, &'a str)> {
@@ -638,7 +720,10 @@ fn parse_product_target_args<'a>(args: &'a [String], usage: &str) -> Result<(&'a
 }
 
 fn parse_compile_args<'a>(args: &'a [String]) -> Result<(&'a Path, &'a str, &'a Path)> {
-    if args.len() != 5 || args.get(1).map(String::as_str) != Some("--target") || args.get(3).map(String::as_str) != Some("--out") {
+    if args.len() != 5
+        || args.get(1).map(String::as_str) != Some("--target")
+        || args.get(3).map(String::as_str) != Some("--out")
+    {
         return Err(TheurgyError::new("usage: compile-native PRODUCT_IR --target TARGET --out OUT_DIR or compile-app APP_DIR --target TARGET --out OUT_DIR").into());
     }
     let target = args[2].as_str();
@@ -651,7 +736,9 @@ fn parse_compile_args<'a>(args: &'a [String]) -> Result<(&'a Path, &'a str, &'a 
 fn project_surface(product: &str, target: &str) -> Result<String> {
     let summary = validate_product_ir(product)?;
     if !summary.targets.iter().any(|candidate| candidate == target) {
-        return Err(TheurgyError::new(format!("product IR does not declare target: {target}")).into());
+        return Err(
+            TheurgyError::new(format!("product IR does not declare target: {target}")).into(),
+        );
     }
     let action_ids = json_string_array_literal(&summary.action_ids);
     if matches!(target, "macos" | "linux") {
@@ -676,6 +763,30 @@ fn project_surface(product: &str, target: &str) -> Result<String> {
 fn compile_native(product: &str, target: &str, out_dir: &Path) -> Result<()> {
     let summary = validate_product_ir(product)?;
     let surface = project_surface(product, target)?;
+    let runtime = RuntimeContract {
+        app_id: summary.app_id.clone(),
+        protocol: "theurgy-runtime-action/v1".to_string(),
+        state_command: vec![
+            format!("{}-core", summary.app_id),
+            "runtime-state".to_string(),
+        ],
+        action_command: vec![
+            format!("{}-core", summary.app_id),
+            "runtime-action".to_string(),
+        ],
+        history_command: Vec::new(),
+        daemon_command: Vec::new(),
+    };
+    compile_native_with_contract(&summary, &surface, &runtime, target, out_dir)
+}
+
+fn compile_native_with_contract(
+    summary: &ProductSummary,
+    surface: &str,
+    runtime: &RuntimeContract,
+    target: &str,
+    out_dir: &Path,
+) -> Result<()> {
     fs::create_dir_all(out_dir)?;
     write_or_replace(
         &out_dir.join("theurgy-surface.json"),
@@ -683,13 +794,7 @@ fn compile_native(product: &str, target: &str, out_dir: &Path) -> Result<()> {
     )?;
     write_or_replace(
         &out_dir.join("theurgy-runtime.json"),
-        &format!(
-            "{{\n  \"version\": \"theurgy-generated-runtime/v1\",\n  \"app\": \"{}\",\n  \"target\": \"{}\",\n  \"stateCommand\": [\"{}-core\", \"runtime-state\"],\n  \"actionCommand\": [\"{}-core\", \"runtime-action\"],\n  \"surface\": \"theurgy-surface.json\"\n}}\n",
-            json_escape(&summary.app_id),
-            json_escape(target),
-            json_escape(&summary.app_id),
-            json_escape(&summary.app_id)
-        ),
+        &generated_runtime_metadata(runtime, target),
     )?;
     match target {
         "macos" => compile_macos(&summary, out_dir),
@@ -698,6 +803,39 @@ fn compile_native(product: &str, target: &str, out_dir: &Path) -> Result<()> {
         "android" => compile_android(&summary, out_dir),
         _ => Err(TheurgyError::new("unsupported target").into()),
     }
+}
+
+fn generated_runtime_metadata(runtime: &RuntimeContract, target: &str) -> String {
+    let mut lines = vec![
+        "{".to_string(),
+        "  \"version\": \"theurgy-generated-runtime/v1\",".to_string(),
+        format!("  \"app\": \"{}\",", json_escape(&runtime.app_id)),
+        format!("  \"target\": \"{}\",", json_escape(target)),
+        format!("  \"protocol\": \"{}\",", json_escape(&runtime.protocol)),
+        format!(
+            "  \"stateCommand\": {},",
+            json_string_array_literal(&runtime.state_command)
+        ),
+        format!(
+            "  \"actionCommand\": {},",
+            json_string_array_literal(&runtime.action_command)
+        ),
+    ];
+    if !runtime.history_command.is_empty() {
+        lines.push(format!(
+            "  \"historyCommand\": {},",
+            json_string_array_literal(&runtime.history_command)
+        ));
+    }
+    if !runtime.daemon_command.is_empty() {
+        lines.push(format!(
+            "  \"daemonCommand\": {},",
+            json_string_array_literal(&runtime.daemon_command)
+        ));
+    }
+    lines.push("  \"surface\": \"theurgy-surface.json\"".to_string());
+    lines.push("}".to_string());
+    format!("{}\n", lines.join("\n"))
 }
 
 fn compile_macos(summary: &ProductSummary, out_dir: &Path) -> Result<()> {
@@ -1178,7 +1316,10 @@ mod tests {
         let product = sample_product();
         let summary = validate_product_ir(&product).unwrap();
         assert_eq!(summary.app_id, "deployments");
-        assert_eq!(summary.targets, vec!["macos".to_string(), "linux".to_string()]);
+        assert_eq!(
+            summary.targets,
+            vec!["macos".to_string(), "linux".to_string()]
+        );
         assert_eq!(summary.actions, 2);
     }
 
@@ -1213,7 +1354,61 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    #[test]
+    fn compile_app_uses_declared_runtime_manifest_and_surface() {
+        let app = test_root("compile-app");
+        let out = test_root("compile-app-out");
+        fs::create_dir_all(app.join("app-blueprint")).unwrap();
+        write_or_replace(
+            &app.join("theurgy.project.toml"),
+            "name = \"deployments\"\nkind = \"desktop\"\nsource_root = \"src\"\nproduct_ir = \"app-blueprint/product.ir.json\"\ndesktop_surface_ir = \"app-blueprint/desktop.surface.ir.json\"\nruntime_manifest = \"app-blueprint/runtime.manifest.json\"\n",
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/product.ir.json"),
+            &sample_product(),
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/runtime.manifest.json"),
+            &sample_runtime_manifest(),
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/desktop.surface.ir.json"),
+            &sample_desktop_surface(),
+        )
+        .unwrap();
+
+        command_compile_app(&[
+            app.display().to_string(),
+            "--target".to_string(),
+            "linux".to_string(),
+            "--out".to_string(),
+            out.display().to_string(),
+        ])
+        .unwrap();
+
+        let runtime = fs::read_to_string(out.join("theurgy-runtime.json")).unwrap();
+        assert!(runtime.contains("\"protocol\": \"deployments-runtime/v1\""));
+        assert!(runtime.contains("\"stateCommand\": [\"custom-core\", \"state\"]"));
+        assert!(runtime.contains("\"historyCommand\": [\"custom-core\", \"history\"]"));
+        let surface = fs::read_to_string(out.join("theurgy-surface.json")).unwrap();
+        assert!(surface.contains("\"role\": \"declared-reference-surface\""));
+
+        fs::remove_dir_all(app).unwrap();
+        fs::remove_dir_all(out).unwrap();
+    }
+
     fn sample_product() -> String {
         "{\n  \"version\": \"theurgy-product-ir/v1\",\n  \"format\": \"json\",\n  \"app\": {\n    \"id\": \"deployments\",\n    \"name\": \"Deployments\",\n    \"targets\": [\"macos\", \"linux\"],\n    \"capabilities\": [\"native-desktop\", \"runtime-actions\"]\n  },\n  \"domain\": {\n    \"objects\": [\n      {\"id\": \"server\", \"label\": \"Server\"},\n      {\"id\": \"deployment\", \"label\": \"Deployment\"}\n    ]\n  },\n  \"actions\": [\n    {\"id\": \"refresh_state\", \"label\": \"Refresh\", \"input\": {}, \"output\": {}, \"effect\": \"read\", \"failure\": {}, \"safe\": true, \"mutating\": false, \"longRunning\": false, \"privileged\": false},\n    {\"id\": \"publish_changes\", \"label\": \"Push to Production\", \"input\": {}, \"output\": {}, \"effect\": \"release\", \"failure\": {}, \"safe\": false, \"mutating\": true, \"longRunning\": true, \"privileged\": true}\n  ],\n  \"state\": {\n    \"snapshotSchema\": \"deployments-state/v1\",\n    \"roots\": [{\"id\": \"headquarters-workspace\", \"kind\": \"xdg-state\"}]\n  }\n}".to_string()
+    }
+
+    fn sample_runtime_manifest() -> String {
+        "{\n  \"version\": \"theurgy-runtime-manifest/v1\",\n  \"app\": \"deployments\",\n  \"productIr\": \"app-blueprint/product.ir.json\",\n  \"runtime\": {\n    \"stateCommand\": [\"custom-core\", \"state\"],\n    \"actionCommand\": [\"custom-core\", \"action\"],\n    \"historyCommand\": [\"custom-core\", \"history\"],\n    \"protocol\": \"deployments-runtime/v1\"\n  },\n  \"surfaces\": {\n    \"desktop\": \"app-blueprint/desktop.surface.ir.json\"\n  }\n}".to_string()
+    }
+
+    fn sample_desktop_surface() -> String {
+        "{\n  \"version\": \"theurgy-desktop-surface-ir/v1\",\n  \"format\": \"json\",\n  \"product\": \"deployments\",\n  \"target\": \"desktop\",\n  \"actions\": [\"refresh_state\", \"publish_changes\"],\n  \"window\": {\n    \"id\": \"window.main\",\n    \"type\": \"Window\",\n    \"title\": \"Deployments\",\n    \"role\": \"declared-reference-surface\"\n  }\n}".to_string()
     }
 }

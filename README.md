@@ -24,7 +24,7 @@ A Rust-backed native desktop app can be solid in a way that an app backed by man
 - well-named spells backed by `theurgy-runtime`
 - project scaffolding for native desktop apps and enterprise web apps
 - first canonical schemas for Product IR, Desktop Surface IR, Mobile Surface IR, Action IR, State Snapshot IR, and Runtime Manifest
-- product runtime/compiler commands for validation, surface projection, native adapter emission, app inspection, and JSON action envelopes
+- product runtime/compiler commands for validation, surface projection, app-manifest-driven native adapter emission, app inspection, and JSON action envelopes
 - a first-phase enterprise web runtime harness contract for CGI/HTTP/FastCGI migration
 - file-first project manifests
 - release adapters for signing, notarization, TestFlight, App Store, and Play Store flows
@@ -46,6 +46,8 @@ cargo run --bin theurgy-runtime -- project-surface product.ir.json --target maco
 cargo run --bin theurgy-runtime -- compile-native product.ir.json --target linux --out /tmp/theurgy-linux
 cargo run --bin theurgy-runtime -- compile-app /path/to/app --target macos --out /tmp/theurgy-macos
 ```
+
+`compile-native` is the raw Product IR entrypoint and may project default surfaces and runtime command names from the product contract. `compile-app` is the real application compiler entrypoint: it reads `theurgy.project.toml`, validates the declared Product IR, Runtime Manifest, and target-appropriate Surface IR, then emits adapter metadata from those declared app contracts. That keeps professional apps explicit while preserving the opt-in boundary for shell-first wizardry-apps.
 
 Install locally:
 
