@@ -3,9 +3,10 @@
   "$id": "https://wizardry.app/schemas/theurgy-runtime-action-result-v1.json",
   "title": "Theurgy Runtime Action Result v1",
   "type": "object",
-  "required": ["protocol", "action", "operation", "result"],
+  "required": ["protocol", "app", "action", "operation", "result"],
   "properties": {
     "protocol": { "const": "theurgy-runtime-action/v1" },
+    "app": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
     "action": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
     "operation": { "$ref": "#/$defs/operation" },
     "result": true

@@ -23,7 +23,7 @@ A Rust-backed native desktop app can be solid in a way that an app backed by man
 
 - well-named spells backed by `theurgy-runtime`
 - project scaffolding for native desktop apps and enterprise web apps
-- first canonical schemas for Product IR, Desktop Surface IR, Mobile Surface IR, Action IR, State Snapshot IR, Runtime Action Result, Operation History, Generated Runtime Metadata, and Runtime Manifest
+- first canonical schemas for Product IR, Desktop Surface IR, Mobile Surface IR, Action IR, State Snapshot IR, Runtime Status, Runtime Action Result, Operation History, Generated Runtime Metadata, and Runtime Manifest
 - product runtime/compiler commands for validation, surface projection, app-manifest-driven native adapter emission, app inspection, and JSON action envelopes
 - a first-phase enterprise web runtime harness contract for CGI/HTTP/FastCGI migration
 - file-first project manifests
@@ -42,6 +42,7 @@ spells/inspect-theurgy-project sample-desktop
 cargo run --bin theurgy-runtime -- validate-product-ir product.ir.json
 cargo run --bin theurgy-runtime -- validate-action-ir action.ir.json
 cargo run --bin theurgy-runtime -- validate-state-snapshot state.snapshot.json
+cargo run --bin theurgy-runtime -- validate-runtime-status runtime-status.json
 cargo run --bin theurgy-runtime -- validate-runtime-action-result action-result.json
 cargo run --bin theurgy-runtime -- validate-operation-history operation-history.json
 cargo run --bin theurgy-runtime -- validate-runtime-manifest runtime.manifest.json

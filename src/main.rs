@@ -236,6 +236,7 @@ fn command_validate_runtime_action_result(args: &[String]) -> Result<()> {
     let summary = validate_runtime_action_result(&value)?;
     println!("status=ok");
     println!("protocol=theurgy-runtime-action/v1");
+    println!("app={}", summary.app_id);
     println!("action={}", summary.action_id);
     println!("operation={}", summary.operation_id);
     Ok(())
@@ -629,11 +630,15 @@ fn run_manifest_action(runtime: &RuntimeContract, action_id: &str, params: &str)
         &[action_id.to_string(), params.to_string()],
         "action",
     )?;
-    validate_manifest_action_output(action_id, &output)?;
+    validate_manifest_action_output(&runtime.app_id, action_id, &output)?;
     Ok(output)
 }
 
-fn validate_manifest_action_output(action_id: &str, output: &str) -> Result<()> {
+fn validate_manifest_action_output(
+    expected_app: &str,
+    action_id: &str,
+    output: &str,
+) -> Result<()> {
     let value = parse_json(output)?;
     let result = manifest_payload_or_raw(&value);
     let summary = validate_runtime_action_result_value(result)?;
@@ -644,7 +649,7 @@ fn validate_manifest_action_output(action_id: &str, output: &str) -> Result<()> 
         ))
         .into());
     }
-    Ok(())
+    validate_runtime_output_app("runtime action result", expected_app, &summary.app_id)
 }
 
 fn validate_manifest_state_output(expected_app: &str, output: &str) -> Result<()> {
@@ -848,6 +853,7 @@ struct RuntimeStatusSummary {
 
 #[derive(Debug, Eq, PartialEq)]
 struct RuntimeActionResultSummary {
+    app_id: String,
     action_id: String,
     operation_id: String,
 }
@@ -1133,6 +1139,9 @@ fn validate_runtime_action_result(text: &str) -> Result<RuntimeActionResultSumma
 
 fn validate_runtime_action_result_value(value: &Value) -> Result<RuntimeActionResultSummary> {
     expect_value_string(value, "protocol", "theurgy-runtime-action/v1")?;
+    let app_id = value_string(value, "app")
+        .filter(|id| valid_slug(id))
+        .ok_or_else(|| TheurgyError::new("runtime action result app must be a lowercase slug"))?;
     let action_id = value_string(value, "action")
         .filter(|id| valid_action_id(id))
         .ok_or_else(|| {
@@ -1144,6 +1153,7 @@ fn validate_runtime_action_result_value(value: &Value) -> Result<RuntimeActionRe
         return Err(TheurgyError::new("runtime action result result required").into());
     }
     Ok(RuntimeActionResultSummary {
+        app_id,
         action_id,
         operation_id,
     })
@@ -2999,12 +3009,18 @@ mod tests {
     fn validates_runtime_action_result_contract() {
         let result = sample_runtime_action_result();
         let summary = validate_runtime_action_result(&result).unwrap();
+        assert_eq!(summary.app_id, "deployments");
         assert_eq!(summary.action_id, "publish_changes");
         assert_eq!(summary.operation_id, "deployments-publish_changes-123");
     }
 
     #[test]
     fn runtime_action_result_validation_requires_typed_operation() {
+        let result = sample_runtime_action_result().replace("\"app\": \"deployments\",\n", "");
+        let error = validate_runtime_action_result(&result)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("runtime action result app"));
         let result = sample_runtime_action_result()
             .replace("\"longRunning\": true", "\"long_running\": true");
         let error = validate_runtime_action_result(&result)
@@ -3119,6 +3135,12 @@ mod tests {
             "../schemas/theurgy-runtime-action-result-v1.json"
         ))
         .unwrap();
+        assert_eq!(
+            schema
+                .pointer("/properties/app/pattern")
+                .and_then(Value::as_str),
+            Some("^[a-z][a-z0-9-]*$")
+        );
         assert_eq!(
             schema
                 .pointer("/properties/operation/$ref")
@@ -3248,10 +3270,23 @@ mod tests {
             "\"action\": \"publish_changes\"",
             "\"action\": \"refresh_state\"",
         );
-        let error = validate_manifest_action_output("publish_changes", &output).unwrap_err();
+        let error =
+            validate_manifest_action_output("deployments", "publish_changes", &output).unwrap_err();
         assert_eq!(
             error.to_string(),
             "runtime action result action mismatch: expected publish_changes, got refresh_state"
+        );
+    }
+
+    #[test]
+    fn manifest_action_output_rejects_app_mismatch() {
+        let output = sample_runtime_action_result()
+            .replace("\"app\": \"deployments\"", "\"app\": \"other-app\"");
+        let error =
+            validate_manifest_action_output("deployments", "publish_changes", &output).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "runtime action result app mismatch: expected deployments, got other-app"
         );
     }
 
@@ -3876,7 +3911,7 @@ mod tests {
     }
 
     fn sample_runtime_action_result() -> String {
-        "{\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"action\": \"publish_changes\",\n  \"operation\": {\n    \"id\": \"deployments-publish_changes-123\",\n    \"status\": \"completed\",\n    \"progress\": 100,\n    \"longRunning\": true\n  },\n  \"result\": {\"message\": \"published\"}\n}".to_string()
+        "{\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments\",\n  \"action\": \"publish_changes\",\n  \"operation\": {\n    \"id\": \"deployments-publish_changes-123\",\n    \"status\": \"completed\",\n    \"progress\": 100,\n    \"longRunning\": true\n  },\n  \"result\": {\"message\": \"published\"}\n}".to_string()
     }
 
     fn sample_operation_history() -> String {
@@ -3891,7 +3926,7 @@ mod tests {
         let runtime = root.join("runtime-fixture");
         write_executable(
             &runtime,
-            "#!/bin/sh\nset -eu\ncase \"${1-}\" in\n  state) printf '{\"schema\":\"theurgy-state-snapshot/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"data\":{}}\\n' ;;\n  status) printf '{\"schema\":\"theurgy-runtime-status/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"state_ready\":true}\\n' ;;\n  history) printf '{\"schema\":\"theurgy-operation-history/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"data\":[],\"subject\":\"%s\",\"limit\":\"%s\"}\\n' \"${2-}\" \"${3-}\" ;;\n  action) printf '{\"success\":true,\"data\":{\"protocol\":\"theurgy-runtime-action/v1\",\"action\":\"%s\",\"operation\":{\"id\":\"op-%s\",\"status\":\"completed\",\"progress\":100,\"longRunning\":false},\"result\":{\"params\":%s}}}\\n' \"${2-}\" \"${2-}\" \"${3-}\" ;;\n  *) printf 'unknown fixture command\\n' >&2; exit 2 ;;\nesac\n",
+            "#!/bin/sh\nset -eu\ncase \"${1-}\" in\n  state) printf '{\"schema\":\"theurgy-state-snapshot/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"data\":{}}\\n' ;;\n  status) printf '{\"schema\":\"theurgy-runtime-status/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"state_ready\":true}\\n' ;;\n  history) printf '{\"schema\":\"theurgy-operation-history/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"data\":[],\"subject\":\"%s\",\"limit\":\"%s\"}\\n' \"${2-}\" \"${3-}\" ;;\n  action) printf '{\"success\":true,\"data\":{\"protocol\":\"theurgy-runtime-action/v1\",\"app\":\"deployments\",\"action\":\"%s\",\"operation\":{\"id\":\"op-%s\",\"status\":\"completed\",\"progress\":100,\"longRunning\":false},\"result\":{\"params\":%s}}}\\n' \"${2-}\" \"${2-}\" \"${3-}\" ;;\n  *) printf 'unknown fixture command\\n' >&2; exit 2 ;;\nesac\n",
         )
         .unwrap();
         write_or_replace(&blueprint.join("product.ir.json"), &sample_product()).unwrap();
