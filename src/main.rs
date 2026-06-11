@@ -5,6 +5,7 @@ use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use serde_json::Value;
 
@@ -353,10 +354,17 @@ fn command_inspect_app(args: &[String]) -> Result<()> {
 
 fn command_run_action(args: &[String]) -> Result<()> {
     if args.is_empty() {
-        return Err(TheurgyError::new("usage: run-action ACTION_ID --json PARAMS").into());
+        return Err(TheurgyError::new(
+            "usage: run-action ACTION_ID [--json PARAMS] [--manifest PATH]",
+        )
+        .into());
     }
     let action_id = &args[0];
+    if !valid_action_id(action_id) {
+        return Err(TheurgyError::new("run-action ACTION_ID must be a stable action id").into());
+    }
     let mut params = "{}".to_string();
+    let mut manifest_path: Option<PathBuf> = None;
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
@@ -368,18 +376,66 @@ fn command_run_action(args: &[String]) -> Result<()> {
                 params = raw.to_string();
                 index += 2;
             }
+            "--manifest" => {
+                let raw = args
+                    .get(index + 1)
+                    .ok_or_else(|| TheurgyError::new("run-action --manifest requires PATH"))?;
+                manifest_path = Some(PathBuf::from(raw));
+                index += 2;
+            }
             other => {
                 return Err(TheurgyError::new(format!("unknown run-action option: {other}")).into())
             }
         }
     }
-    println!(
+    let output = run_action_output(action_id, &params, manifest_path.as_deref())?;
+    print!("{output}");
+    Ok(())
+}
+
+fn run_action_output(
+    action_id: &str,
+    params: &str,
+    manifest_path: Option<&Path>,
+) -> Result<String> {
+    validate_json_params(params)?;
+    if let Some(path) = manifest_path {
+        let manifest = fs::read_to_string(path).map_err(|error| {
+            TheurgyError::new(format!("could not read {}: {error}", path.display()))
+        })?;
+        let runtime = runtime_contract_from_manifest(&manifest)?;
+        return run_manifest_action(&runtime, action_id, params);
+    }
+    Ok(format!(
         "{{\n  \"success\": true,\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"action\": \"{}\",\n  \"operation\": {{\n    \"id\": \"op-{}\",\n    \"status\": \"accepted\",\n    \"progress\": 0,\n    \"longRunning\": false\n  }},\n  \"params\": {}\n}}",
         json_escape(action_id),
         json_escape(action_id),
         params
-    );
-    Ok(())
+    ))
+}
+
+fn run_manifest_action(runtime: &RuntimeContract, action_id: &str, params: &str) -> Result<String> {
+    let Some(executable) = runtime.action_command.first() else {
+        return Err(TheurgyError::new("runtime manifest actionCommand required").into());
+    };
+    let output = Command::new(executable)
+        .args(&runtime.action_command[1..])
+        .arg(action_id)
+        .arg(params)
+        .output()
+        .map_err(|error| TheurgyError::new(format!("could not run action command: {error}")))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let message = if stderr.is_empty() {
+            format!("action command exited with {}", output.status)
+        } else {
+            stderr
+        };
+        return Err(TheurgyError::new(message).into());
+    }
+    String::from_utf8(output.stdout).map_err(|error| {
+        TheurgyError::new(format!("action command output was not UTF-8: {error}")).into()
+    })
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -1740,6 +1796,62 @@ mod tests {
         assert!(validate_json_params("[1,2]").is_ok());
         assert!(validate_json_params("\"scalar\"").is_err());
         assert!(validate_json_params("{").is_err());
+    }
+
+    #[test]
+    fn run_action_without_manifest_returns_protocol_envelope() {
+        let output = run_action_output("refresh_state", "{\"force\":true}", None).unwrap();
+        let value: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(value.get("success").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            value.get("protocol").and_then(Value::as_str),
+            Some("theurgy-runtime-action/v1")
+        );
+        assert_eq!(
+            value.get("action").and_then(Value::as_str),
+            Some("refresh_state")
+        );
+        assert_eq!(
+            value.pointer("/params/force").and_then(Value::as_bool),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn run_action_with_manifest_dispatches_action_command() {
+        let root = test_root("run-action");
+        fs::create_dir_all(&root).unwrap();
+        let runtime = root.join("runtime-action-fixture");
+        write_executable(
+            &runtime,
+            "#!/bin/sh\nset -eu\nprintf '{\"success\":true,\"action\":\"%s\",\"params\":%s}\\n' \"$1\" \"$2\"\n",
+        )
+        .unwrap();
+        let manifest = root.join("runtime.manifest.json");
+        write_or_replace(
+            &manifest,
+            &format!(
+                "{{\n  \"version\": \"theurgy-runtime-manifest/v1\",\n  \"app\": \"deployments\",\n  \"productIr\": \"app-blueprint/product.ir.json\",\n  \"runtime\": {{\n    \"stateCommand\": [\"{}\", \"state\"],\n    \"actionCommand\": [\"{}\"],\n    \"protocol\": \"deployments-runtime/v1\"\n  }}\n}}",
+                json_escape(&runtime.display().to_string()),
+                json_escape(&runtime.display().to_string())
+            ),
+        )
+        .unwrap();
+
+        let output =
+            run_action_output("refresh_state", "{\"force\":true}", Some(&manifest)).unwrap();
+        let value: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(value.get("success").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            value.get("action").and_then(Value::as_str),
+            Some("refresh_state")
+        );
+        assert_eq!(
+            value.pointer("/params/force").and_then(Value::as_bool),
+            Some(true)
+        );
+
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

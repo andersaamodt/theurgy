@@ -47,6 +47,7 @@ cargo run --bin theurgy-runtime -- validate-surface-ir desktop.surface.ir.json
 cargo run --bin theurgy-runtime -- project-surface product.ir.json --target macos
 cargo run --bin theurgy-runtime -- compile-native product.ir.json --target linux --out /tmp/theurgy-linux
 cargo run --bin theurgy-runtime -- compile-app /path/to/app --target macos --out /tmp/theurgy-macos
+cargo run --bin theurgy-runtime -- run-action refresh_state --json '{}' --manifest runtime.manifest.json
 ```
 
 `compile-native` is the raw Product IR entrypoint and may project default surfaces and runtime command names from the product contract. `compile-app` is the real application compiler entrypoint: it reads `theurgy.project.toml`, validates the declared Product IR, Runtime Manifest, and target-appropriate Surface IR, then emits adapter metadata from those declared app contracts. That keeps professional apps explicit while preserving the opt-in boundary for shell-first wizardry-apps.
