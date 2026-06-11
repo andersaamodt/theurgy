@@ -8,7 +8,7 @@
     "version": { "const": "theurgy-mobile-surface-ir/v1" },
     "format": { "const": "json" },
     "product": { "type": "string", "minLength": 1 },
-    "target": { "enum": ["ios", "android"] },
+    "target": { "enum": ["mobile", "ios", "android"] },
     "screens": { "type": "array", "items": { "$ref": "#/$defs/screen" }, "minItems": 1 },
     "actions": { "type": "array", "items": { "type": "string" } }
   },

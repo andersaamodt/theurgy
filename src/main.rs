@@ -1840,9 +1840,15 @@ fn validate_surface_ir(text: &str) -> Result<SurfaceSummary> {
     let action_ids = surface_action_ids(&value)?;
     let mut roles = Vec::new();
     if schema == "theurgy-desktop-surface-ir/v1" {
+        if !matches!(target.as_str(), "desktop" | "macos" | "linux") {
+            return Err(TheurgyError::new("desktop surface IR target invalid").into());
+        }
         let window = value_object(&value, "window")?;
         collect_surface_roles(window, &mut roles);
     } else {
+        if !matches!(target.as_str(), "mobile" | "ios" | "android") {
+            return Err(TheurgyError::new("mobile surface IR target invalid").into());
+        }
         for screen in value_array(&value, "screens")? {
             if let Ok(node) = value_object(screen, "node") {
                 collect_surface_roles(node, &mut roles);
@@ -4866,6 +4872,29 @@ mod tests {
     }
 
     #[test]
+    fn surface_ir_schemas_allow_family_targets() {
+        let desktop_schema: Value = serde_json::from_str(include_str!(
+            "../schemas/theurgy-desktop-surface-ir-v1.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            desktop_schema
+                .pointer("/properties/target/enum/0")
+                .and_then(Value::as_str),
+            Some("desktop")
+        );
+        let mobile_schema: Value =
+            serde_json::from_str(include_str!("../schemas/theurgy-mobile-surface-ir-v1.json"))
+                .unwrap();
+        assert_eq!(
+            mobile_schema
+                .pointer("/properties/target/enum/0")
+                .and_then(Value::as_str),
+            Some("mobile")
+        );
+    }
+
+    #[test]
     fn operation_status_schema_declares_operation_contract() {
         let schema: Value =
             serde_json::from_str(include_str!("../schemas/theurgy-operation-status-v1.json"))
@@ -5439,6 +5468,17 @@ mod tests {
         assert_eq!(summary.action_ids, vec!["refresh_state".to_string()]);
         assert!(summary.roles.contains(&"status-overview".to_string()));
         assert!(summary.roles.contains(&"focused-action-detail".to_string()));
+    }
+
+    #[test]
+    fn surface_ir_validation_rejects_target_family_drift() {
+        let desktop =
+            sample_desktop_surface().replace("\"target\": \"desktop\"", "\"target\": \"ios\"");
+        let error = validate_surface_ir(&desktop).unwrap_err().to_string();
+        assert_eq!(error, "desktop surface IR target invalid");
+        let mobile = "{\n  \"version\": \"theurgy-mobile-surface-ir/v1\",\n  \"format\": \"json\",\n  \"product\": \"deployments\",\n  \"target\": \"linux\",\n  \"actions\": [\"refresh_state\"],\n  \"screens\": [{\"id\": \"overview\", \"title\": \"Deployments\", \"node\": {\"id\": \"screen.overview\", \"type\": \"NavigationStack\", \"role\": \"status-overview\"}}]\n}\n";
+        let error = validate_surface_ir(mobile).unwrap_err().to_string();
+        assert_eq!(error, "mobile surface IR target invalid");
     }
 
     #[test]
@@ -6070,7 +6110,7 @@ mod tests {
         ])
         .unwrap_err()
         .to_string();
-        assert!(error.contains("surface IR schema for linux must be theurgy-desktop-surface-ir/v1"));
+        assert_eq!(error, "mobile surface IR target invalid");
 
         fs::remove_dir_all(app).unwrap();
     }
