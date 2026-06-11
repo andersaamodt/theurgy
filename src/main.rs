@@ -2258,6 +2258,10 @@ struct RuntimeContract {
   let historyCommand = __HISTORY_COMMAND__
   let daemonCommand = __DAEMON_COMMAND__
   let actionContracts = __ACTION_CONTRACTS__
+
+  func command(for action: ProductActionContract, json: String) -> [String] {
+    actionCommand + [action.id, json]
+  }
 }
 
 struct RuntimeContractView: View {
@@ -2279,6 +2283,7 @@ struct RuntimeContractView: View {
             VStack(alignment: .leading) {
               Text(action.label)
               Text(action.effect)
+              Text(contract.command(for: action, json: "{}").joined(separator: " "))
             }
           }
         }
@@ -2369,6 +2374,14 @@ public final class MainActivity extends Activity {
     }
   }
 
+  private static String[] commandFor(ProductActionContract action, String json) {
+    String[] command = new String[ACTION_COMMAND.length + 2];
+    System.arraycopy(ACTION_COMMAND, 0, command, 0, ACTION_COMMAND.length);
+    command[ACTION_COMMAND.length] = action.id;
+    command[ACTION_COMMAND.length + 1] = json;
+    return command;
+  }
+
   @Override public void onCreate(Bundle state) {
     super.onCreate(state);
     TextView view = new TextView(this);
@@ -2381,7 +2394,8 @@ public final class MainActivity extends Activity {
       .append("\nDaemon: ").append(String.join(" ", DAEMON_COMMAND))
       .append("\nActions:");
     for (ProductActionContract action : ACTION_CONTRACTS) {
-      text.append("\n").append(action.label).append(" [").append(action.effect).append("]");
+      text.append("\n").append(action.label).append(" [").append(action.effect).append("] ")
+        .append(String.join(" ", commandFor(action, "{}")));
     }
     view.setText(text.toString());
     setContentView(view);
@@ -3685,6 +3699,9 @@ mod tests {
         assert!(ios.contains("\"deployments-daemon\""));
         assert!(ios.contains("struct ProductActionContract"));
         assert!(ios.contains("let actionContracts = [ProductActionContract"));
+        assert!(ios
+            .contains("func command(for action: ProductActionContract, json: String) -> [String]"));
+        assert!(ios.contains("actionCommand + [action.id, json]"));
         assert!(ios.contains("id: \"publish_changes\""));
         assert!(ios.contains("inputKeys: [\"deployment\"]"));
         assert!(!ios.contains("id: \"refresh_state\""));
@@ -3699,6 +3716,10 @@ mod tests {
         assert!(android.contains("new String[] {\"deployments-core\", \"runtime-history\"}"));
         assert!(android.contains("new String[] {\"deployments-daemon\"}"));
         assert!(android.contains("private static final ProductActionContract[] ACTION_CONTRACTS"));
+        assert!(android.contains(
+            "private static String[] commandFor(ProductActionContract action, String json)"
+        ));
+        assert!(android.contains("command[ACTION_COMMAND.length] = action.id;"));
         assert!(android.contains(
             "new ProductActionContract(\"publish_changes\", \"Push to Production\", \"release\""
         ));
