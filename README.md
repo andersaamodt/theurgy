@@ -44,6 +44,7 @@ cargo run --bin theurgy-runtime -- validate-runtime-manifest runtime.manifest.js
 cargo run --bin theurgy-runtime -- validate-surface-ir desktop.surface.ir.json
 cargo run --bin theurgy-runtime -- project-surface product.ir.json --target macos
 cargo run --bin theurgy-runtime -- compile-native product.ir.json --target linux --out /tmp/theurgy-linux
+cargo run --bin theurgy-runtime -- compile-app /path/to/app --target macos --out /tmp/theurgy-macos
 ```
 
 Install locally:

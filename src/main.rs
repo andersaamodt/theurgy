@@ -71,6 +71,7 @@ fn run(args: Vec<String>) -> Result<()> {
         Some("validate-surface-ir") => command_validate_surface_ir(&args[2..]),
         Some("project-surface") => command_project_surface(&args[2..]),
         Some("compile-native") => command_compile_native(&args[2..]),
+        Some("compile-app") => command_compile_app(&args[2..]),
         Some("inspect-app") => command_inspect_app(&args[2..]),
         Some("run-action") => command_run_action(&args[2..]),
         Some(other) => Err(TheurgyError::new(format!("unknown command: {other}")).into()),
@@ -217,6 +218,28 @@ fn command_compile_native(args: &[String]) -> Result<()> {
     validate_product_ir(&product)?;
     compile_native(&product, target, out_dir)?;
     println!("status=ok");
+    println!("target={target}");
+    println!("out={}", out_dir.display());
+    Ok(())
+}
+
+fn command_compile_app(args: &[String]) -> Result<()> {
+    let (app_dir, target, out_dir) = parse_compile_args(args)?;
+    let manifest_path = app_dir.join("theurgy.project.toml");
+    let manifest = fs::read_to_string(&manifest_path).map_err(|error| {
+        TheurgyError::new(format!(
+            "could not read {}: {error}",
+            manifest_path.display()
+        ))
+    })?;
+    let product_ir = manifest_value(&manifest, "product_ir")
+        .map_err(|_| TheurgyError::new("compile-app requires product_ir in theurgy.project.toml"))?;
+    let product_path = app_dir.join(product_ir);
+    let product = read_json(&product_path)?;
+    validate_product_ir(&product)?;
+    compile_native(&product, target, out_dir)?;
+    println!("status=ok");
+    println!("app={}", app_dir.display());
     println!("target={target}");
     println!("out={}", out_dir.display());
     Ok(())
@@ -616,7 +639,7 @@ fn parse_product_target_args<'a>(args: &'a [String], usage: &str) -> Result<(&'a
 
 fn parse_compile_args<'a>(args: &'a [String]) -> Result<(&'a Path, &'a str, &'a Path)> {
     if args.len() != 5 || args.get(1).map(String::as_str) != Some("--target") || args.get(3).map(String::as_str) != Some("--out") {
-        return Err(TheurgyError::new("usage: compile-native PRODUCT_IR --target TARGET --out OUT_DIR").into());
+        return Err(TheurgyError::new("usage: compile-native PRODUCT_IR --target TARGET --out OUT_DIR or compile-app APP_DIR --target TARGET --out OUT_DIR").into());
     }
     let target = args[2].as_str();
     if !matches!(target, "macos" | "linux" | "ios" | "android") {

@@ -34,5 +34,6 @@ If `PATH` is omitted, the spell uses `NAME`. The generated desktop project is in
 `theurgy-runtime validate-surface-ir PATH` validates a desktop or mobile surface projection.
 `theurgy-runtime project-surface PATH --target macos|linux` emits a desktop surface projection.
 `theurgy-runtime compile-native PATH --target macos|linux --out OUT_DIR` emits a deterministic native adapter root.
+`theurgy-runtime compile-app APP_DIR --target macos|linux --out OUT_DIR` reads `theurgy.project.toml` and compiles from the app's declared Product IR.
 
 This compiler track is opt-in. Shell-first wizardry-apps projects do not depend on it unless they choose the Theurgy native runtime path.
