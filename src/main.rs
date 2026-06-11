@@ -605,11 +605,27 @@ fn run_manifest_action(runtime: &RuntimeContract, action_id: &str, params: &str)
     if let Some(contracts) = &runtime.product_action_contracts {
         validate_runtime_action_params(action_id, params, contracts)?;
     }
-    run_manifest_command_with_args(
+    let output = run_manifest_command_with_args(
         &runtime.action_command,
         &[action_id.to_string(), params.to_string()],
         "action",
-    )
+    )?;
+    validate_manifest_action_output(action_id, &output)?;
+    Ok(output)
+}
+
+fn validate_manifest_action_output(action_id: &str, output: &str) -> Result<()> {
+    let value = parse_json(output)?;
+    let result = value.get("data").unwrap_or(&value);
+    let summary = validate_runtime_action_result_value(result)?;
+    if summary.action_id != action_id {
+        return Err(TheurgyError::new(format!(
+            "runtime action result action mismatch: expected {action_id}, got {}",
+            summary.action_id
+        ))
+        .into());
+    }
+    Ok(())
 }
 
 fn validate_runtime_action_params(
@@ -1024,13 +1040,17 @@ fn validate_state_snapshot(text: &str) -> Result<StateSnapshotSummary> {
 
 fn validate_runtime_action_result(text: &str) -> Result<RuntimeActionResultSummary> {
     let value = parse_json(text)?;
-    expect_value_string(&value, "protocol", "theurgy-runtime-action/v1")?;
-    let action_id = value_string(&value, "action")
+    validate_runtime_action_result_value(&value)
+}
+
+fn validate_runtime_action_result_value(value: &Value) -> Result<RuntimeActionResultSummary> {
+    expect_value_string(value, "protocol", "theurgy-runtime-action/v1")?;
+    let action_id = value_string(value, "action")
         .filter(|id| valid_action_id(id))
         .ok_or_else(|| {
             TheurgyError::new("runtime action result action must be a stable action id")
         })?;
-    let operation = value_object(&value, "operation")?;
+    let operation = value_object(value, "operation")?;
     let operation_id = validate_operation_record(operation)?;
     if value.get("result").is_none() {
         return Err(TheurgyError::new("runtime action result result required").into());
@@ -2912,18 +2932,31 @@ mod tests {
         let value: Value = serde_json::from_str(&output).unwrap();
         assert_eq!(value.get("success").and_then(Value::as_bool), Some(true));
         assert_eq!(
-            value.get("action").and_then(Value::as_str),
+            value.pointer("/data/action").and_then(Value::as_str),
             Some("refresh_state")
         );
         assert_eq!(
             value
-                .get("params")
+                .pointer("/data/result/params")
                 .and_then(Value::as_object)
                 .map(|params| params.len()),
             Some(0)
         );
 
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn manifest_action_output_rejects_action_mismatch() {
+        let output = sample_runtime_action_result().replace(
+            "\"action\": \"publish_changes\"",
+            "\"action\": \"refresh_state\"",
+        );
+        let error = validate_manifest_action_output("publish_changes", &output).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "runtime action result action mismatch: expected publish_changes, got refresh_state"
+        );
     }
 
     #[test]
@@ -3474,7 +3507,7 @@ mod tests {
         let runtime = root.join("runtime-fixture");
         write_executable(
             &runtime,
-            "#!/bin/sh\nset -eu\ncase \"${1-}\" in\n  state) printf '{\"schema\":\"theurgy-state-snapshot/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"data\":{}}\\n' ;;\n  status) printf '{\"schema\":\"theurgy-runtime-status/v1\",\"app\":\"deployments\",\"state_ready\":true}\\n' ;;\n  history) printf '{\"schema\":\"theurgy-operation-history/v1\",\"app\":\"deployments\",\"subject\":\"%s\",\"limit\":\"%s\"}\\n' \"${2-}\" \"${3-}\" ;;\n  action) printf '{\"success\":true,\"action\":\"%s\",\"params\":%s}\\n' \"${2-}\" \"${3-}\" ;;\n  *) printf 'unknown fixture command\\n' >&2; exit 2 ;;\nesac\n",
+            "#!/bin/sh\nset -eu\ncase \"${1-}\" in\n  state) printf '{\"schema\":\"theurgy-state-snapshot/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"data\":{}}\\n' ;;\n  status) printf '{\"schema\":\"theurgy-runtime-status/v1\",\"app\":\"deployments\",\"state_ready\":true}\\n' ;;\n  history) printf '{\"schema\":\"theurgy-operation-history/v1\",\"app\":\"deployments\",\"subject\":\"%s\",\"limit\":\"%s\"}\\n' \"${2-}\" \"${3-}\" ;;\n  action) printf '{\"success\":true,\"data\":{\"protocol\":\"theurgy-runtime-action/v1\",\"action\":\"%s\",\"operation\":{\"id\":\"op-%s\",\"status\":\"completed\",\"progress\":100,\"longRunning\":false},\"result\":{\"params\":%s}}}\\n' \"${2-}\" \"${2-}\" \"${3-}\" ;;\n  *) printf 'unknown fixture command\\n' >&2; exit 2 ;;\nesac\n",
         )
         .unwrap();
         write_or_replace(&blueprint.join("product.ir.json"), &sample_product()).unwrap();
