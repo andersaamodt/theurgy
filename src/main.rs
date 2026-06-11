@@ -1609,7 +1609,7 @@ fn swift_action_contracts_literal(contracts: &[ActionContract]) -> String {
         .iter()
         .map(|contract| {
             format!(
-                "ProductActionContract(id: \"{}\", label: \"{}\", effect: \"{}\", safe: {}, mutating: {}, longRunning: {}, privileged: {}, inputKeys: {})",
+                "ProductActionContract(id: \"{}\", label: \"{}\", effect: \"{}\", safe: {}, mutating: {}, longRunning: {}, privileged: {}, inputKeys: {}, outputKeys: {}, failureKeys: {})",
                 swift_escape(&contract.id),
                 swift_escape(&contract.label),
                 swift_escape(&contract.effect),
@@ -1617,7 +1617,9 @@ fn swift_action_contracts_literal(contracts: &[ActionContract]) -> String {
                 swift_bool(contract.mutating),
                 swift_bool(contract.long_running),
                 swift_bool(contract.privileged),
-                swift_string_array_literal(&contract.input_keys)
+                swift_string_array_literal(&contract.input_keys),
+                swift_string_array_literal(&contract.output_keys),
+                swift_string_array_literal(&contract.failure_keys)
             )
         })
         .collect::<Vec<_>>()
@@ -1662,7 +1664,7 @@ fn java_action_contracts_literal(contracts: &[ActionContract]) -> String {
         .iter()
         .map(|contract| {
             format!(
-                "new ProductActionContract(\"{}\", \"{}\", \"{}\", {}, {}, {}, {}, {})",
+                "new ProductActionContract(\"{}\", \"{}\", \"{}\", {}, {}, {}, {}, {}, {}, {})",
                 java_escape(&contract.id),
                 java_escape(&contract.label),
                 java_escape(&contract.effect),
@@ -1670,7 +1672,9 @@ fn java_action_contracts_literal(contracts: &[ActionContract]) -> String {
                 java_bool(contract.mutating),
                 java_bool(contract.long_running),
                 java_bool(contract.privileged),
-                java_string_array_literal(&contract.input_keys)
+                java_string_array_literal(&contract.input_keys),
+                java_string_array_literal(&contract.output_keys),
+                java_string_array_literal(&contract.failure_keys)
             )
         })
         .collect::<Vec<_>>()
@@ -2286,6 +2290,8 @@ struct ProductActionContract {
   let longRunning: Bool
   let privileged: Bool
   let inputKeys: [String]
+  let outputKeys: [String]
+  let failureKeys: [String]
 }
 
 struct RuntimeContract {
@@ -2399,8 +2405,10 @@ public final class MainActivity extends Activity {
     final boolean longRunning;
     final boolean privileged;
     final String[] inputKeys;
+    final String[] outputKeys;
+    final String[] failureKeys;
 
-    ProductActionContract(String id, String label, String effect, boolean safe, boolean mutating, boolean longRunning, boolean privileged, String[] inputKeys) {
+    ProductActionContract(String id, String label, String effect, boolean safe, boolean mutating, boolean longRunning, boolean privileged, String[] inputKeys, String[] outputKeys, String[] failureKeys) {
       this.id = id;
       this.label = label;
       this.effect = effect;
@@ -2409,6 +2417,8 @@ public final class MainActivity extends Activity {
       this.longRunning = longRunning;
       this.privileged = privileged;
       this.inputKeys = inputKeys;
+      this.outputKeys = outputKeys;
+      this.failureKeys = failureKeys;
     }
   }
 
@@ -3837,6 +3847,8 @@ mod tests {
         assert!(ios.contains("actionCommand + [action.id, json]"));
         assert!(ios.contains("id: \"publish_changes\""));
         assert!(ios.contains("inputKeys: [\"deployment\"]"));
+        assert!(ios.contains("outputKeys: []"));
+        assert!(ios.contains("failureKeys: []"));
         assert!(!ios.contains("id: \"refresh_state\""));
 
         let android = fs::read_to_string(
@@ -3857,6 +3869,8 @@ mod tests {
             "new ProductActionContract(\"publish_changes\", \"Push to Production\", \"release\""
         ));
         assert!(android.contains("new String[] {\"deployment\"}"));
+        assert!(android.contains("final String[] outputKeys;"));
+        assert!(android.contains("final String[] failureKeys;"));
         assert!(!android.contains("new ProductActionContract(\"refresh_state\""));
 
         fs::remove_dir_all(ios_root).unwrap();
