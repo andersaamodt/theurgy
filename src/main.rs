@@ -625,7 +625,21 @@ fn run_status_output(manifest_path: &Path) -> Result<String> {
 }
 
 fn subscribe_status_output(manifest_path: &Path) -> Result<String> {
-    run_status_output(manifest_path)
+    let runtime = runtime_contract_from_path(manifest_path)?;
+    let command = if runtime.subscribe_status_command.is_empty() {
+        &runtime.status_command
+    } else {
+        &runtime.subscribe_status_command
+    };
+    if command.is_empty() {
+        return Err(TheurgyError::new(
+            "runtime manifest subscribeStatusCommand or statusCommand required",
+        )
+        .into());
+    }
+    let output = run_manifest_command(command, "status")?;
+    validate_manifest_status_output(&runtime.app_id, &output)?;
+    Ok(output)
 }
 
 fn run_history_output(manifest_path: &Path, subject: &str, limit: Option<&str>) -> Result<String> {
@@ -1162,6 +1176,7 @@ struct RuntimeContract {
     protocol: String,
     state_command: Vec<String>,
     status_command: Vec<String>,
+    subscribe_status_command: Vec<String>,
     action_command: Vec<String>,
     history_command: Vec<String>,
     daemon_command: Vec<String>,
@@ -1335,6 +1350,11 @@ fn runtime_contract_from_manifest(text: &str) -> Result<RuntimeContract> {
         protocol: summary.protocol,
         state_command: value_string_array(runtime, "stateCommand")?,
         status_command: value_string_array(runtime, "statusCommand").unwrap_or_default(),
+        subscribe_status_command: optional_string_array(
+            runtime,
+            "subscribeStatusCommand",
+            "runtime manifest subscribeStatusCommand",
+        )?,
         action_command: value_string_array(runtime, "actionCommand")?,
         history_command: value_string_array(runtime, "historyCommand").unwrap_or_default(),
         daemon_command: value_string_array(runtime, "daemonCommand").unwrap_or_default(),
@@ -1572,6 +1592,16 @@ fn validate_runtime_manifest_value(value: &Value) -> Result<RuntimeManifestSumma
     let action_command = value_string_array(runtime, "actionCommand")?;
     if state_command.is_empty() || action_command.is_empty() {
         return Err(TheurgyError::new("runtime manifest commands must be non-empty arrays").into());
+    }
+    let subscribe_status_command = optional_string_array(
+        runtime,
+        "subscribeStatusCommand",
+        "runtime manifest subscribeStatusCommand",
+    )?;
+    if runtime.get("subscribeStatusCommand").is_some() && subscribe_status_command.is_empty() {
+        return Err(
+            TheurgyError::new("runtime manifest subscribeStatusCommand must be non-empty").into(),
+        );
     }
     let protocol = value_string(runtime, "protocol")
         .filter(|protocol| !protocol.is_empty())
@@ -2199,7 +2229,11 @@ fn compile_native(product: &str, target: &str, out_dir: &Path) -> Result<()> {
             format!("{}-core", summary.app_id),
             "runtime-state".to_string(),
         ],
-        status_command: Vec::new(),
+        status_command: vec![
+            format!("{}-core", summary.app_id),
+            "runtime-status".to_string(),
+        ],
+        subscribe_status_command: Vec::new(),
         action_command: vec![
             format!("{}-core", summary.app_id),
             "runtime-action".to_string(),
@@ -2322,7 +2356,7 @@ fn generated_runtime_metadata(
     }
     object.insert(
         "subscribeStatusCommand".to_string(),
-        string_vec_value(&subscribe_status_command()),
+        string_vec_value(&effective_subscribe_status_command(runtime)),
     );
     object.insert(
         "actionCommand".to_string(),
@@ -2371,7 +2405,13 @@ fn string_vec_value(values: &[String]) -> Value {
     Value::Array(values.iter().cloned().map(Value::String).collect())
 }
 
-fn subscribe_status_command() -> Vec<String> {
+fn effective_subscribe_status_command(runtime: &RuntimeContract) -> Vec<String> {
+    if !runtime.subscribe_status_command.is_empty() {
+        return runtime.subscribe_status_command.clone();
+    }
+    if !runtime.status_command.is_empty() {
+        return runtime.status_command.clone();
+    }
     vec![
         "theurgy-runtime".to_string(),
         "subscribe-status".to_string(),
@@ -2427,7 +2467,7 @@ fn macos_adapter_source(
     runtime: &RuntimeContract,
 ) -> String {
     let action_contracts = surface_action_contracts(summary, surface);
-    let subscribe_status_command = subscribe_status_command();
+    let subscribe_status_command = effective_subscribe_status_command(runtime);
     let default_action_id = action_contracts
         .first()
         .map(|contract| contract.id.clone())
@@ -2614,7 +2654,7 @@ fn linux_adapter_source(
     let action_contracts = surface_action_contracts(summary, surface);
     let action_contracts_json =
         serde_json::to_string(&action_contracts_value(&action_contracts)).unwrap_or_default();
-    let subscribe_status_command = subscribe_status_command();
+    let subscribe_status_command = effective_subscribe_status_command(runtime);
     let subscribe_status_executable = subscribe_status_command
         .first()
         .cloned()
@@ -2869,7 +2909,7 @@ fn ios_adapter_source(
     runtime: &RuntimeContract,
 ) -> String {
     let action_contracts = surface_action_contracts(summary, surface);
-    let subscribe_status_command = subscribe_status_command();
+    let subscribe_status_command = effective_subscribe_status_command(runtime);
     let template = r#"// Generated by theurgy-runtime compile-native.
 // Runtime: theurgy-runtime.json
 // Surface: theurgy-surface.json
@@ -2984,7 +3024,7 @@ fn android_adapter_source(
     runtime: &RuntimeContract,
 ) -> String {
     let action_contracts = surface_action_contracts(summary, surface);
-    let subscribe_status_command = subscribe_status_command();
+    let subscribe_status_command = effective_subscribe_status_command(runtime);
     let template = r#"package app.theurgy.generated;
 
 import android.app.Activity;
@@ -3921,6 +3961,21 @@ mod tests {
     }
 
     #[test]
+    fn runtime_manifest_validation_rejects_empty_subscribe_status_command() {
+        let manifest = sample_runtime_manifest().replace(
+            "\"statusCommand\": [\"custom-core\", \"status\"]",
+            "\"statusCommand\": [\"custom-core\", \"status\"],\n    \"subscribeStatusCommand\": []",
+        );
+        let error = runtime_contract_from_manifest(&manifest)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            "runtime manifest subscribeStatusCommand must be non-empty"
+        );
+    }
+
+    #[test]
     fn action_params_must_be_json_object_or_array() {
         assert!(validate_json_params("{\"ok\":true}").is_ok());
         assert!(validate_json_params("[1,2]").is_ok());
@@ -4206,6 +4261,34 @@ mod tests {
     }
 
     #[test]
+    fn subscribe_status_once_uses_explicit_manifest_command() {
+        let root = runtime_fixture_root("subscribe-status-explicit");
+        let manifest = root.join("runtime.manifest.json");
+        let runtime = root.join("runtime-fixture").display().to_string();
+        let manifest_text = fs::read_to_string(&manifest).unwrap().replace(
+            "\"statusCommand\": [",
+            &format!(
+                "\"subscribeStatusCommand\": [\"{}\", \"subscribe\"],\n    \"statusCommand\": [",
+                json_escape(&runtime)
+            ),
+        );
+        write_or_replace(&manifest, &manifest_text).unwrap();
+
+        let output = subscribe_status_output(&manifest).unwrap();
+        let value: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(
+            value.get("schema").and_then(Value::as_str),
+            Some("theurgy-runtime-status/v1")
+        );
+        assert_eq!(
+            value.get("state_ready").and_then(Value::as_bool),
+            Some(false)
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn subscribe_status_requires_once_until_streaming_is_implemented() {
         let root = runtime_fixture_root("subscribe-status-requires-once");
         let error = command_subscribe_status(&[
@@ -4287,13 +4370,7 @@ mod tests {
         );
         assert_eq!(
             runtime_json.get("subscribeStatusCommand").unwrap(),
-            &serde_json::json!([
-                "theurgy-runtime",
-                "subscribe-status",
-                "--manifest",
-                "theurgy-runtime.json",
-                "--once"
-            ])
+            &serde_json::json!(["deployments-core", "runtime-status"])
         );
         assert_eq!(
             runtime_json.get("surfaceSchema").and_then(Value::as_str),
@@ -4370,8 +4447,7 @@ mod tests {
         assert!(main_c.contains("theurgy-runtime.json"));
         assert!(main_c.contains("runtime-state"));
         assert!(main_c.contains("subscribe_runtime_status"));
-        assert!(main_c.contains("theurgy-runtime"));
-        assert!(main_c.contains("subscribe-status"));
+        assert!(main_c.contains("runtime-status"));
         assert!(main_c
             .contains("GtkWidget *subscribe_button = gtk_button_new_with_label(\"Subscribe\")"));
         assert!(main_c.contains("g_subprocess_newv"));
@@ -4573,13 +4649,7 @@ mod tests {
         );
         assert_eq!(
             runtime_json.get("subscribeStatusCommand").unwrap(),
-            &serde_json::json!([
-                "theurgy-runtime",
-                "subscribe-status",
-                "--manifest",
-                "theurgy-runtime.json",
-                "--once"
-            ])
+            &serde_json::json!(["custom-core", "status"])
         );
         assert_eq!(
             runtime_json.get("historyCommand").unwrap(),
@@ -4755,7 +4825,9 @@ mod tests {
         assert!(
             swift.contains("let runtimeStatusCommand = [\"deployments-core\", \"runtime-status\"]")
         );
-        assert!(swift.contains("let runtimeSubscribeStatusCommand = [\"theurgy-runtime\", \"subscribe-status\", \"--manifest\", \"theurgy-runtime.json\", \"--once\"]"));
+        assert!(swift.contains(
+            "let runtimeSubscribeStatusCommand = [\"deployments-core\", \"runtime-status\"]"
+        ));
         assert!(
             swift.contains("let runtimeActionCommand = [\"deployments-core\", \"runtime-action\"]")
         );
@@ -4807,9 +4879,9 @@ mod tests {
         assert!(ios.contains("theurgy-runtime-action/v1"));
         assert!(ios.contains("\"deployments-core\", \"runtime-state\""));
         assert!(ios.contains("\"deployments-core\", \"runtime-status\""));
-        assert!(ios.contains(
-            "\"theurgy-runtime\", \"subscribe-status\", \"--manifest\", \"theurgy-runtime.json\", \"--once\""
-        ));
+        assert!(
+            ios.contains("let subscribeStatusCommand = [\"deployments-core\", \"runtime-status\"]")
+        );
         assert!(ios.contains("\"deployments-core\", \"runtime-history\""));
         assert!(ios.contains("\"deployments-daemon\""));
         assert!(ios.contains("struct ProductActionContract"));
@@ -4833,7 +4905,7 @@ mod tests {
         assert!(android.contains("new String[] {\"deployments-core\", \"runtime-action\"}"));
         assert!(android.contains("new String[] {\"deployments-core\", \"runtime-status\"}"));
         assert!(android.contains(
-            "private static final String[] SUBSCRIBE_STATUS_COMMAND = new String[] {\"theurgy-runtime\", \"subscribe-status\", \"--manifest\", \"theurgy-runtime.json\", \"--once\"};"
+            "private static final String[] SUBSCRIBE_STATUS_COMMAND = new String[] {\"deployments-core\", \"runtime-status\"};"
         ));
         assert!(android.contains("new String[] {\"deployments-core\", \"runtime-history\"}"));
         assert!(android.contains("new String[] {\"deployments-daemon\"}"));
@@ -4875,6 +4947,10 @@ mod tests {
             protocol: "theurgy-runtime-action/v1".to_string(),
             state_command: vec!["deployments-core".to_string(), "runtime-state".to_string()],
             status_command: vec!["deployments-core".to_string(), "runtime-status".to_string()],
+            subscribe_status_command: vec![
+                "deployments-core".to_string(),
+                "runtime-status".to_string(),
+            ],
             action_command: vec!["deployments-core".to_string(), "runtime-action".to_string()],
             history_command: vec![
                 "deployments-core".to_string(),
@@ -4921,7 +4997,7 @@ mod tests {
         let runtime = root.join("runtime-fixture");
         write_executable(
             &runtime,
-            "#!/bin/sh\nset -eu\ncase \"${1-}\" in\n  state) printf '{\"schema\":\"theurgy-state-snapshot/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"data\":{}}\\n' ;;\n  status) printf '{\"schema\":\"theurgy-runtime-status/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"state_ready\":true}\\n' ;;\n  history) printf '{\"schema\":\"theurgy-operation-history/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"data\":[],\"subject\":\"%s\",\"limit\":\"%s\"}\\n' \"${2-}\" \"${3-}\" ;;\n  action) printf '{\"success\":true,\"data\":{\"protocol\":\"theurgy-runtime-action/v1\",\"app\":\"deployments\",\"action\":\"%s\",\"operation\":{\"id\":\"op-%s\",\"status\":\"completed\",\"progress\":100,\"longRunning\":false},\"result\":{\"params\":%s}}}\\n' \"${2-}\" \"${2-}\" \"${3-}\" ;;\n  *) printf 'unknown fixture command\\n' >&2; exit 2 ;;\nesac\n",
+            "#!/bin/sh\nset -eu\ncase \"${1-}\" in\n  state) printf '{\"schema\":\"theurgy-state-snapshot/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"data\":{}}\\n' ;;\n  status) printf '{\"schema\":\"theurgy-runtime-status/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"state_ready\":true}\\n' ;;\n  subscribe) printf '{\"schema\":\"theurgy-runtime-status/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"state_ready\":false}\\n' ;;\n  history) printf '{\"schema\":\"theurgy-operation-history/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"data\":[],\"subject\":\"%s\",\"limit\":\"%s\"}\\n' \"${2-}\" \"${3-}\" ;;\n  action) printf '{\"success\":true,\"data\":{\"protocol\":\"theurgy-runtime-action/v1\",\"app\":\"deployments\",\"action\":\"%s\",\"operation\":{\"id\":\"op-%s\",\"status\":\"completed\",\"progress\":100,\"longRunning\":false},\"result\":{\"params\":%s}}}\\n' \"${2-}\" \"${2-}\" \"${3-}\" ;;\n  *) printf 'unknown fixture command\\n' >&2; exit 2 ;;\nesac\n",
         )
         .unwrap();
         write_or_replace(&blueprint.join("product.ir.json"), &sample_product()).unwrap();
