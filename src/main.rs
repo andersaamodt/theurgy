@@ -2410,50 +2410,22 @@ fn optional_nonempty_string(value: &Value, key: &str, label: &str) -> Result<Opt
 }
 
 fn validate_action_contract(action: &Value) -> Result<ActionContract> {
-    let id = value_string(action, "id")
-        .filter(|id| valid_action_id(id))
-        .ok_or_else(|| TheurgyError::new("product IR action.id must be a stable action id"))?;
-    let label = value_string(action, "label")
-        .filter(|label| !label.is_empty())
-        .ok_or_else(|| TheurgyError::new("product IR action.label required"))?;
-    let input = value_object(action, "input")
-        .map_err(|_| TheurgyError::new("product IR action.input object required"))?;
-    let output = value_object(action, "output")
-        .map_err(|_| TheurgyError::new("product IR action.output object required"))?;
-    let failure = value_object(action, "failure")
-        .map_err(|_| TheurgyError::new("product IR action.failure object required"))?;
-    let effect = value_string(action, "effect")
-        .ok_or_else(|| TheurgyError::new("product IR action.effect invalid"))?;
-    if !matches!(
-        effect.as_str(),
-        "read" | "write" | "background" | "external" | "release"
-    ) {
-        return Err(TheurgyError::new("product IR action.effect invalid").into());
-    }
-    for key in ["safe", "mutating", "longRunning", "privileged"] {
-        value_bool(action, key).ok_or_else(|| {
-            TheurgyError::new(format!("product IR action.{key} boolean required"))
-        })?;
-    }
-    let command = optional_string_array(action, "command", "product IR action.command")?;
-    if action.get("command").is_some() && command.is_empty() {
-        return Err(TheurgyError::new("product IR action.command required").into());
-    }
+    let contract = product_runtime::validate_product_action_contract(action)?;
     Ok(ActionContract {
-        id,
-        label,
-        effect,
-        safe: value_bool(action, "safe").unwrap_or(false),
-        mutating: value_bool(action, "mutating").unwrap_or(false),
-        long_running: value_bool(action, "longRunning").unwrap_or(false),
-        privileged: value_bool(action, "privileged").unwrap_or(false),
-        command,
-        input_keys: object_keys(input),
-        output_keys: object_keys(output),
-        failure_keys: object_keys(failure),
-        input_shape: object_shape(input, "product IR action.input")?,
-        output_shape: object_shape(output, "product IR action.output")?,
-        failure_shape: object_shape(failure, "product IR action.failure")?,
+        id: contract.id,
+        label: contract.label,
+        effect: contract.effect,
+        safe: contract.safe,
+        mutating: contract.mutating,
+        long_running: contract.long_running,
+        privileged: contract.privileged,
+        command: contract.command,
+        input_keys: contract.input_keys,
+        output_keys: contract.output_keys,
+        failure_keys: contract.failure_keys,
+        input_shape: contract.input_shape,
+        output_shape: contract.output_shape,
+        failure_shape: contract.failure_shape,
     })
 }
 
