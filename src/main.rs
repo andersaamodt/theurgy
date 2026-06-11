@@ -2228,20 +2228,11 @@ fn validate_runtime_action_request(text: &str) -> Result<RuntimeActionRequestSum
 }
 
 fn validate_runtime_action_request_value(value: &Value) -> Result<RuntimeActionRequestSummary> {
-    expect_value_string(value, "protocol", product_runtime::RUNTIME_ACTION_PROTOCOL)?;
-    let app_id = value_string(value, "app")
-        .filter(|id| valid_slug(id))
-        .ok_or_else(|| TheurgyError::new("runtime action request app must be a lowercase slug"))?;
-    let action_id = value_string(value, "action")
-        .filter(|id| valid_action_id(id))
-        .ok_or_else(|| {
-            TheurgyError::new("runtime action request action must be a stable action id")
-        })?;
-    let params = value_object(value, "params")?;
-    if !params.is_object() {
-        return Err(TheurgyError::new("runtime action request params must be an object").into());
-    }
-    Ok(RuntimeActionRequestSummary { app_id, action_id })
+    let request = product_runtime::validate_runtime_action_request_value(value)?;
+    Ok(RuntimeActionRequestSummary {
+        app_id: request.app_id,
+        action_id: request.action_id,
+    })
 }
 
 fn validate_runtime_action_request_against_runtime(
@@ -2271,25 +2262,12 @@ fn validate_runtime_action_request_against_runtime(
 }
 
 fn validate_runtime_action_result_value(value: &Value) -> Result<RuntimeActionResultSummary> {
-    expect_value_string(value, "protocol", product_runtime::RUNTIME_ACTION_PROTOCOL)?;
-    let app_id = value_string(value, "app")
-        .filter(|id| valid_slug(id))
-        .ok_or_else(|| TheurgyError::new("runtime action result app must be a lowercase slug"))?;
-    let action_id = value_string(value, "action")
-        .filter(|id| valid_action_id(id))
-        .ok_or_else(|| {
-            TheurgyError::new("runtime action result action must be a stable action id")
-        })?;
-    let operation = value_object(value, "operation")?;
-    let (operation_id, long_running) = validate_operation_record(operation)?;
-    if value.get("result").is_none() {
-        return Err(TheurgyError::new("runtime action result result required").into());
-    }
+    let result = product_runtime::validate_runtime_action_result_value(value)?;
     Ok(RuntimeActionResultSummary {
-        app_id,
-        action_id,
-        operation_id,
-        long_running,
+        app_id: result.app_id,
+        action_id: result.action_id,
+        operation_id: result.operation_id,
+        long_running: result.long_running,
     })
 }
 

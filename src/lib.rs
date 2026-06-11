@@ -1,4 +1,9 @@
 pub mod product_runtime {
+    use std::error::Error;
+    use std::fmt;
+
+    use serde_json::Value;
+
     pub const PRODUCT_IR_SCHEMA: &str = "theurgy-product-ir/v1";
     pub const DESKTOP_SURFACE_IR_SCHEMA: &str = "theurgy-desktop-surface-ir/v1";
     pub const MOBILE_SURFACE_IR_SCHEMA: &str = "theurgy-mobile-surface-ir/v1";
@@ -50,6 +55,150 @@ pub mod product_runtime {
         } else {
             None
         }
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct RuntimeActionRequest {
+        pub app_id: String,
+        pub action_id: String,
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct RuntimeActionResult {
+        pub app_id: String,
+        pub action_id: String,
+        pub operation_id: String,
+        pub long_running: bool,
+    }
+
+    #[derive(Debug, Eq, PartialEq)]
+    pub struct ContractError {
+        message: String,
+    }
+
+    impl ContractError {
+        fn new(message: impl Into<String>) -> Self {
+            Self {
+                message: message.into(),
+            }
+        }
+    }
+
+    impl fmt::Display for ContractError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str(&self.message)
+        }
+    }
+
+    impl Error for ContractError {}
+
+    pub type ContractResult<T> = std::result::Result<T, ContractError>;
+
+    pub fn validate_runtime_action_request_value(
+        value: &Value,
+    ) -> ContractResult<RuntimeActionRequest> {
+        expect_value_string(value, "protocol", RUNTIME_ACTION_PROTOCOL)?;
+        let app_id = value_string(value, "app")
+            .filter(|id| valid_slug(id))
+            .ok_or_else(|| {
+                ContractError::new("runtime action request app must be a lowercase slug")
+            })?;
+        let action_id = value_string(value, "action")
+            .filter(|id| valid_action_id(id))
+            .ok_or_else(|| {
+                ContractError::new("runtime action request action must be a stable action id")
+            })?;
+        value_object(value, "params")?;
+        Ok(RuntimeActionRequest { app_id, action_id })
+    }
+
+    pub fn validate_runtime_action_result_value(
+        value: &Value,
+    ) -> ContractResult<RuntimeActionResult> {
+        expect_value_string(value, "protocol", RUNTIME_ACTION_PROTOCOL)?;
+        let app_id = value_string(value, "app")
+            .filter(|id| valid_slug(id))
+            .ok_or_else(|| {
+                ContractError::new("runtime action result app must be a lowercase slug")
+            })?;
+        let action_id = value_string(value, "action")
+            .filter(|id| valid_action_id(id))
+            .ok_or_else(|| {
+                ContractError::new("runtime action result action must be a stable action id")
+            })?;
+        let operation = value_object(value, "operation")?;
+        let (operation_id, long_running) = validate_operation_record(operation)?;
+        if value.get("result").is_none() {
+            return Err(ContractError::new("runtime action result result required"));
+        }
+        Ok(RuntimeActionResult {
+            app_id,
+            action_id,
+            operation_id,
+            long_running,
+        })
+    }
+
+    fn validate_operation_record(value: &Value) -> ContractResult<(String, bool)> {
+        let id = value_string(value, "id")
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| ContractError::new("runtime operation.id required"))?;
+        let status = value_string(value, "status")
+            .ok_or_else(|| ContractError::new("runtime operation.status required"))?;
+        if !matches!(
+            status.as_str(),
+            "accepted" | "running" | "completed" | "failed" | "cancelled"
+        ) {
+            return Err(ContractError::new("runtime operation.status invalid"));
+        }
+        let progress = value
+            .get("progress")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| ContractError::new("runtime operation.progress integer required"))?;
+        if progress > 100 {
+            return Err(ContractError::new(
+                "runtime operation.progress must be 0..100",
+            ));
+        }
+        let long_running = value
+            .get("longRunning")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| ContractError::new("runtime operation.longRunning boolean required"))?;
+        Ok((id, long_running))
+    }
+
+    fn expect_value_string(value: &Value, key: &str, expected: &str) -> ContractResult<()> {
+        match value_string(value, key) {
+            Some(actual) if actual == expected => Ok(()),
+            _ => Err(ContractError::new(format!("expected {key} = {expected}"))),
+        }
+    }
+
+    fn value_string(value: &Value, key: &str) -> Option<String> {
+        value.get(key)?.as_str().map(String::from)
+    }
+
+    fn value_object<'a>(value: &'a Value, key: &str) -> ContractResult<&'a Value> {
+        value
+            .get(key)
+            .filter(|candidate| candidate.is_object())
+            .ok_or_else(|| ContractError::new(format!("missing JSON object key: {key}")))
+    }
+
+    fn valid_slug(value: &str) -> bool {
+        !value.is_empty()
+            && value.bytes().all(|byte| {
+                byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_')
+            })
+    }
+
+    fn valid_action_id(value: &str) -> bool {
+        !value.is_empty()
+            && value.bytes().all(|byte| {
+                byte.is_ascii_lowercase()
+                    || byte.is_ascii_digit()
+                    || matches!(byte, b'-' | b'_' | b'.')
+            })
     }
 }
 
@@ -105,5 +254,67 @@ mod tests {
             product_runtime::adapter_runtime_transport("ios"),
             product_runtime::MOBILE_ADAPTER_TRANSPORT
         );
+    }
+
+    #[test]
+    fn product_runtime_validates_action_request_abi() {
+        let value = serde_json::json!({
+            "protocol": product_runtime::RUNTIME_ACTION_PROTOCOL,
+            "app": "deployments",
+            "action": "publish_changes",
+            "params": {"deployment": "site-one"}
+        });
+        let request = product_runtime::validate_runtime_action_request_value(&value).unwrap();
+        assert_eq!(request.app_id, "deployments");
+        assert_eq!(request.action_id, "publish_changes");
+
+        let invalid = serde_json::json!({
+            "protocol": product_runtime::RUNTIME_ACTION_PROTOCOL,
+            "app": "Deployments",
+            "action": "publish_changes",
+            "params": {}
+        });
+        let error = product_runtime::validate_runtime_action_request_value(&invalid)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(error, "runtime action request app must be a lowercase slug");
+    }
+
+    #[test]
+    fn product_runtime_validates_action_result_abi() {
+        let value = serde_json::json!({
+            "protocol": product_runtime::RUNTIME_ACTION_PROTOCOL,
+            "app": "deployments",
+            "action": "publish_changes",
+            "operation": {
+                "id": "op-publish",
+                "status": "completed",
+                "progress": 100,
+                "longRunning": true
+            },
+            "result": {"message": "published"}
+        });
+        let result = product_runtime::validate_runtime_action_result_value(&value).unwrap();
+        assert_eq!(result.app_id, "deployments");
+        assert_eq!(result.action_id, "publish_changes");
+        assert_eq!(result.operation_id, "op-publish");
+        assert!(result.long_running);
+
+        let invalid = serde_json::json!({
+            "protocol": product_runtime::RUNTIME_ACTION_PROTOCOL,
+            "app": "deployments",
+            "action": "publish_changes",
+            "operation": {
+                "id": "op-publish",
+                "status": "completed",
+                "progress": 101,
+                "longRunning": true
+            },
+            "result": {}
+        });
+        let error = product_runtime::validate_runtime_action_result_value(&invalid)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(error, "runtime operation.progress must be 0..100");
     }
 }
