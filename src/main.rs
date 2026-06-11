@@ -559,7 +559,9 @@ fn run_status_output(manifest_path: &Path) -> Result<String> {
     if runtime.status_command.is_empty() {
         return Err(TheurgyError::new("runtime manifest statusCommand required").into());
     }
-    run_manifest_command(&runtime.status_command, "status")
+    let output = run_manifest_command(&runtime.status_command, "status")?;
+    validate_manifest_status_output(&output)?;
+    Ok(output)
 }
 
 fn run_history_output(manifest_path: &Path, subject: &str, limit: Option<&str>) -> Result<String> {
@@ -636,6 +638,13 @@ fn validate_manifest_state_output(output: &str) -> Result<()> {
     let value = parse_json(output)?;
     let result = manifest_payload_or_raw(&value);
     validate_state_snapshot_value(result)?;
+    Ok(())
+}
+
+fn validate_manifest_status_output(output: &str) -> Result<()> {
+    let value = parse_json(output)?;
+    let result = manifest_payload_or_raw(&value);
+    validate_runtime_status_value(result)?;
     Ok(())
 }
 
@@ -806,6 +815,11 @@ struct ActionSummary {
 
 #[derive(Debug, Eq, PartialEq)]
 struct StateSnapshotSummary {
+    app_id: String,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct RuntimeStatusSummary {
     app_id: String,
 }
 
@@ -1067,6 +1081,21 @@ fn validate_state_snapshot_value(value: &Value) -> Result<StateSnapshotSummary> 
         .ok_or_else(|| TheurgyError::new("state snapshot generatedAt required"))?;
     value_object(value, "data")?;
     Ok(StateSnapshotSummary { app_id })
+}
+
+fn validate_runtime_status_value(value: &Value) -> Result<RuntimeStatusSummary> {
+    expect_value_string(value, "schema", "theurgy-runtime-status/v1")?;
+    let app_id = value_string(value, "app")
+        .filter(|id| valid_slug(id))
+        .ok_or_else(|| TheurgyError::new("runtime status app must be a lowercase slug"))?;
+    value_string(value, "generatedAt")
+        .filter(|generated_at| !generated_at.is_empty())
+        .ok_or_else(|| TheurgyError::new("runtime status generatedAt required"))?;
+    value
+        .get("state_ready")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| TheurgyError::new("runtime status state_ready must be boolean"))?;
+    Ok(RuntimeStatusSummary { app_id })
 }
 
 fn validate_runtime_action_result(text: &str) -> Result<RuntimeActionResultSummary> {
@@ -3218,6 +3247,15 @@ mod tests {
     }
 
     #[test]
+    fn manifest_status_output_rejects_untyped_stdout() {
+        let error = validate_manifest_status_output("{\"ok\":true}").unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "expected schema = theurgy-runtime-status/v1"
+        );
+    }
+
+    #[test]
     fn manifest_history_output_rejects_untyped_stdout() {
         let error = validate_manifest_history_output("{\"ok\":true}").unwrap_err();
         assert_eq!(
@@ -3560,7 +3598,7 @@ mod tests {
         let runtime = root.join("runtime-fixture");
         write_executable(
             &runtime,
-            "#!/bin/sh\nset -eu\ncase \"${1-}\" in\n  state) printf '{\"schema\":\"theurgy-state-snapshot/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"data\":{}}\\n' ;;\n  status) printf '{\"schema\":\"theurgy-runtime-status/v1\",\"app\":\"deployments\",\"state_ready\":true}\\n' ;;\n  history) printf '{\"schema\":\"theurgy-operation-history/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"data\":[],\"subject\":\"%s\",\"limit\":\"%s\"}\\n' \"${2-}\" \"${3-}\" ;;\n  action) printf '{\"success\":true,\"data\":{\"protocol\":\"theurgy-runtime-action/v1\",\"action\":\"%s\",\"operation\":{\"id\":\"op-%s\",\"status\":\"completed\",\"progress\":100,\"longRunning\":false},\"result\":{\"params\":%s}}}\\n' \"${2-}\" \"${2-}\" \"${3-}\" ;;\n  *) printf 'unknown fixture command\\n' >&2; exit 2 ;;\nesac\n",
+            "#!/bin/sh\nset -eu\ncase \"${1-}\" in\n  state) printf '{\"schema\":\"theurgy-state-snapshot/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"data\":{}}\\n' ;;\n  status) printf '{\"schema\":\"theurgy-runtime-status/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"state_ready\":true}\\n' ;;\n  history) printf '{\"schema\":\"theurgy-operation-history/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"data\":[],\"subject\":\"%s\",\"limit\":\"%s\"}\\n' \"${2-}\" \"${3-}\" ;;\n  action) printf '{\"success\":true,\"data\":{\"protocol\":\"theurgy-runtime-action/v1\",\"action\":\"%s\",\"operation\":{\"id\":\"op-%s\",\"status\":\"completed\",\"progress\":100,\"longRunning\":false},\"result\":{\"params\":%s}}}\\n' \"${2-}\" \"${2-}\" \"${3-}\" ;;\n  *) printf 'unknown fixture command\\n' >&2; exit 2 ;;\nesac\n",
         )
         .unwrap();
         write_or_replace(&blueprint.join("product.ir.json"), &sample_product()).unwrap();
