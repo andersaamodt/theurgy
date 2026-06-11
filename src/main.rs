@@ -329,8 +329,8 @@ fn command_validate_runtime_manifest(args: &[String]) -> Result<()> {
     if args.len() != 1 {
         return Err(TheurgyError::new("usage: validate-runtime-manifest PATH").into());
     }
-    let value = read_json(Path::new(&args[0]))?;
-    let summary = validate_runtime_manifest(&value)?;
+    let summary =
+        runtime_manifest_summary_from_library(product_runtime::load_runtime_manifest(&args[0])?);
     println!("status=ok");
     println!("schema=theurgy-runtime-manifest/v1");
     println!("app={}", summary.app_id);
@@ -2371,7 +2371,13 @@ fn validate_product_ir_value(value: &Value) -> Result<ProductSummary> {
 
 fn validate_runtime_manifest_value(value: &Value) -> Result<RuntimeManifestSummary> {
     let manifest = product_runtime::validate_runtime_manifest_value(value)?;
-    Ok(RuntimeManifestSummary {
+    Ok(runtime_manifest_summary_from_library(manifest))
+}
+
+fn runtime_manifest_summary_from_library(
+    manifest: product_runtime::RuntimeManifest,
+) -> RuntimeManifestSummary {
+    RuntimeManifestSummary {
         app_id: manifest.app_id,
         product_ir: manifest.product_ir,
         desktop_surface_ir: manifest.desktop_surface_ir,
@@ -2386,7 +2392,7 @@ fn validate_runtime_manifest_value(value: &Value) -> Result<RuntimeManifestSumma
                 .compatibility
                 .theurgy_required_for_legacy_wizardry_apps,
         },
-    })
+    }
 }
 
 fn product_surface_paths(value: &Value) -> Result<(Option<String>, Option<String>)> {

@@ -1,6 +1,8 @@
 pub mod product_runtime {
     use std::error::Error;
     use std::fmt;
+    use std::fs;
+    use std::path::Path;
 
     use serde_json::Value;
 
@@ -298,6 +300,15 @@ pub mod product_runtime {
             protocol,
             compatibility,
         })
+    }
+
+    pub fn load_runtime_manifest(path: impl AsRef<Path>) -> ContractResult<RuntimeManifest> {
+        let path = path.as_ref();
+        let text = fs::read_to_string(path)
+            .map_err(|error| ContractError::new(format!("could not read JSON: {error}")))?;
+        let value: Value = serde_json::from_str(&text)
+            .map_err(|error| ContractError::new(format!("invalid JSON: {error}")))?;
+        validate_runtime_manifest_value(&value)
     }
 
     fn runtime_manifest_surface_paths(
@@ -733,5 +744,37 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert_eq!(error, "runtime manifest commands must be non-empty arrays");
+    }
+
+    #[test]
+    fn product_runtime_loads_runtime_manifest_from_disk() {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "theurgy-runtime-manifest-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "version": product_runtime::RUNTIME_MANIFEST_SCHEMA,
+                "app": "deployments",
+                "productIr": "app-blueprint/product.ir.json",
+                "runtime": {
+                    "protocol": product_runtime::RUNTIME_ACTION_PROTOCOL,
+                    "stateCommand": ["deployments-core", "runtime-state"],
+                    "actionCommand": ["deployments-core", "runtime-action"]
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let manifest = product_runtime::load_runtime_manifest(&path).unwrap();
+        assert_eq!(manifest.app_id, "deployments");
+        assert_eq!(manifest.product_ir, "app-blueprint/product.ir.json");
+        std::fs::remove_file(path).unwrap();
     }
 }
