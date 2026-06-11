@@ -2370,97 +2370,22 @@ fn validate_product_ir_value(value: &Value) -> Result<ProductSummary> {
 }
 
 fn validate_runtime_manifest_value(value: &Value) -> Result<RuntimeManifestSummary> {
-    expect_value_string(value, "version", product_runtime::RUNTIME_MANIFEST_SCHEMA)?;
-    let app_id = value_string(value, "app")
-        .filter(|id| valid_slug(id))
-        .ok_or_else(|| TheurgyError::new("runtime manifest app must be a lowercase slug"))?;
-    let product_ir = value_string(value, "productIr")
-        .filter(|path| !path.is_empty())
-        .ok_or_else(|| TheurgyError::new("runtime manifest productIr required"))?;
-    let (desktop_surface_ir, mobile_surface_ir, legacy_native_desktop_ir) =
-        runtime_manifest_surface_paths(value)?;
-    let compatibility = validate_runtime_manifest_compatibility(value)?;
-    let runtime = value_object(value, "runtime")?;
-    let state_command = value_string_array(runtime, "stateCommand")?;
-    let action_command = value_string_array(runtime, "actionCommand")?;
-    if state_command.is_empty() || action_command.is_empty() {
-        return Err(TheurgyError::new("runtime manifest commands must be non-empty arrays").into());
-    }
-    let subscribe_status_command = optional_string_array(
-        runtime,
-        "subscribeStatusCommand",
-        "runtime manifest subscribeStatusCommand",
-    )?;
-    if runtime.get("subscribeStatusCommand").is_some() && subscribe_status_command.is_empty() {
-        return Err(
-            TheurgyError::new("runtime manifest subscribeStatusCommand must be non-empty").into(),
-        );
-    }
-    let operation_status_command = optional_string_array(
-        runtime,
-        "operationStatusCommand",
-        "runtime manifest operationStatusCommand",
-    )?;
-    if runtime.get("operationStatusCommand").is_some() && operation_status_command.is_empty() {
-        return Err(
-            TheurgyError::new("runtime manifest operationStatusCommand must be non-empty").into(),
-        );
-    }
-    let protocol = value_string(runtime, "protocol")
-        .filter(|protocol| !protocol.is_empty())
-        .ok_or_else(|| TheurgyError::new("runtime manifest protocol required"))?;
+    let manifest = product_runtime::validate_runtime_manifest_value(value)?;
     Ok(RuntimeManifestSummary {
-        app_id,
-        product_ir,
-        desktop_surface_ir,
-        mobile_surface_ir,
-        legacy_native_desktop_ir,
-        protocol,
-        compatibility,
-    })
-}
-
-fn runtime_manifest_surface_paths(
-    value: &Value,
-) -> Result<(Option<String>, Option<String>, Option<String>)> {
-    let Some(surfaces) = value.get("surfaces") else {
-        return Ok((None, None, None));
-    };
-    if !surfaces.is_object() {
-        return Err(TheurgyError::new("runtime manifest surfaces must be an object").into());
-    }
-    Ok((
-        optional_nonempty_string(surfaces, "desktop", "runtime manifest surfaces.desktop")?,
-        optional_nonempty_string(surfaces, "mobile", "runtime manifest surfaces.mobile")?,
-        optional_nonempty_string(
-            surfaces,
-            "legacyNativeDesktop",
-            "runtime manifest surfaces.legacyNativeDesktop",
-        )?,
-    ))
-}
-
-fn validate_runtime_manifest_compatibility(value: &Value) -> Result<RuntimeCompatibility> {
-    let Some(compatibility) = value.get("compatibility") else {
-        return Ok(RuntimeCompatibility::shell_first_default());
-    };
-    let compatibility = compatibility
-        .as_object()
-        .ok_or_else(|| TheurgyError::new("runtime manifest compatibility must be an object"))?;
-    let defaults = RuntimeCompatibility::shell_first_default();
-    Ok(RuntimeCompatibility {
-        wizardry_apps_shell_first_still_supported: optional_object_bool(
-            compatibility,
-            "wizardryAppsShellFirstStillSupported",
-            "runtime manifest compatibility.wizardryAppsShellFirstStillSupported",
-        )?
-        .unwrap_or(defaults.wizardry_apps_shell_first_still_supported),
-        theurgy_required_for_legacy_wizardry_apps: optional_object_bool(
-            compatibility,
-            "theurgyRequiredForLegacyWizardryApps",
-            "runtime manifest compatibility.theurgyRequiredForLegacyWizardryApps",
-        )?
-        .unwrap_or(defaults.theurgy_required_for_legacy_wizardry_apps),
+        app_id: manifest.app_id,
+        product_ir: manifest.product_ir,
+        desktop_surface_ir: manifest.desktop_surface_ir,
+        mobile_surface_ir: manifest.mobile_surface_ir,
+        legacy_native_desktop_ir: manifest.legacy_native_desktop_ir,
+        protocol: manifest.protocol,
+        compatibility: RuntimeCompatibility {
+            wizardry_apps_shell_first_still_supported: manifest
+                .compatibility
+                .wizardry_apps_shell_first_still_supported,
+            theurgy_required_for_legacy_wizardry_apps: manifest
+                .compatibility
+                .theurgy_required_for_legacy_wizardry_apps,
+        },
     })
 }
 
@@ -2661,21 +2586,6 @@ fn value_string(value: &Value, key: &str) -> Option<String> {
 
 fn value_bool(value: &Value, key: &str) -> Option<bool> {
     value.get(key)?.as_bool()
-}
-
-fn optional_object_bool(
-    object: &serde_json::Map<String, Value>,
-    key: &str,
-    label: &str,
-) -> Result<Option<bool>> {
-    object
-        .get(key)
-        .map(|value| {
-            value
-                .as_bool()
-                .ok_or_else(|| TheurgyError::new(format!("{label} must be boolean")).into())
-        })
-        .transpose()
 }
 
 fn value_object<'a>(value: &'a Value, key: &str) -> Result<&'a Value> {

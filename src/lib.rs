@@ -94,6 +94,32 @@ pub mod product_runtime {
         pub entries: usize,
     }
 
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct RuntimeManifest {
+        pub app_id: String,
+        pub product_ir: String,
+        pub desktop_surface_ir: Option<String>,
+        pub mobile_surface_ir: Option<String>,
+        pub legacy_native_desktop_ir: Option<String>,
+        pub protocol: String,
+        pub compatibility: RuntimeCompatibility,
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub struct RuntimeCompatibility {
+        pub wizardry_apps_shell_first_still_supported: bool,
+        pub theurgy_required_for_legacy_wizardry_apps: bool,
+    }
+
+    impl RuntimeCompatibility {
+        pub fn shell_first_default() -> Self {
+            Self {
+                wizardry_apps_shell_first_still_supported: true,
+                theurgy_required_for_legacy_wizardry_apps: false,
+            }
+        }
+    }
+
     #[derive(Debug, Eq, PartialEq)]
     pub struct ContractError {
         message: String,
@@ -221,6 +247,107 @@ pub mod product_runtime {
         })
     }
 
+    pub fn validate_runtime_manifest_value(value: &Value) -> ContractResult<RuntimeManifest> {
+        expect_value_string(value, "version", RUNTIME_MANIFEST_SCHEMA)?;
+        let app_id = value_string(value, "app")
+            .filter(|id| valid_slug(id))
+            .ok_or_else(|| ContractError::new("runtime manifest app must be a lowercase slug"))?;
+        let product_ir = value_string(value, "productIr")
+            .filter(|path| !path.is_empty())
+            .ok_or_else(|| ContractError::new("runtime manifest productIr required"))?;
+        let (desktop_surface_ir, mobile_surface_ir, legacy_native_desktop_ir) =
+            runtime_manifest_surface_paths(value)?;
+        let compatibility = validate_runtime_manifest_compatibility(value)?;
+        let runtime = value_object(value, "runtime")?;
+        let state_command = value_string_array(runtime, "stateCommand")?;
+        let action_command = value_string_array(runtime, "actionCommand")?;
+        if state_command.is_empty() || action_command.is_empty() {
+            return Err(ContractError::new(
+                "runtime manifest commands must be non-empty arrays",
+            ));
+        }
+        let subscribe_status_command = optional_string_array(
+            runtime,
+            "subscribeStatusCommand",
+            "runtime manifest subscribeStatusCommand",
+        )?;
+        if runtime.get("subscribeStatusCommand").is_some() && subscribe_status_command.is_empty() {
+            return Err(ContractError::new(
+                "runtime manifest subscribeStatusCommand must be non-empty",
+            ));
+        }
+        let operation_status_command = optional_string_array(
+            runtime,
+            "operationStatusCommand",
+            "runtime manifest operationStatusCommand",
+        )?;
+        if runtime.get("operationStatusCommand").is_some() && operation_status_command.is_empty() {
+            return Err(ContractError::new(
+                "runtime manifest operationStatusCommand must be non-empty",
+            ));
+        }
+        let protocol = value_string(runtime, "protocol")
+            .filter(|protocol| !protocol.is_empty())
+            .ok_or_else(|| ContractError::new("runtime manifest protocol required"))?;
+        Ok(RuntimeManifest {
+            app_id,
+            product_ir,
+            desktop_surface_ir,
+            mobile_surface_ir,
+            legacy_native_desktop_ir,
+            protocol,
+            compatibility,
+        })
+    }
+
+    fn runtime_manifest_surface_paths(
+        value: &Value,
+    ) -> ContractResult<(Option<String>, Option<String>, Option<String>)> {
+        let Some(surfaces) = value.get("surfaces") else {
+            return Ok((None, None, None));
+        };
+        if !surfaces.is_object() {
+            return Err(ContractError::new(
+                "runtime manifest surfaces must be an object",
+            ));
+        }
+        Ok((
+            optional_nonempty_string(surfaces, "desktop", "runtime manifest surfaces.desktop")?,
+            optional_nonempty_string(surfaces, "mobile", "runtime manifest surfaces.mobile")?,
+            optional_nonempty_string(
+                surfaces,
+                "legacyNativeDesktop",
+                "runtime manifest surfaces.legacyNativeDesktop",
+            )?,
+        ))
+    }
+
+    fn validate_runtime_manifest_compatibility(
+        value: &Value,
+    ) -> ContractResult<RuntimeCompatibility> {
+        let Some(compatibility) = value.get("compatibility") else {
+            return Ok(RuntimeCompatibility::shell_first_default());
+        };
+        let compatibility = compatibility.as_object().ok_or_else(|| {
+            ContractError::new("runtime manifest compatibility must be an object")
+        })?;
+        let defaults = RuntimeCompatibility::shell_first_default();
+        Ok(RuntimeCompatibility {
+            wizardry_apps_shell_first_still_supported: optional_object_bool(
+                compatibility,
+                "wizardryAppsShellFirstStillSupported",
+                "runtime manifest compatibility.wizardryAppsShellFirstStillSupported",
+            )?
+            .unwrap_or(defaults.wizardry_apps_shell_first_still_supported),
+            theurgy_required_for_legacy_wizardry_apps: optional_object_bool(
+                compatibility,
+                "theurgyRequiredForLegacyWizardryApps",
+                "runtime manifest compatibility.theurgyRequiredForLegacyWizardryApps",
+            )?
+            .unwrap_or(defaults.theurgy_required_for_legacy_wizardry_apps),
+        })
+    }
+
     fn validate_operation_record(value: &Value) -> ContractResult<(String, bool)> {
         let id = value_string(value, "id")
             .filter(|id| !id.is_empty())
@@ -272,6 +399,70 @@ pub mod product_runtime {
             .get(key)
             .and_then(Value::as_array)
             .ok_or_else(|| ContractError::new(format!("missing JSON array key: {key}")))
+    }
+
+    fn value_string_array(value: &Value, key: &str) -> ContractResult<Vec<String>> {
+        let array = value_array(value, key)?;
+        let mut values = Vec::new();
+        for item in array {
+            let Some(string) = item.as_str() else {
+                return Err(ContractError::new(format!(
+                    "JSON array key {key} must contain strings"
+                )));
+            };
+            values.push(string.to_string());
+        }
+        Ok(values)
+    }
+
+    fn optional_string_array(value: &Value, key: &str, label: &str) -> ContractResult<Vec<String>> {
+        let Some(raw) = value.get(key) else {
+            return Ok(Vec::new());
+        };
+        let Some(array) = raw.as_array() else {
+            return Err(ContractError::new(format!("{label} must be an array")));
+        };
+        let mut values = Vec::new();
+        for item in array {
+            let Some(text) = item.as_str().filter(|text| !text.is_empty()) else {
+                return Err(ContractError::new(format!(
+                    "{label} must contain non-empty strings"
+                )));
+            };
+            values.push(text.to_string());
+        }
+        Ok(values)
+    }
+
+    fn optional_nonempty_string(
+        value: &Value,
+        key: &str,
+        label: &str,
+    ) -> ContractResult<Option<String>> {
+        let Some(raw) = value.get(key) else {
+            return Ok(None);
+        };
+        let Some(text) = raw.as_str().filter(|text| !text.is_empty()) else {
+            return Err(ContractError::new(format!(
+                "{label} must be a non-empty string"
+            )));
+        };
+        Ok(Some(text.to_string()))
+    }
+
+    fn optional_object_bool(
+        object: &serde_json::Map<String, Value>,
+        key: &str,
+        label: &str,
+    ) -> ContractResult<Option<bool>> {
+        object
+            .get(key)
+            .map(|value| {
+                value
+                    .as_bool()
+                    .ok_or_else(|| ContractError::new(format!("{label} must be boolean")))
+            })
+            .transpose()
     }
 
     fn valid_slug(value: &str) -> bool {
@@ -480,5 +671,67 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert_eq!(error, "missing JSON array key: data");
+    }
+
+    #[test]
+    fn product_runtime_validates_runtime_manifest_contract() {
+        let manifest = serde_json::json!({
+            "version": product_runtime::RUNTIME_MANIFEST_SCHEMA,
+            "app": "deployments",
+            "productIr": "app-blueprint/product.ir.json",
+            "surfaces": {
+                "desktop": "app-blueprint/desktop.surface.ir.json",
+                "mobile": "app-blueprint/mobile.surface.ir.json",
+                "legacyNativeDesktop": "app-blueprint/app.ir.yaml"
+            },
+            "runtime": {
+                "protocol": product_runtime::RUNTIME_ACTION_PROTOCOL,
+                "stateCommand": ["deployments-core", "runtime-state"],
+                "actionCommand": ["deployments-core", "runtime-action"],
+                "subscribeStatusCommand": ["deployments-core", "runtime-status"],
+                "operationStatusCommand": ["deployments-core", "runtime-operation-status"]
+            }
+        });
+        let manifest = product_runtime::validate_runtime_manifest_value(&manifest).unwrap();
+        assert_eq!(manifest.app_id, "deployments");
+        assert_eq!(manifest.product_ir, "app-blueprint/product.ir.json");
+        assert_eq!(
+            manifest.desktop_surface_ir.as_deref(),
+            Some("app-blueprint/desktop.surface.ir.json")
+        );
+        assert_eq!(
+            manifest.mobile_surface_ir.as_deref(),
+            Some("app-blueprint/mobile.surface.ir.json")
+        );
+        assert_eq!(
+            manifest.legacy_native_desktop_ir.as_deref(),
+            Some("app-blueprint/app.ir.yaml")
+        );
+        assert_eq!(manifest.protocol, product_runtime::RUNTIME_ACTION_PROTOCOL);
+        assert!(
+            manifest
+                .compatibility
+                .wizardry_apps_shell_first_still_supported
+        );
+        assert!(
+            !manifest
+                .compatibility
+                .theurgy_required_for_legacy_wizardry_apps
+        );
+
+        let invalid = serde_json::json!({
+            "version": product_runtime::RUNTIME_MANIFEST_SCHEMA,
+            "app": "deployments",
+            "productIr": "app-blueprint/product.ir.json",
+            "runtime": {
+                "protocol": product_runtime::RUNTIME_ACTION_PROTOCOL,
+                "stateCommand": [],
+                "actionCommand": ["deployments-core", "runtime-action"]
+            }
+        });
+        let error = product_runtime::validate_runtime_manifest_value(&invalid)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(error, "runtime manifest commands must be non-empty arrays");
     }
 }
