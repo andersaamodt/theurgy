@@ -2191,30 +2191,17 @@ fn validate_runtime_status(text: &str) -> Result<RuntimeStatusSummary> {
 }
 
 fn validate_state_snapshot_value(value: &Value) -> Result<StateSnapshotSummary> {
-    expect_value_string(value, "schema", product_runtime::STATE_SNAPSHOT_SCHEMA)?;
-    let app_id = value_string(value, "app")
-        .filter(|id| valid_slug(id))
-        .ok_or_else(|| TheurgyError::new("state snapshot app must be a lowercase slug"))?;
-    value_string(value, "generatedAt")
-        .filter(|generated_at| !generated_at.is_empty())
-        .ok_or_else(|| TheurgyError::new("state snapshot generatedAt required"))?;
-    value_object(value, "data")?;
-    Ok(StateSnapshotSummary { app_id })
+    let snapshot = product_runtime::validate_state_snapshot_value(value)?;
+    Ok(StateSnapshotSummary {
+        app_id: snapshot.app_id,
+    })
 }
 
 fn validate_runtime_status_value(value: &Value) -> Result<RuntimeStatusSummary> {
-    expect_value_string(value, "schema", product_runtime::RUNTIME_STATUS_SCHEMA)?;
-    let app_id = value_string(value, "app")
-        .filter(|id| valid_slug(id))
-        .ok_or_else(|| TheurgyError::new("runtime status app must be a lowercase slug"))?;
-    value_string(value, "generatedAt")
-        .filter(|generated_at| !generated_at.is_empty())
-        .ok_or_else(|| TheurgyError::new("runtime status generatedAt required"))?;
-    value
-        .get("state_ready")
-        .and_then(Value::as_bool)
-        .ok_or_else(|| TheurgyError::new("runtime status state_ready must be boolean"))?;
-    Ok(RuntimeStatusSummary { app_id })
+    let status = product_runtime::validate_runtime_status_value(value)?;
+    Ok(RuntimeStatusSummary {
+        app_id: status.app_id,
+    })
 }
 
 fn validate_runtime_action_result(text: &str) -> Result<RuntimeActionResultSummary> {
@@ -2277,19 +2264,11 @@ fn validate_operation_status(text: &str) -> Result<OperationStatusSummary> {
 }
 
 fn validate_operation_status_value(value: &Value) -> Result<OperationStatusSummary> {
-    expect_value_string(value, "schema", product_runtime::OPERATION_STATUS_SCHEMA)?;
-    let app_id = value_string(value, "app")
-        .filter(|id| valid_slug(id))
-        .ok_or_else(|| TheurgyError::new("operation status app must be a lowercase slug"))?;
-    value_string(value, "generatedAt")
-        .filter(|generated_at| !generated_at.is_empty())
-        .ok_or_else(|| TheurgyError::new("operation status generatedAt required"))?;
-    let operation = value_object(value, "operation")?;
-    let (operation_id, long_running) = validate_operation_record(operation)?;
+    let status = product_runtime::validate_operation_status_value(value)?;
     Ok(OperationStatusSummary {
-        app_id,
-        operation_id,
-        long_running,
+        app_id: status.app_id,
+        operation_id: status.operation_id,
+        long_running: status.long_running,
     })
 }
 
@@ -2299,17 +2278,10 @@ fn validate_operation_history(text: &str) -> Result<OperationHistorySummary> {
 }
 
 fn validate_operation_history_value(value: &Value) -> Result<OperationHistorySummary> {
-    expect_value_string(value, "schema", product_runtime::OPERATION_HISTORY_SCHEMA)?;
-    let app_id = value_string(value, "app")
-        .filter(|id| valid_slug(id))
-        .ok_or_else(|| TheurgyError::new("operation history app must be a lowercase slug"))?;
-    value_string(value, "generatedAt")
-        .filter(|generated_at| !generated_at.is_empty())
-        .ok_or_else(|| TheurgyError::new("operation history generatedAt required"))?;
-    let entries = value_array(value, "data")?;
+    let history = product_runtime::validate_operation_history_value(value)?;
     Ok(OperationHistorySummary {
-        app_id,
-        entries: entries.len(),
+        app_id: history.app_id,
+        entries: history.entries,
     })
 }
 
@@ -2616,30 +2588,6 @@ fn validate_generated_action_contract(contract: &Value) -> Result<String> {
         }
     }
     Ok(id)
-}
-
-fn validate_operation_record(operation: &Value) -> Result<(String, bool)> {
-    let id = value_string(operation, "id")
-        .filter(|id| !id.is_empty())
-        .ok_or_else(|| TheurgyError::new("runtime operation.id required"))?;
-    let status = value_string(operation, "status")
-        .ok_or_else(|| TheurgyError::new("runtime operation.status required"))?;
-    if !matches!(
-        status.as_str(),
-        "accepted" | "running" | "completed" | "failed" | "cancelled"
-    ) {
-        return Err(TheurgyError::new("runtime operation.status invalid").into());
-    }
-    let progress = operation
-        .get("progress")
-        .and_then(Value::as_u64)
-        .ok_or_else(|| TheurgyError::new("runtime operation.progress integer required"))?;
-    if progress > 100 {
-        return Err(TheurgyError::new("runtime operation.progress must be 0..100").into());
-    }
-    let long_running = value_bool(operation, "longRunning")
-        .ok_or_else(|| TheurgyError::new("runtime operation.longRunning boolean required"))?;
-    Ok((id, long_running))
 }
 
 fn surface_action_ids(value: &Value) -> Result<Vec<String>> {

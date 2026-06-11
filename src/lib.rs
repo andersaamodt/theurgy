@@ -58,6 +58,16 @@ pub mod product_runtime {
     }
 
     #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct StateSnapshot {
+        pub app_id: String,
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct RuntimeStatus {
+        pub app_id: String,
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
     pub struct RuntimeActionRequest {
         pub app_id: String,
         pub action_id: String,
@@ -69,6 +79,19 @@ pub mod product_runtime {
         pub action_id: String,
         pub operation_id: String,
         pub long_running: bool,
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct OperationStatus {
+        pub app_id: String,
+        pub operation_id: String,
+        pub long_running: bool,
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct OperationHistory {
+        pub app_id: String,
+        pub entries: usize,
     }
 
     #[derive(Debug, Eq, PartialEq)]
@@ -93,6 +116,33 @@ pub mod product_runtime {
     impl Error for ContractError {}
 
     pub type ContractResult<T> = std::result::Result<T, ContractError>;
+
+    pub fn validate_state_snapshot_value(value: &Value) -> ContractResult<StateSnapshot> {
+        expect_value_string(value, "schema", STATE_SNAPSHOT_SCHEMA)?;
+        let app_id = value_string(value, "app")
+            .filter(|id| valid_slug(id))
+            .ok_or_else(|| ContractError::new("state snapshot app must be a lowercase slug"))?;
+        value_string(value, "generatedAt")
+            .filter(|generated_at| !generated_at.is_empty())
+            .ok_or_else(|| ContractError::new("state snapshot generatedAt required"))?;
+        value_object(value, "data")?;
+        Ok(StateSnapshot { app_id })
+    }
+
+    pub fn validate_runtime_status_value(value: &Value) -> ContractResult<RuntimeStatus> {
+        expect_value_string(value, "schema", RUNTIME_STATUS_SCHEMA)?;
+        let app_id = value_string(value, "app")
+            .filter(|id| valid_slug(id))
+            .ok_or_else(|| ContractError::new("runtime status app must be a lowercase slug"))?;
+        value_string(value, "generatedAt")
+            .filter(|generated_at| !generated_at.is_empty())
+            .ok_or_else(|| ContractError::new("runtime status generatedAt required"))?;
+        value
+            .get("state_ready")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| ContractError::new("runtime status state_ready must be boolean"))?;
+        Ok(RuntimeStatus { app_id })
+    }
 
     pub fn validate_runtime_action_request_value(
         value: &Value,
@@ -136,6 +186,38 @@ pub mod product_runtime {
             action_id,
             operation_id,
             long_running,
+        })
+    }
+
+    pub fn validate_operation_status_value(value: &Value) -> ContractResult<OperationStatus> {
+        expect_value_string(value, "schema", OPERATION_STATUS_SCHEMA)?;
+        let app_id = value_string(value, "app")
+            .filter(|id| valid_slug(id))
+            .ok_or_else(|| ContractError::new("operation status app must be a lowercase slug"))?;
+        value_string(value, "generatedAt")
+            .filter(|generated_at| !generated_at.is_empty())
+            .ok_or_else(|| ContractError::new("operation status generatedAt required"))?;
+        let operation = value_object(value, "operation")?;
+        let (operation_id, long_running) = validate_operation_record(operation)?;
+        Ok(OperationStatus {
+            app_id,
+            operation_id,
+            long_running,
+        })
+    }
+
+    pub fn validate_operation_history_value(value: &Value) -> ContractResult<OperationHistory> {
+        expect_value_string(value, "schema", OPERATION_HISTORY_SCHEMA)?;
+        let app_id = value_string(value, "app")
+            .filter(|id| valid_slug(id))
+            .ok_or_else(|| ContractError::new("operation history app must be a lowercase slug"))?;
+        value_string(value, "generatedAt")
+            .filter(|generated_at| !generated_at.is_empty())
+            .ok_or_else(|| ContractError::new("operation history generatedAt required"))?;
+        let entries = value_array(value, "data")?;
+        Ok(OperationHistory {
+            app_id,
+            entries: entries.len(),
         })
     }
 
@@ -183,6 +265,13 @@ pub mod product_runtime {
             .get(key)
             .filter(|candidate| candidate.is_object())
             .ok_or_else(|| ContractError::new(format!("missing JSON object key: {key}")))
+    }
+
+    fn value_array<'a>(value: &'a Value, key: &str) -> ContractResult<&'a Vec<Value>> {
+        value
+            .get(key)
+            .and_then(Value::as_array)
+            .ok_or_else(|| ContractError::new(format!("missing JSON array key: {key}")))
     }
 
     fn valid_slug(value: &str) -> bool {
@@ -281,6 +370,38 @@ mod tests {
     }
 
     #[test]
+    fn product_runtime_validates_state_and_status_abi() {
+        let snapshot = serde_json::json!({
+            "schema": product_runtime::STATE_SNAPSHOT_SCHEMA,
+            "app": "deployments",
+            "generatedAt": "2026-06-11T00:00:00Z",
+            "data": {"deployments": []}
+        });
+        let snapshot = product_runtime::validate_state_snapshot_value(&snapshot).unwrap();
+        assert_eq!(snapshot.app_id, "deployments");
+
+        let status = serde_json::json!({
+            "schema": product_runtime::RUNTIME_STATUS_SCHEMA,
+            "app": "deployments",
+            "generatedAt": "2026-06-11T00:00:00Z",
+            "state_ready": true
+        });
+        let status = product_runtime::validate_runtime_status_value(&status).unwrap();
+        assert_eq!(status.app_id, "deployments");
+
+        let invalid = serde_json::json!({
+            "schema": product_runtime::RUNTIME_STATUS_SCHEMA,
+            "app": "deployments",
+            "generatedAt": "2026-06-11T00:00:00Z",
+            "state_ready": "yes"
+        });
+        let error = product_runtime::validate_runtime_status_value(&invalid)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(error, "runtime status state_ready must be boolean");
+    }
+
+    #[test]
     fn product_runtime_validates_action_result_abi() {
         let value = serde_json::json!({
             "protocol": product_runtime::RUNTIME_ACTION_PROTOCOL,
@@ -316,5 +437,48 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert_eq!(error, "runtime operation.progress must be 0..100");
+    }
+
+    #[test]
+    fn product_runtime_validates_operation_status_and_history_abi() {
+        let status = serde_json::json!({
+            "schema": product_runtime::OPERATION_STATUS_SCHEMA,
+            "app": "deployments",
+            "generatedAt": "2026-06-11T00:00:00Z",
+            "operation": {
+                "id": "op-publish",
+                "status": "running",
+                "progress": 50,
+                "longRunning": true
+            }
+        });
+        let status = product_runtime::validate_operation_status_value(&status).unwrap();
+        assert_eq!(status.app_id, "deployments");
+        assert_eq!(status.operation_id, "op-publish");
+        assert!(status.long_running);
+
+        let history = serde_json::json!({
+            "schema": product_runtime::OPERATION_HISTORY_SCHEMA,
+            "app": "deployments",
+            "generatedAt": "2026-06-11T00:00:00Z",
+            "data": [
+                {"id": "op-one"},
+                {"id": "op-two"}
+            ]
+        });
+        let history = product_runtime::validate_operation_history_value(&history).unwrap();
+        assert_eq!(history.app_id, "deployments");
+        assert_eq!(history.entries, 2);
+
+        let invalid = serde_json::json!({
+            "schema": product_runtime::OPERATION_HISTORY_SCHEMA,
+            "app": "deployments",
+            "generatedAt": "2026-06-11T00:00:00Z",
+            "data": {}
+        });
+        let error = product_runtime::validate_operation_history_value(&invalid)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(error, "missing JSON array key: data");
     }
 }
