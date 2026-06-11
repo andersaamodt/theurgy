@@ -555,6 +555,15 @@ fn inspect_app_lines(path: &Path) -> Result<Vec<String>> {
         "product_background_jobs={}",
         product.background_job_ids.join(",")
     ));
+    for job in &product.background_jobs {
+        if !job.command.is_empty() {
+            lines.push(format!(
+                "product_background_job_{}_command={}",
+                job.id,
+                command_text(&job.command)
+            ));
+        }
+    }
     lines.push(format!(
         "product_release_targets={}",
         release_target_ids(&product).join(",")
@@ -718,6 +727,14 @@ fn validate_product_action_commands(
         "statusCommand",
         &runtime.status_command,
     )?;
+    for job in &product.background_jobs {
+        validate_optional_product_command(
+            &format!("backgroundJobs.{}.command", job.id),
+            &job.command,
+            "daemonCommand",
+            &runtime.daemon_command,
+        )?;
+    }
     for contract in &product.action_contracts {
         if contract.command.is_empty() {
             continue;
@@ -1505,6 +1522,7 @@ struct ProductSummary {
     state_command: Vec<String>,
     state_status_command: Vec<String>,
     persistence_root_ids: Vec<String>,
+    background_jobs: Vec<BackgroundJob>,
     background_job_ids: Vec<String>,
     release_targets: Vec<ReleaseTarget>,
     audit_keys: Vec<String>,
@@ -1535,6 +1553,12 @@ struct ActionContract {
 struct ActionSummary {
     action_ids: Vec<String>,
     actions: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct BackgroundJob {
+    id: String,
+    command: Vec<String>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -2112,8 +2136,9 @@ fn validate_product_ir_value(value: &Value) -> Result<ProductSummary> {
         optional_string_array(state, "statusCommand", "product IR state.statusCommand")?;
     let persistence_root_ids = optional_object_id_array(state, "roots", "product IR state.roots")?;
     validate_product_persistence(value)?;
-    let background_job_ids =
+    let background_jobs =
         validate_product_background_jobs(value, "backgroundJobs", "product IR backgroundJobs")?;
+    let background_job_ids = background_jobs.iter().map(|job| job.id.clone()).collect();
     let release_targets = validate_product_release_targets(
         value,
         "releaseTargets",
@@ -2134,6 +2159,7 @@ fn validate_product_ir_value(value: &Value) -> Result<ProductSummary> {
         state_command,
         state_status_command,
         persistence_root_ids,
+        background_jobs,
         background_job_ids,
         release_targets,
         audit_keys,
@@ -2515,14 +2541,18 @@ fn optional_object_id_array(value: &Value, key: &str, label: &str) -> Result<Vec
     Ok(ids)
 }
 
-fn validate_product_background_jobs(value: &Value, key: &str, label: &str) -> Result<Vec<String>> {
+fn validate_product_background_jobs(
+    value: &Value,
+    key: &str,
+    label: &str,
+) -> Result<Vec<BackgroundJob>> {
     let Some(raw) = value.get(key) else {
         return Ok(Vec::new());
     };
     let Some(array) = raw.as_array() else {
         return Err(TheurgyError::new(format!("{label} must be an array")).into());
     };
-    let mut ids = Vec::new();
+    let mut jobs = Vec::new();
     for item in array {
         let Some(object) = item.as_object() else {
             return Err(TheurgyError::new(format!("{label} must contain objects")).into());
@@ -2530,16 +2560,19 @@ fn validate_product_background_jobs(value: &Value, key: &str, label: &str) -> Re
         let id = required_stable_id(item, &format!("{label} object.id"))?;
         required_nonempty_object_string(item, "label", &format!("{label} object.label"))?;
         optional_nonempty_object_string(item, "state", &format!("{label} object.state"))?;
-        if object.get("command").is_some() {
+        let command = if object.get("command").is_some() {
             let command =
                 optional_string_array(item, "command", &format!("{label} object.command"))?;
             if command.is_empty() {
                 return Err(TheurgyError::new(format!("{label} object.command required")).into());
             }
-        }
-        ids.push(id);
+            command
+        } else {
+            Vec::new()
+        };
+        jobs.push(BackgroundJob { id, command });
     }
-    Ok(ids)
+    Ok(jobs)
 }
 
 fn validate_product_release_targets(
@@ -4408,6 +4441,9 @@ mod tests {
         assert!(lines.contains(&"product_state_status_command=custom-core status".to_string()));
         assert!(lines.contains(&"product_actions=2".to_string()));
         assert!(lines.contains(&"product_long_running_actions=1".to_string()));
+        assert!(lines.contains(
+            &"product_background_job_server-queue_command=deployments-daemon".to_string()
+        ));
         assert!(lines.contains(&"runtime_protocol=deployments-runtime/v1".to_string()));
         assert!(lines.contains(
             &"runtime_operation_status_command=custom-core operation-status".to_string()
@@ -6345,6 +6381,93 @@ mod tests {
     }
 
     #[test]
+    fn compile_app_rejects_background_job_command_drift() {
+        let app = test_root("compile-app-background-command-drift");
+        let out = test_root("compile-app-background-command-drift-out");
+        fs::create_dir_all(app.join("app-blueprint")).unwrap();
+        write_or_replace(
+            &app.join("theurgy.project.toml"),
+            "name = \"deployments\"\nkind = \"desktop\"\nsource_root = \"src\"\nproduct_ir = \"app-blueprint/product.ir.json\"\ndesktop_surface_ir = \"app-blueprint/desktop.surface.ir.json\"\nruntime_manifest = \"app-blueprint/runtime.manifest.json\"\n",
+        )
+        .unwrap();
+        let product = sample_product().replace(
+            "\"command\": [\"deployments-daemon\"]",
+            "\"command\": [\"other-daemon\"]",
+        );
+        write_or_replace(&app.join("app-blueprint/product.ir.json"), &product).unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/runtime.manifest.json"),
+            &sample_full_runtime_manifest(),
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/desktop.surface.ir.json"),
+            &sample_desktop_surface(),
+        )
+        .unwrap();
+
+        let error = command_compile_app(&[
+            app.display().to_string(),
+            "--target".to_string(),
+            "linux".to_string(),
+            "--out".to_string(),
+            out.display().to_string(),
+        ])
+        .unwrap_err()
+        .to_string();
+        assert_eq!(
+            error,
+            "product IR backgroundJobs.server-queue.command must match runtime manifest daemonCommand"
+        );
+
+        fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
+    fn compile_app_rejects_background_job_without_runtime_daemon() {
+        let app = test_root("compile-app-background-command-missing");
+        let out = test_root("compile-app-background-command-missing-out");
+        fs::create_dir_all(app.join("app-blueprint")).unwrap();
+        write_or_replace(
+            &app.join("theurgy.project.toml"),
+            "name = \"deployments\"\nkind = \"desktop\"\nsource_root = \"src\"\nproduct_ir = \"app-blueprint/product.ir.json\"\ndesktop_surface_ir = \"app-blueprint/desktop.surface.ir.json\"\nruntime_manifest = \"app-blueprint/runtime.manifest.json\"\n",
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/product.ir.json"),
+            &sample_product(),
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/runtime.manifest.json"),
+            &sample_runtime_manifest()
+                .replace("    \"daemonCommand\": [\"deployments-daemon\"],\n", ""),
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/desktop.surface.ir.json"),
+            &sample_desktop_surface(),
+        )
+        .unwrap();
+
+        let error = command_compile_app(&[
+            app.display().to_string(),
+            "--target".to_string(),
+            "linux".to_string(),
+            "--out".to_string(),
+            out.display().to_string(),
+        ])
+        .unwrap_err()
+        .to_string();
+        assert_eq!(
+            error,
+            "product IR backgroundJobs.server-queue.command requires runtime manifest daemonCommand"
+        );
+
+        fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
     fn compile_macos_emits_full_runtime_bridge() {
         let root = test_root("compile-macos-bridge");
         let product = sample_product();
@@ -6606,7 +6729,11 @@ mod tests {
     }
 
     fn sample_runtime_manifest() -> String {
-        "{\n  \"version\": \"theurgy-runtime-manifest/v1\",\n  \"app\": \"deployments\",\n  \"productIr\": \"app-blueprint/product.ir.json\",\n  \"runtime\": {\n    \"stateCommand\": [\"custom-core\", \"state\"],\n    \"statusCommand\": [\"custom-core\", \"status\"],\n    \"operationStatusCommand\": [\"custom-core\", \"operation-status\"],\n    \"actionCommand\": [\"custom-core\", \"action\"],\n    \"historyCommand\": [\"custom-core\", \"history\"],\n    \"protocol\": \"deployments-runtime/v1\"\n  },\n  \"surfaces\": {\n    \"desktop\": \"app-blueprint/desktop.surface.ir.json\"\n  },\n  \"compatibility\": {\n    \"wizardryAppsShellFirstStillSupported\": true,\n    \"theurgyRequiredForLegacyWizardryApps\": false\n  }\n}".to_string()
+        "{\n  \"version\": \"theurgy-runtime-manifest/v1\",\n  \"app\": \"deployments\",\n  \"productIr\": \"app-blueprint/product.ir.json\",\n  \"runtime\": {\n    \"stateCommand\": [\"custom-core\", \"state\"],\n    \"statusCommand\": [\"custom-core\", \"status\"],\n    \"operationStatusCommand\": [\"custom-core\", \"operation-status\"],\n    \"actionCommand\": [\"custom-core\", \"action\"],\n    \"historyCommand\": [\"custom-core\", \"history\"],\n    \"daemonCommand\": [\"deployments-daemon\"],\n    \"protocol\": \"deployments-runtime/v1\"\n  },\n  \"surfaces\": {\n    \"desktop\": \"app-blueprint/desktop.surface.ir.json\"\n  },\n  \"compatibility\": {\n    \"wizardryAppsShellFirstStillSupported\": true,\n    \"theurgyRequiredForLegacyWizardryApps\": false\n  }\n}".to_string()
+    }
+
+    fn sample_full_runtime_manifest() -> String {
+        sample_runtime_manifest()
     }
 
     fn sample_desktop_surface() -> String {
