@@ -480,6 +480,7 @@ fn command_compile_app(args: &[String]) -> Result<()> {
         &runtime_contract,
         target,
         out_dir,
+        runtime_contract.legacy_native_desktop_ir.is_some(),
     )?;
     println!("status=ok");
     println!("app={}", app_dir.display());
@@ -3146,7 +3147,7 @@ fn compile_native(product: &str, target: &str, out_dir: &Path) -> Result<()> {
         product_action_ids: Some(summary.action_ids.clone()),
         product_action_contracts: Some(summary.action_contracts.clone()),
     };
-    compile_native_with_contract(&summary, &surface, &runtime, target, out_dir)
+    compile_native_with_contract(&summary, &surface, &runtime, target, out_dir, false)
 }
 
 fn compile_native_with_contract(
@@ -3155,6 +3156,7 @@ fn compile_native_with_contract(
     runtime: &RuntimeContract,
     target: &str,
     out_dir: &Path,
+    preserve_existing_legacy_desktop_adapter: bool,
 ) -> Result<()> {
     if !summary
         .targets
@@ -3222,12 +3224,28 @@ fn compile_native_with_contract(
     let runtime_metadata = generated_runtime_metadata(summary, runtime, target, &surface_summary);
     validate_generated_runtime(&runtime_metadata)?;
     write_or_replace(&out_dir.join("theurgy-runtime.json"), &runtime_metadata)?;
+    if preserve_existing_legacy_desktop_adapter
+        && matches!(target, "macos" | "linux")
+        && desktop_adapter_source_exists(target, out_dir)
+    {
+        return Ok(());
+    }
     match target {
         "macos" => compile_macos(summary, &surface_summary, runtime, out_dir),
         "linux" => compile_linux(summary, &surface_summary, runtime, out_dir),
         "ios" => compile_ios(summary, &surface_summary, runtime, out_dir),
         "android" => compile_android(summary, &surface_summary, runtime, out_dir),
         _ => Err(TheurgyError::new("unsupported target").into()),
+    }
+}
+
+fn desktop_adapter_source_exists(target: &str, out_dir: &Path) -> bool {
+    match target {
+        "macos" => {
+            out_dir.join("Package.swift").exists() && out_dir.join("Sources/App/App.swift").exists()
+        }
+        "linux" => out_dir.join("meson.build").exists() && out_dir.join("src/main.c").exists(),
+        _ => false,
     }
 }
 
@@ -6249,6 +6267,61 @@ mod tests {
     }
 
     #[test]
+    fn compile_app_preserves_existing_legacy_desktop_adapter_sources() {
+        let app = test_root("compile-app-preserve-legacy-adapter");
+        let out = test_root("compile-app-preserve-legacy-adapter-out");
+        fs::create_dir_all(app.join("app-blueprint")).unwrap();
+        fs::create_dir_all(out.join("src")).unwrap();
+        write_or_replace(
+            &app.join("theurgy.project.toml"),
+            "name = \"deployments\"\nkind = \"desktop\"\nsource_root = \"src\"\nproduct_ir = \"app-blueprint/product.ir.json\"\ndesktop_surface_ir = \"app-blueprint/desktop.surface.ir.json\"\nruntime_manifest = \"app-blueprint/runtime.manifest.json\"\n",
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/product.ir.json"),
+            &sample_product(),
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/runtime.manifest.json"),
+            &sample_runtime_manifest(),
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/desktop.surface.ir.json"),
+            &sample_desktop_surface(),
+        )
+        .unwrap();
+        write_or_replace(&out.join("meson.build"), "legacy meson\n").unwrap();
+        write_or_replace(&out.join("src/main.c"), "legacy linux adapter\n").unwrap();
+
+        command_compile_app(&[
+            app.display().to_string(),
+            "--target".to_string(),
+            "linux".to_string(),
+            "--out".to_string(),
+            out.display().to_string(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(out.join("meson.build")).unwrap(),
+            "legacy meson\n"
+        );
+        assert_eq!(
+            fs::read_to_string(out.join("src/main.c")).unwrap(),
+            "legacy linux adapter\n"
+        );
+        let runtime = fs::read_to_string(out.join("theurgy-runtime.json")).unwrap();
+        assert!(runtime.contains("\"legacyNativeDesktopIr\": \"app-blueprint/app.ir.yaml\""));
+        let surface = fs::read_to_string(out.join("theurgy-surface.json")).unwrap();
+        assert!(surface.contains("\"role\": \"declared-reference-surface\""));
+
+        fs::remove_dir_all(app).unwrap();
+        fs::remove_dir_all(out).unwrap();
+    }
+
+    #[test]
     fn compile_app_rejects_surface_actions_missing_from_product_ir() {
         let app = test_root("compile-app-surface-action");
         let out = test_root("compile-app-surface-action-out");
@@ -6682,7 +6755,7 @@ mod tests {
         let summary = validate_product_ir(&product).unwrap();
         let surface = project_surface(&product, "macos").unwrap();
         let runtime = sample_full_runtime_contract();
-        compile_native_with_contract(&summary, &surface, &runtime, "macos", &root).unwrap();
+        compile_native_with_contract(&summary, &surface, &runtime, "macos", &root, false).unwrap();
 
         let swift = fs::read_to_string(root.join("Sources/App/App.swift")).unwrap();
         assert!(
@@ -6733,13 +6806,15 @@ mod tests {
             "\"actions\": [\"publish_changes\"]",
         );
         let runtime = sample_full_runtime_contract();
-        compile_native_with_contract(&summary, &ios_surface, &runtime, "ios", &ios_root).unwrap();
+        compile_native_with_contract(&summary, &ios_surface, &runtime, "ios", &ios_root, false)
+            .unwrap();
         compile_native_with_contract(
             &summary,
             &android_surface,
             &runtime,
             "android",
             &android_root,
+            false,
         )
         .unwrap();
 
