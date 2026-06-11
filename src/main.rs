@@ -4211,6 +4211,19 @@ func runtimeStringArray(_ json: String, key: String) -> [String] {
   return values
 }
 
+func surfaceScreens(_ json: String) -> [String] {
+  guard let screens = contractObject(json)?["screens"] as? [[String: Any]] else {
+    return []
+  }
+  return screens.compactMap { screen in
+    guard let id = screen["id"] as? String else {
+      return nil
+    }
+    let title = screen["title"] as? String ?? id
+    return "\(id): \(title)"
+  }
+}
+
 struct ProductActionContract {
   let id: String
   let label: String
@@ -4239,6 +4252,9 @@ struct RuntimeContract {
   var operationStatusSchema: String { runtimeString(runtimeMetadata, key: "operationStatusSchema") }
   var operationHistorySchema: String { runtimeString(runtimeMetadata, key: "operationHistorySchema") }
   var runtimeSurfaceActions: [String] { runtimeStringArray(runtimeMetadata, key: "surfaceActions") }
+  var surfaceSchema: String { runtimeString(surfaceMetadata, key: "version") }
+  var surfaceTarget: String { runtimeString(surfaceMetadata, key: "target") }
+  var surfaceScreens: [String] { surfaceScreens(surfaceMetadata) }
   let protocolName = "__PROTOCOL__"
   let stateCommand = __STATE_COMMAND__
   let statusCommand = __STATUS_COMMAND__
@@ -4291,6 +4307,11 @@ struct RuntimeContractView: View {
           Text(contract.actionCommand.joined(separator: " "))
           Text(contract.historyCommand.joined(separator: " "))
           Text(contract.daemonCommand.joined(separator: " "))
+        }
+        Section("Surface") {
+          Text("Surface schema: \(contract.surfaceSchema)")
+          Text("Surface target: \(contract.surfaceTarget)")
+          Text("Surface screens: \(contract.surfaceScreens.joined(separator: ", "))")
         }
         Section("Actions") {
           ForEach(contract.actionContracts, id: \.id) { action in
@@ -4480,6 +4501,31 @@ public final class MainActivity extends Activity {
     }
   }
 
+  private static String surfaceScreens(String json) {
+    try {
+      JSONArray screens = new JSONObject(json).optJSONArray("screens");
+      if (screens == null) {
+        return "";
+      }
+      StringBuilder text = new StringBuilder();
+      for (int i = 0; i < screens.length(); i += 1) {
+        JSONObject screen = screens.optJSONObject(i);
+        if (screen == null) {
+          continue;
+        }
+        if (text.length() > 0) {
+          text.append(", ");
+        }
+        String id = screen.optString("id");
+        String title = screen.optString("title", id);
+        text.append(id).append(": ").append(title);
+      }
+      return text.toString();
+    } catch (JSONException error) {
+      return "";
+    }
+  }
+
   @Override public void onCreate(Bundle state) {
     super.onCreate(state);
     TextView view = new TextView(this);
@@ -4497,6 +4543,9 @@ public final class MainActivity extends Activity {
       .append("\nOperation status schema: ").append(jsonString(runtimeMetadata, "operationStatusSchema"))
       .append("\nOperation history schema: ").append(jsonString(runtimeMetadata, "operationHistorySchema"))
       .append("\nRuntime surface actions: ").append(jsonStringArray(runtimeMetadata, "surfaceActions"))
+      .append("\nSurface schema: ").append(jsonString(surfaceMetadata, "version"))
+      .append("\nSurface target: ").append(jsonString(surfaceMetadata, "target"))
+      .append("\nSurface screens: ").append(surfaceScreens(surfaceMetadata))
       .append("\nState: ").append(String.join(" ", STATE_COMMAND))
       .append("\nStatus: ").append(String.join(" ", STATUS_COMMAND))
       .append("\nSubscribe: ").append(String.join(" ", SUBSCRIBE_STATUS_COMMAND))
@@ -7402,6 +7451,15 @@ mod tests {
         assert!(ios.contains("runtimeString(runtimeMetadata, key: \"operationStatusSchema\")"));
         assert!(ios.contains("runtimeString(runtimeMetadata, key: \"operationHistorySchema\")"));
         assert!(ios.contains("runtimeStringArray(runtimeMetadata, key: \"surfaceActions\")"));
+        assert!(ios.contains("func surfaceScreens(_ json: String) -> [String]"));
+        assert!(ios.contains("contractObject(json)?[\"screens\"] as? [[String: Any]]"));
+        assert!(ios.contains(
+            "var surfaceSchema: String { runtimeString(surfaceMetadata, key: \"version\") }"
+        ));
+        assert!(ios.contains(
+            "var surfaceTarget: String { runtimeString(surfaceMetadata, key: \"target\") }"
+        ));
+        assert!(ios.contains("var surfaceScreens: [String] { surfaceScreens(surfaceMetadata) }"));
         assert!(ios.contains("Runtime app: \\(contract.runtimeApp)"));
         assert!(ios.contains("Runtime target: \\(contract.runtimeTarget)"));
         assert!(ios.contains("Runtime transport: \\(contract.runtimeTransport)"));
@@ -7415,6 +7473,9 @@ mod tests {
         assert!(ios.contains("Operation status schema: \\(contract.operationStatusSchema)"));
         assert!(ios.contains("Operation history schema: \\(contract.operationHistorySchema)"));
         assert!(ios.contains("Runtime surface actions: \\(contract.runtimeSurfaceActions.joined"));
+        assert!(ios.contains("Surface schema: \\(contract.surfaceSchema)"));
+        assert!(ios.contains("Surface target: \\(contract.surfaceTarget)"));
+        assert!(ios.contains("Surface screens: \\(contract.surfaceScreens.joined"));
         assert!(ios.contains("\"deployments-core\", \"runtime-state\""));
         assert!(ios.contains("\"deployments-core\", \"runtime-status\""));
         assert!(
@@ -7518,6 +7579,9 @@ mod tests {
         assert!(android.contains("jsonString(runtimeMetadata, \"operationStatusSchema\")"));
         assert!(android.contains("jsonString(runtimeMetadata, \"operationHistorySchema\")"));
         assert!(android.contains("jsonStringArray(runtimeMetadata, \"surfaceActions\")"));
+        assert!(android.contains("private static String surfaceScreens(String json)"));
+        assert!(android.contains("new JSONObject(json).optJSONArray(\"screens\")"));
+        assert!(android.contains("screen.optString(\"title\", id)"));
         assert!(android.contains("Runtime app: "));
         assert!(android.contains("Runtime target: "));
         assert!(android.contains("Runtime transport: "));
@@ -7527,6 +7591,9 @@ mod tests {
         assert!(android.contains("Operation status schema: "));
         assert!(android.contains("Operation history schema: "));
         assert!(android.contains("Runtime surface actions: "));
+        assert!(android.contains("Surface schema: "));
+        assert!(android.contains("Surface target: "));
+        assert!(android.contains("Surface screens: "));
         assert!(android.contains("new String[] {\"deployments-core\", \"runtime-action\"}"));
         assert!(android.contains("new String[] {\"deployments-core\", \"runtime-status\"}"));
         assert!(android.contains(
