@@ -694,6 +694,7 @@ fn validate_manifest_action_output(
         .into());
     }
     if let Some(contracts) = contracts {
+        validate_runtime_action_operation_contract(action_id, summary.long_running, contracts)?;
         validate_runtime_action_result_keys(action_id, result, contracts)?;
     }
     validate_runtime_output_app("runtime action result", expected_app, &summary.app_id)
@@ -813,6 +814,27 @@ fn validate_runtime_action_result_keys(
         "runtime action result",
         action_id,
     )?;
+    Ok(())
+}
+
+fn validate_runtime_action_operation_contract(
+    action_id: &str,
+    actual_long_running: bool,
+    contracts: &[ActionContract],
+) -> Result<()> {
+    let Some(contract) = contracts.iter().find(|contract| contract.id == action_id) else {
+        return Err(TheurgyError::new(format!(
+            "runtime action not declared in Product IR: {action_id}"
+        ))
+        .into());
+    };
+    if actual_long_running != contract.long_running {
+        return Err(TheurgyError::new(format!(
+            "runtime action operation.longRunning mismatch for {action_id}: expected {}, got {}",
+            contract.long_running, actual_long_running
+        ))
+        .into());
+    }
     Ok(())
 }
 
@@ -1054,6 +1076,7 @@ struct RuntimeActionResultSummary {
     app_id: String,
     action_id: String,
     operation_id: String,
+    long_running: bool,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -1369,7 +1392,7 @@ fn validate_runtime_action_result_value(value: &Value) -> Result<RuntimeActionRe
             TheurgyError::new("runtime action result action must be a stable action id")
         })?;
     let operation = value_object(value, "operation")?;
-    let operation_id = validate_operation_record(operation)?;
+    let (operation_id, long_running) = validate_operation_record(operation)?;
     if value.get("result").is_none() {
         return Err(TheurgyError::new("runtime action result result required").into());
     }
@@ -1377,6 +1400,7 @@ fn validate_runtime_action_result_value(value: &Value) -> Result<RuntimeActionRe
         app_id,
         action_id,
         operation_id,
+        long_running,
     })
 }
 
@@ -1600,7 +1624,7 @@ fn validate_generated_action_contract(contract: &Value) -> Result<String> {
     Ok(id)
 }
 
-fn validate_operation_record(operation: &Value) -> Result<String> {
+fn validate_operation_record(operation: &Value) -> Result<(String, bool)> {
     let id = value_string(operation, "id")
         .filter(|id| !id.is_empty())
         .ok_or_else(|| TheurgyError::new("runtime operation.id required"))?;
@@ -1619,9 +1643,9 @@ fn validate_operation_record(operation: &Value) -> Result<String> {
     if progress > 100 {
         return Err(TheurgyError::new("runtime operation.progress must be 0..100").into());
     }
-    value_bool(operation, "longRunning")
+    let long_running = value_bool(operation, "longRunning")
         .ok_or_else(|| TheurgyError::new("runtime operation.longRunning boolean required"))?;
-    Ok(id)
+    Ok((id, long_running))
 }
 
 fn surface_action_ids(value: &Value) -> Result<Vec<String>> {
@@ -3679,6 +3703,25 @@ mod tests {
                 .and_then(Value::as_object)
                 .map(|params| params.len()),
             Some(0)
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn run_action_with_manifest_rejects_long_running_mismatch() {
+        let root = runtime_fixture_root("run-action-long-running");
+        let manifest = root.join("runtime.manifest.json");
+
+        let error = run_action_output(
+            "publish_changes",
+            "{\"deployment\":\"site-one\"}",
+            Some(&manifest),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "runtime action operation.longRunning mismatch for publish_changes: expected true, got false"
         );
 
         fs::remove_dir_all(root).unwrap();
