@@ -12,3 +12,6 @@
 - Avoid proprietary framework lock-in and commercial platform assumptions.
 - Keep bridges explicit: shell, Rust, native UI, and web handlers must have readable contracts.
 - Preserve CLI parity for meaningful GUI features.
+- For wizardry-native desktop migrations, preserve the shared native schema/generator and make Rust the compiled control plane underneath it instead of replacing the app with a one-platform rewrite.
+- Keep shell out of hot interactive paths once a typed Rust runtime exists; leave shell to the surrounding wizardry lifecycle.
+- Require release artifacts and tests to prove the compiled core is actually bundled for every supported desktop target.

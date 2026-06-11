@@ -17,6 +17,16 @@
 - Generated blank projects use AGPL-3.0-or-later plus Wizardry Addendum.
 - Theurgy repository code is OWL 3.1 unless a file explicitly says otherwise.
 
+## Migration Standards
+- A theurgy migration should preserve the existing wizardry-native app contract when the app already uses a shared native schema or language. Do not replace a cross-platform generator with a single-platform rewrite just to introduce Rust.
+- Move hot, stateful, graph-shaped, latency-sensitive, or platform-integrated behavior into a compiled Rust control plane.
+- Keep generated native hosts as platform adapters when they are already the right place for AppKit, SwiftUI, GTK, permissions, menus, windows, or lifecycle glue.
+- The normal desktop artifact should launch one solid compiled app executable. Separate daemons and helpers are appropriate only when they have an independent lifecycle.
+- Shell scripts may surround the app for install, repair, release, inspection, and compatibility, but they should not keep owning the core interactive runtime once a typed Rust core exists.
+- The migration boundary must be explicit: typed commands, JSON/state schemas, documented XDG roots, release-bundled binaries, and tests that prove the app did not regress to shell-only runtime behavior.
+- For existing apps, migrate by adding a compiled core beside the current backend first, then route new/hot capabilities through it before removing old compatibility paths.
+- Release artifacts for every supported desktop target must include the compiled core at the time the migration lands; do not defer non-primary desktop targets without saying exactly what artifact remains incomplete.
+
 ## Validation
 - Run `cargo fmt --check`.
 - Run `cargo test`.
