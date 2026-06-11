@@ -53,11 +53,12 @@ cargo run --bin theurgy-runtime -- compile-native product.ir.json --target linux
 cargo run --bin theurgy-runtime -- compile-app /path/to/app --target macos --out /tmp/theurgy-macos
 cargo run --bin theurgy-runtime -- run-state --manifest runtime.manifest.json
 cargo run --bin theurgy-runtime -- run-status --manifest runtime.manifest.json
+cargo run --bin theurgy-runtime -- subscribe-status --manifest runtime.manifest.json --once
 cargo run --bin theurgy-runtime -- run-history deployment-slug 40 --manifest runtime.manifest.json
 cargo run --bin theurgy-runtime -- run-action refresh_state --json '{}' --manifest runtime.manifest.json
 ```
 
-`compile-native` is the raw Product IR entrypoint and may project default surfaces and runtime command names from the product contract. `compile-app` is the real application compiler entrypoint: it reads `theurgy.project.toml`, validates the declared Product IR, Runtime Manifest, and target-appropriate Surface IR, rejects manifest path drift between those contracts, then emits adapter metadata from the declared app contracts. That keeps professional apps explicit while preserving the opt-in boundary for shell-first wizardry-apps.
+`compile-native` is the raw Product IR entrypoint and may project default surfaces and runtime command names from the product contract. `compile-app` is the real application compiler entrypoint: it reads `theurgy.project.toml`, validates the declared Product IR, Runtime Manifest, and target-appropriate Surface IR, rejects manifest path drift between those contracts, then emits adapter metadata from the declared app contracts. Generated runtime metadata exposes the bridge as `stateCommand`, `statusCommand`, `subscribeStatusCommand`, `actionCommand`, and `historyCommand`, with typed action contracts beside the commands. That keeps professional apps explicit while preserving the opt-in boundary for shell-first wizardry-apps.
 
 Install locally:
 
