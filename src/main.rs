@@ -1864,10 +1864,15 @@ fn validate_product_ir_value(value: &Value) -> Result<ProductSummary> {
         .filter(|schema| !schema.is_empty())
         .ok_or_else(|| TheurgyError::new("product IR state.snapshotSchema required"))?;
     let persistence_root_ids = optional_object_id_array(state, "roots", "product IR state.roots")?;
+    validate_product_persistence(value)?;
     let background_job_ids =
-        optional_object_id_array(value, "backgroundJobs", "product IR backgroundJobs")?;
-    let release_target_ids =
-        optional_object_id_array(value, "releaseTargets", "product IR releaseTargets")?;
+        validate_product_background_jobs(value, "backgroundJobs", "product IR backgroundJobs")?;
+    let release_target_ids = validate_product_release_targets(
+        value,
+        "releaseTargets",
+        "product IR releaseTargets",
+        &targets,
+    )?;
     let audit_keys = optional_object_keys(value, "audit")?;
     Ok(ProductSummary {
         app_id,
@@ -2215,6 +2220,129 @@ fn optional_object_id_array(value: &Value, key: &str, label: &str) -> Result<Vec
         ids.push(id.to_string());
     }
     Ok(ids)
+}
+
+fn validate_product_background_jobs(value: &Value, key: &str, label: &str) -> Result<Vec<String>> {
+    let Some(raw) = value.get(key) else {
+        return Ok(Vec::new());
+    };
+    let Some(array) = raw.as_array() else {
+        return Err(TheurgyError::new(format!("{label} must be an array")).into());
+    };
+    let mut ids = Vec::new();
+    for item in array {
+        let Some(object) = item.as_object() else {
+            return Err(TheurgyError::new(format!("{label} must contain objects")).into());
+        };
+        let id = required_stable_id(item, &format!("{label} object.id"))?;
+        required_nonempty_object_string(item, "label", &format!("{label} object.label"))?;
+        optional_nonempty_object_string(item, "state", &format!("{label} object.state"))?;
+        if object.get("command").is_some() {
+            let command =
+                optional_string_array(item, "command", &format!("{label} object.command"))?;
+            if command.is_empty() {
+                return Err(TheurgyError::new(format!("{label} object.command required")).into());
+            }
+        }
+        ids.push(id);
+    }
+    Ok(ids)
+}
+
+fn validate_product_release_targets(
+    value: &Value,
+    key: &str,
+    label: &str,
+    app_targets: &[String],
+) -> Result<Vec<String>> {
+    let Some(raw) = value.get(key) else {
+        return Ok(Vec::new());
+    };
+    let Some(array) = raw.as_array() else {
+        return Err(TheurgyError::new(format!("{label} must be an array")).into());
+    };
+    let mut ids = Vec::new();
+    for item in array {
+        let Some(_object) = item.as_object() else {
+            return Err(TheurgyError::new(format!("{label} must contain objects")).into());
+        };
+        let id = required_stable_id(item, &format!("{label} object.id"))?;
+        let target =
+            required_nonempty_object_string(item, "target", &format!("{label} object.target"))?;
+        if !matches!(target.as_str(), "macos" | "linux" | "ios" | "android") {
+            return Err(TheurgyError::new(format!(
+                "{label} object.target must be macos, linux, ios, or android"
+            ))
+            .into());
+        }
+        if !app_targets.iter().any(|app_target| app_target == &target) {
+            return Err(TheurgyError::new(format!(
+                "{label} object.target not declared in app.targets: {target}"
+            ))
+            .into());
+        }
+        let surface =
+            required_nonempty_object_string(item, "surface", &format!("{label} object.surface"))?;
+        let expected_surface = if matches!(target.as_str(), "macos" | "linux") {
+            "desktop"
+        } else {
+            "mobile"
+        };
+        if surface != expected_surface {
+            return Err(TheurgyError::new(format!(
+                "{label} object.surface for {target} must be {expected_surface}"
+            ))
+            .into());
+        }
+        required_nonempty_object_string(item, "artifact", &format!("{label} object.artifact"))?;
+        ids.push(id);
+    }
+    Ok(ids)
+}
+
+fn validate_product_persistence(value: &Value) -> Result<()> {
+    let Some(raw) = value.get("persistence") else {
+        return Ok(());
+    };
+    let Some(_object) = raw.as_object() else {
+        return Err(TheurgyError::new("product IR persistence must be an object").into());
+    };
+    required_nonempty_object_string(raw, "truth", "product IR persistence.truth")?;
+    optional_nonempty_object_string(raw, "database", "product IR persistence.database")?;
+    optional_nonempty_object_string(raw, "history", "product IR persistence.history")?;
+    Ok(())
+}
+
+fn required_stable_id(value: &Value, label: &str) -> Result<String> {
+    value
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|id| valid_action_id(id))
+        .map(String::from)
+        .ok_or_else(|| TheurgyError::new(format!("{label} must be stable")).into())
+}
+
+fn required_nonempty_object_string(value: &Value, key: &str, label: &str) -> Result<String> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .filter(|text| !text.is_empty())
+        .map(String::from)
+        .ok_or_else(|| TheurgyError::new(format!("{label} required")).into())
+}
+
+fn optional_nonempty_object_string(
+    value: &Value,
+    key: &str,
+    label: &str,
+) -> Result<Option<String>> {
+    let Some(raw) = value.get(key) else {
+        return Ok(None);
+    };
+    let Some(text) = raw.as_str().filter(|text| !text.is_empty()) else {
+        return Err(TheurgyError::new(format!("{label} must be a non-empty string")).into());
+    };
+    Ok(Some(text.to_string()))
 }
 
 fn optional_object_keys(value: &Value, key: &str) -> Result<Vec<String>> {
@@ -4042,6 +4170,22 @@ mod tests {
         let product = sample_product().replace("\"params\": \"object\"", "\"params\": \"blob\"");
         let error = validate_product_ir(&product).unwrap_err().to_string();
         assert!(error.contains("unsupported shape type: blob"));
+        let product = sample_product().replace(
+            "\"persistence\": {\n    \"truth\": \"file-first\"\n  },",
+            "\"persistence\": {\n    \"database\": \"none\"\n  },",
+        );
+        let error = validate_product_ir(&product).unwrap_err().to_string();
+        assert!(error.contains("persistence.truth required"));
+        let product = sample_product().replace("\"target\": \"macos\"", "\"target\": \"ios\"");
+        let error = validate_product_ir(&product).unwrap_err().to_string();
+        assert!(error.contains("releaseTargets object.target not declared in app.targets: ios"));
+        let product =
+            sample_product().replace("\"surface\": \"desktop\"", "\"surface\": \"mobile\"");
+        let error = validate_product_ir(&product).unwrap_err().to_string();
+        assert!(error.contains("releaseTargets object.surface for macos must be desktop"));
+        let product = sample_product().replace("\"label\": \"Server Queue\"", "\"label\": \"\"");
+        let error = validate_product_ir(&product).unwrap_err().to_string();
+        assert!(error.contains("backgroundJobs object.label required"));
     }
 
     #[test]
@@ -4244,6 +4388,24 @@ mod tests {
                 .pointer("/$defs/shape/additionalProperties/$ref")
                 .and_then(Value::as_str),
             Some("#/$defs/shapeDescriptor")
+        );
+        assert_eq!(
+            schema
+                .pointer("/properties/backgroundJobs/items/$ref")
+                .and_then(Value::as_str),
+            Some("#/$defs/backgroundJob")
+        );
+        assert_eq!(
+            schema
+                .pointer("/properties/releaseTargets/items/$ref")
+                .and_then(Value::as_str),
+            Some("#/$defs/releaseTarget")
+        );
+        assert_eq!(
+            schema
+                .pointer("/properties/persistence/required/0")
+                .and_then(Value::as_str),
+            Some("truth")
         );
     }
 
@@ -5451,14 +5613,19 @@ mod tests {
     }
 
     fn sample_product() -> String {
-        "{\n  \"version\": \"theurgy-product-ir/v1\",\n  \"format\": \"json\",\n  \"app\": {\n    \"id\": \"deployments\",\n    \"name\": \"Deployments\",\n    \"targets\": [\"macos\", \"linux\"],\n    \"capabilities\": [\"native-desktop\", \"runtime-actions\"],\n    \"permissions\": [\"files\"]\n  },\n  \"domain\": {\n    \"objects\": [\n      {\"id\": \"server\", \"label\": \"Server\"},\n      {\"id\": \"deployment\", \"label\": \"Deployment\"}\n    ]\n  },\n  \"actions\": [\n    {\"id\": \"refresh_state\", \"label\": \"Refresh\", \"input\": {}, \"output\": {\"params\": \"object\"}, \"effect\": \"read\", \"failure\": {}, \"safe\": true, \"mutating\": false, \"longRunning\": false, \"privileged\": false},\n    {\"id\": \"publish_changes\", \"label\": \"Push to Production\", \"input\": {\"deployment\": \"string\"}, \"output\": {\"params\": \"object\"}, \"effect\": \"release\", \"failure\": {}, \"safe\": false, \"mutating\": true, \"longRunning\": true, \"privileged\": true}\n  ],\n  \"state\": {\n    \"snapshotSchema\": \"deployments-state/v1\",\n    \"roots\": [{\"id\": \"headquarters-workspace\", \"kind\": \"xdg-state\"}]\n  },\n  \"backgroundJobs\": [\n    {\"id\": \"server-queue\", \"label\": \"Server Queue\"}\n  ],\n  \"releaseTargets\": [\n    {\"id\": \"macos-app\", \"target\": \"macos\"}\n  ],\n  \"audit\": {\n    \"operationHistory\": true,\n    \"cliParity\": true\n  }\n}".to_string()
+        "{\n  \"version\": \"theurgy-product-ir/v1\",\n  \"format\": \"json\",\n  \"app\": {\n    \"id\": \"deployments\",\n    \"name\": \"Deployments\",\n    \"targets\": [\"macos\", \"linux\"],\n    \"capabilities\": [\"native-desktop\", \"runtime-actions\"],\n    \"permissions\": [\"files\"]\n  },\n  \"domain\": {\n    \"objects\": [\n      {\"id\": \"server\", \"label\": \"Server\"},\n      {\"id\": \"deployment\", \"label\": \"Deployment\"}\n    ]\n  },\n  \"actions\": [\n    {\"id\": \"refresh_state\", \"label\": \"Refresh\", \"input\": {}, \"output\": {\"params\": \"object\"}, \"effect\": \"read\", \"failure\": {}, \"safe\": true, \"mutating\": false, \"longRunning\": false, \"privileged\": false},\n    {\"id\": \"publish_changes\", \"label\": \"Push to Production\", \"input\": {\"deployment\": \"string\"}, \"output\": {\"params\": \"object\"}, \"effect\": \"release\", \"failure\": {}, \"safe\": false, \"mutating\": true, \"longRunning\": true, \"privileged\": true}\n  ],\n  \"state\": {\n    \"snapshotSchema\": \"deployments-state/v1\",\n    \"roots\": [{\"id\": \"headquarters-workspace\", \"kind\": \"xdg-state\"}]\n  },\n  \"backgroundJobs\": [\n    {\"id\": \"server-queue\", \"label\": \"Server Queue\", \"command\": [\"deployments-daemon\"], \"state\": \"server.queue_mode\"}\n  ],\n  \"releaseTargets\": [\n    {\"id\": \"macos-app\", \"target\": \"macos\", \"surface\": \"desktop\", \"artifact\": \"generated/macos\"}\n  ],\n  \"persistence\": {\n    \"truth\": \"file-first\"\n  },\n  \"audit\": {\n    \"operationHistory\": true,\n    \"cliParity\": true\n  }\n}".to_string()
     }
 
     fn sample_mobile_product() -> String {
-        sample_product().replace(
-            "\"targets\": [\"macos\", \"linux\"]",
-            "\"targets\": [\"ios\", \"android\"]",
-        )
+        sample_product()
+            .replace(
+                "\"targets\": [\"macos\", \"linux\"]",
+                "\"targets\": [\"ios\", \"android\"]",
+            )
+            .replace(
+                "{\"id\": \"macos-app\", \"target\": \"macos\", \"surface\": \"desktop\", \"artifact\": \"generated/macos\"}",
+                "{\"id\": \"ios-app\", \"target\": \"ios\", \"surface\": \"mobile\", \"artifact\": \"generated/mobile/ios\"},\n    {\"id\": \"android-app\", \"target\": \"android\", \"surface\": \"mobile\", \"artifact\": \"generated/mobile/android\"}",
+            )
     }
 
     fn sample_full_runtime_contract() -> RuntimeContract {

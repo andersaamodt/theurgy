@@ -47,9 +47,24 @@
       },
       "additionalProperties": true
     },
-    "persistence": { "type": "object", "additionalProperties": true },
-    "backgroundJobs": { "type": "array", "items": { "type": "object" } },
-    "releaseTargets": { "type": "array", "items": { "type": "object" } },
+    "persistence": {
+      "type": "object",
+      "required": ["truth"],
+      "properties": {
+        "truth": { "type": "string", "minLength": 1 },
+        "database": { "type": "string", "minLength": 1 },
+        "history": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": true
+    },
+    "backgroundJobs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/backgroundJob" }
+    },
+    "releaseTargets": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/releaseTarget" }
+    },
     "audit": { "type": "object", "additionalProperties": true },
     "surfaces": { "type": "object", "additionalProperties": true }
   },
@@ -75,6 +90,28 @@
       "type": "array",
       "items": { "type": "string" },
       "minItems": 1
+    },
+    "backgroundJob": {
+      "type": "object",
+      "required": ["id", "label"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
+        "label": { "type": "string", "minLength": 1 },
+        "command": { "$ref": "#/$defs/command" },
+        "state": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": true
+    },
+    "releaseTarget": {
+      "type": "object",
+      "required": ["id", "target", "surface", "artifact"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
+        "target": { "enum": ["macos", "linux", "ios", "android"] },
+        "surface": { "enum": ["desktop", "mobile"] },
+        "artifact": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": true
     },
     "shape": {
       "type": "object",
