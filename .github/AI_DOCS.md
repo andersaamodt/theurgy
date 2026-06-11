@@ -26,6 +26,9 @@
 - The migration boundary must be explicit: typed commands, JSON/state schemas, documented XDG roots, release-bundled binaries, and tests that prove the app did not regress to shell-only runtime behavior.
 - For existing apps, migrate by adding a compiled core beside the current backend first, then route new/hot capabilities through it before removing old compatibility paths.
 - Release artifacts for every supported desktop target must include the compiled core at the time the migration lands; do not defer non-primary desktop targets without saying exactly what artifact remains incomplete.
+- During source-tree development, backend wrappers should avoid preferring stale release binaries over freshly built debug binaries. Installed app bundles should prefer the bundled compiled binary.
+- Append-only logs are a good audit substrate, but migrated app features still need active-state projections. Memory, resident workers, artifacts, and desktop-control audits should not surface raw event logs as their primary UX or API.
+- Structured desktop-control adapters may call platform tools internally, but they must not expose freeform shell, AppleScript, or automation strings as the capability contract.
 
 ## Validation
 - Run `cargo fmt --check`.
