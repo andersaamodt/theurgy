@@ -464,19 +464,201 @@ fn command_inspect_app(args: &[String]) -> Result<()> {
         .first()
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
-    command_inspect(&[path.display().to_string()])?;
-    let manifest = fs::read_to_string(path.join("theurgy.project.toml")).unwrap_or_default();
-    for key in [
-        "product_ir",
-        "desktop_surface_ir",
-        "mobile_surface_ir",
-        "runtime_manifest",
-    ] {
-        if let Ok(value) = manifest_value(&manifest, key) {
-            println!("{key}={value}");
-        }
+    for line in inspect_app_lines(&path)? {
+        println!("{line}");
     }
     Ok(())
+}
+
+fn inspect_app_lines(path: &Path) -> Result<Vec<String>> {
+    let manifest_path = path.join("theurgy.project.toml");
+    let manifest = fs::read_to_string(&manifest_path).map_err(|error| {
+        TheurgyError::new(format!(
+            "could not read {}: {error}",
+            manifest_path.display()
+        ))
+    })?;
+    let manifest_summary = inspect_manifest(&manifest)?;
+    let mut lines = vec![
+        format!("name={}", manifest_summary.name),
+        format!("kind={}", manifest_summary.kind),
+        format!("source_root={}", manifest_summary.source_root),
+        "truth=file-first".to_string(),
+    ];
+    let product_ir = manifest_value(&manifest, "product_ir").map_err(|_| {
+        TheurgyError::new("inspect-app requires product_ir in theurgy.project.toml")
+    })?;
+    let runtime_manifest = manifest_value(&manifest, "runtime_manifest").map_err(|_| {
+        TheurgyError::new("inspect-app requires runtime_manifest in theurgy.project.toml")
+    })?;
+    lines.push(format!("product_ir={product_ir}"));
+    if let Ok(desktop_surface_ir) = manifest_value(&manifest, "desktop_surface_ir") {
+        lines.push(format!("desktop_surface_ir={desktop_surface_ir}"));
+    }
+    if let Ok(mobile_surface_ir) = manifest_value(&manifest, "mobile_surface_ir") {
+        lines.push(format!("mobile_surface_ir={mobile_surface_ir}"));
+    }
+    lines.push(format!("runtime_manifest={runtime_manifest}"));
+
+    let product_text = read_json(&path.join(&product_ir))?;
+    let product = validate_product_ir(&product_text)?;
+    lines.push(format!("product_app={}", product.app_id));
+    lines.push(format!("product_targets={}", product.targets.join(",")));
+    lines.push(format!("product_actions={}", product.actions));
+    lines.push(format!(
+        "product_long_running_actions={}",
+        product
+            .action_contracts
+            .iter()
+            .filter(|contract| contract.long_running)
+            .count()
+    ));
+    lines.push(format!(
+        "product_background_jobs={}",
+        product.background_job_ids.join(",")
+    ));
+    lines.push(format!(
+        "product_audit_keys={}",
+        product.audit_keys.join(",")
+    ));
+
+    let runtime_path = path.join(&runtime_manifest);
+    let runtime_text = read_json(&runtime_path)?;
+    let runtime_summary = validate_runtime_manifest(&runtime_text)?;
+    if runtime_summary.app_id != product.app_id {
+        return Err(TheurgyError::new("runtime manifest app does not match product IR app").into());
+    }
+    if runtime_summary.product_ir != product_ir {
+        return Err(TheurgyError::new(format!(
+            "runtime manifest productIr does not match theurgy.project.toml product_ir: {}",
+            runtime_summary.product_ir
+        ))
+        .into());
+    }
+    let runtime = runtime_contract_from_manifest(&runtime_text)?;
+    lines.push(format!("runtime_protocol={}", runtime.protocol));
+    lines.push(format!(
+        "runtime_state_command={}",
+        command_text(&runtime.state_command)
+    ));
+    lines.push(format!(
+        "runtime_status_command={}",
+        command_text(&runtime.status_command)
+    ));
+    lines.push(format!(
+        "runtime_subscribe_status_command={}",
+        command_text(&effective_subscribe_status_command(&runtime))
+    ));
+    lines.push(format!(
+        "runtime_operation_status_command={}",
+        command_text(&runtime.operation_status_command)
+    ));
+    lines.push(format!(
+        "runtime_action_command={}",
+        command_text(&runtime.action_command)
+    ));
+    lines.push(format!(
+        "runtime_history_command={}",
+        command_text(&runtime.history_command)
+    ));
+    lines.push(format!(
+        "runtime_daemon_command={}",
+        command_text(&runtime.daemon_command)
+    ));
+    lines.extend(inspect_runtime_compatibility_lines(&runtime_text)?);
+
+    if let Ok(desktop_surface_ir) = manifest_value(&manifest, "desktop_surface_ir") {
+        let surface = validate_declared_surface(&path, &desktop_surface_ir, &product)?;
+        lines.push(format!("desktop_surface_schema={}", surface.schema));
+        lines.push(format!("desktop_surface_target={}", surface.target));
+        lines.push(format!(
+            "desktop_surface_actions={}",
+            surface.action_ids.len()
+        ));
+        lines.push(format!("desktop_surface_roles={}", surface.roles.join(",")));
+        if runtime_summary.desktop_surface_ir.as_deref() != Some(desktop_surface_ir.as_str()) {
+            return Err(TheurgyError::new(
+                "runtime manifest surfaces.desktop does not match theurgy.project.toml",
+            )
+            .into());
+        }
+    }
+    if let Ok(mobile_surface_ir) = manifest_value(&manifest, "mobile_surface_ir") {
+        let surface = validate_declared_surface(&path, &mobile_surface_ir, &product)?;
+        lines.push(format!("mobile_surface_schema={}", surface.schema));
+        lines.push(format!("mobile_surface_target={}", surface.target));
+        lines.push(format!(
+            "mobile_surface_actions={}",
+            surface.action_ids.len()
+        ));
+        lines.push(format!("mobile_surface_roles={}", surface.roles.join(",")));
+        if runtime_summary.mobile_surface_ir.as_deref() != Some(mobile_surface_ir.as_str()) {
+            return Err(TheurgyError::new(
+                "runtime manifest surfaces.mobile does not match theurgy.project.toml",
+            )
+            .into());
+        }
+    }
+    Ok(lines)
+}
+
+fn validate_declared_surface(
+    app_dir: &Path,
+    surface_ir: &str,
+    product: &ProductSummary,
+) -> Result<SurfaceSummary> {
+    let surface_text = read_json(&app_dir.join(surface_ir))?;
+    let surface = validate_surface_ir(&surface_text)?;
+    if surface.product != product.app_id {
+        return Err(TheurgyError::new("surface IR product does not match product IR app").into());
+    }
+    for action_id in &surface.action_ids {
+        if !product
+            .action_ids
+            .iter()
+            .any(|product_action| product_action == action_id)
+        {
+            return Err(TheurgyError::new(format!(
+                "surface IR action not declared in Product IR: {action_id}"
+            ))
+            .into());
+        }
+    }
+    Ok(surface)
+}
+
+fn inspect_runtime_compatibility_lines(runtime_text: &str) -> Result<Vec<String>> {
+    let value = parse_json(runtime_text)?;
+    let mut lines = Vec::new();
+    let Some(compatibility) = value.get("compatibility") else {
+        return Ok(lines);
+    };
+    let compatibility = compatibility
+        .as_object()
+        .ok_or_else(|| TheurgyError::new("runtime manifest compatibility must be an object"))?;
+    if let Some(value) = compatibility.get("wizardryAppsShellFirstStillSupported") {
+        let flag = value.as_bool().ok_or_else(|| {
+            TheurgyError::new(
+                "runtime manifest compatibility.wizardryAppsShellFirstStillSupported must be boolean",
+            )
+        })?;
+        lines.push(format!("compatibility_wizardry_apps_shell_first={flag}"));
+    }
+    if let Some(value) = compatibility.get("theurgyRequiredForLegacyWizardryApps") {
+        let flag = value.as_bool().ok_or_else(|| {
+            TheurgyError::new(
+                "runtime manifest compatibility.theurgyRequiredForLegacyWizardryApps must be boolean",
+            )
+        })?;
+        lines.push(format!(
+            "compatibility_theurgy_required_for_legacy_wizardry_apps={flag}"
+        ));
+    }
+    Ok(lines)
+}
+
+fn command_text(command: &[String]) -> String {
+    command.join(" ")
 }
 
 fn command_run_state(args: &[String]) -> Result<()> {
@@ -3654,6 +3836,80 @@ mod tests {
     }
 
     #[test]
+    fn inspect_app_summarizes_product_runtime_and_surface_contracts() {
+        let app = test_root("inspect-app-contract");
+        fs::create_dir_all(app.join("app-blueprint")).unwrap();
+        write_or_replace(
+            &app.join("theurgy.project.toml"),
+            "name = \"deployments\"\nkind = \"desktop\"\nsource_root = \"src\"\nproduct_ir = \"app-blueprint/product.ir.json\"\ndesktop_surface_ir = \"app-blueprint/desktop.surface.ir.json\"\nruntime_manifest = \"app-blueprint/runtime.manifest.json\"\n",
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/product.ir.json"),
+            &sample_product(),
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/runtime.manifest.json"),
+            &sample_runtime_manifest(),
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/desktop.surface.ir.json"),
+            &sample_desktop_surface(),
+        )
+        .unwrap();
+
+        let lines = inspect_app_lines(&app).unwrap();
+        assert!(lines.contains(&"product_app=deployments".to_string()));
+        assert!(lines.contains(&"product_actions=2".to_string()));
+        assert!(lines.contains(&"product_long_running_actions=1".to_string()));
+        assert!(lines.contains(&"runtime_protocol=deployments-runtime/v1".to_string()));
+        assert!(lines.contains(
+            &"runtime_operation_status_command=custom-core operation-status".to_string()
+        ));
+        assert!(lines.contains(&"desktop_surface_actions=2".to_string()));
+        assert!(lines.contains(&"compatibility_wizardry_apps_shell_first=true".to_string()));
+        assert!(lines.contains(
+            &"compatibility_theurgy_required_for_legacy_wizardry_apps=false".to_string()
+        ));
+        fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
+    fn inspect_app_rejects_surface_action_drift() {
+        let app = test_root("inspect-app-surface-drift");
+        fs::create_dir_all(app.join("app-blueprint")).unwrap();
+        write_or_replace(
+            &app.join("theurgy.project.toml"),
+            "name = \"deployments\"\nkind = \"desktop\"\nsource_root = \"src\"\nproduct_ir = \"app-blueprint/product.ir.json\"\ndesktop_surface_ir = \"app-blueprint/desktop.surface.ir.json\"\nruntime_manifest = \"app-blueprint/runtime.manifest.json\"\n",
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/product.ir.json"),
+            &sample_product(),
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/runtime.manifest.json"),
+            &sample_runtime_manifest(),
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/desktop.surface.ir.json"),
+            &sample_desktop_surface().replace(
+                "\"actions\": [\"refresh_state\", \"publish_changes\"]",
+                "\"actions\": [\"refresh_state\", \"delete_everything\"]",
+            ),
+        )
+        .unwrap();
+
+        let error = inspect_app_lines(&app).unwrap_err().to_string();
+        assert!(error.contains("surface IR action not declared in Product IR: delete_everything"));
+        fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
     fn creates_desktop_project_without_overwrite() {
         let root = test_root("desktop");
         create_project(ProjectKind::Desktop, "demo-desktop", &root).unwrap();
@@ -5289,7 +5545,7 @@ mod tests {
     }
 
     fn sample_runtime_manifest() -> String {
-        "{\n  \"version\": \"theurgy-runtime-manifest/v1\",\n  \"app\": \"deployments\",\n  \"productIr\": \"app-blueprint/product.ir.json\",\n  \"runtime\": {\n    \"stateCommand\": [\"custom-core\", \"state\"],\n    \"statusCommand\": [\"custom-core\", \"status\"],\n    \"operationStatusCommand\": [\"custom-core\", \"operation-status\"],\n    \"actionCommand\": [\"custom-core\", \"action\"],\n    \"historyCommand\": [\"custom-core\", \"history\"],\n    \"protocol\": \"deployments-runtime/v1\"\n  },\n  \"surfaces\": {\n    \"desktop\": \"app-blueprint/desktop.surface.ir.json\"\n  }\n}".to_string()
+        "{\n  \"version\": \"theurgy-runtime-manifest/v1\",\n  \"app\": \"deployments\",\n  \"productIr\": \"app-blueprint/product.ir.json\",\n  \"runtime\": {\n    \"stateCommand\": [\"custom-core\", \"state\"],\n    \"statusCommand\": [\"custom-core\", \"status\"],\n    \"operationStatusCommand\": [\"custom-core\", \"operation-status\"],\n    \"actionCommand\": [\"custom-core\", \"action\"],\n    \"historyCommand\": [\"custom-core\", \"history\"],\n    \"protocol\": \"deployments-runtime/v1\"\n  },\n  \"surfaces\": {\n    \"desktop\": \"app-blueprint/desktop.surface.ir.json\"\n  },\n  \"compatibility\": {\n    \"wizardryAppsShellFirstStillSupported\": true,\n    \"theurgyRequiredForLegacyWizardryApps\": false\n  }\n}".to_string()
     }
 
     fn sample_desktop_surface() -> String {

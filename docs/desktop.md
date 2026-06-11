@@ -32,8 +32,10 @@ If `PATH` is omitted, the spell uses `NAME`. The generated desktop project is in
 `theurgy-runtime validate-product-ir PATH` validates the shared product contract.
 `theurgy-runtime validate-runtime-manifest PATH` validates the runtime bridge contract.
 `theurgy-runtime validate-surface-ir PATH` validates a desktop or mobile surface projection.
+`theurgy-runtime validate-operation-status PATH` validates the typed status record for a runtime operation.
 `theurgy-runtime project-surface PATH --target macos|linux|ios|android` emits a target surface projection.
 `theurgy-runtime compile-native PATH --target macos|linux|ios|android --out OUT_DIR` emits a deterministic native adapter root.
 `theurgy-runtime compile-app APP_DIR --target macos|linux|ios|android --out OUT_DIR` reads `theurgy.project.toml` and compiles from the app's declared Product IR.
+`theurgy-runtime inspect-app APP_DIR` validates and summarizes the declared Product IR, target surfaces, runtime bridge commands, compatibility posture, and long-running action coverage.
 
 This compiler track is opt-in. Shell-first wizardry-apps projects do not depend on it unless they choose the Theurgy native runtime path.

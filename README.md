@@ -23,7 +23,7 @@ A Rust-backed native desktop app can be solid in a way that an app backed by man
 
 - well-named spells backed by `theurgy-runtime`
 - project scaffolding for native desktop apps and enterprise web apps
-- first canonical schemas for Product IR, Desktop Surface IR, Mobile Surface IR, Action IR, State Snapshot IR, Runtime Status, Runtime Action Result, Operation History, Generated Runtime Metadata, and Runtime Manifest
+- first canonical schemas for Product IR, Desktop Surface IR, Mobile Surface IR, Action IR, State Snapshot IR, Runtime Status, Runtime Action Result, Operation Status, Operation History, Generated Runtime Metadata, and Runtime Manifest
 - product runtime/compiler commands for validation, surface projection, app-manifest-driven native adapter emission, app inspection, and JSON action envelopes
 - a first-phase enterprise web runtime harness contract for CGI/HTTP/FastCGI migration
 - file-first project manifests
@@ -44,6 +44,7 @@ cargo run --bin theurgy-runtime -- validate-action-ir action.ir.json
 cargo run --bin theurgy-runtime -- validate-state-snapshot state.snapshot.json
 cargo run --bin theurgy-runtime -- validate-runtime-status runtime-status.json
 cargo run --bin theurgy-runtime -- validate-runtime-action-result action-result.json
+cargo run --bin theurgy-runtime -- validate-operation-status operation-status.json
 cargo run --bin theurgy-runtime -- validate-operation-history operation-history.json
 cargo run --bin theurgy-runtime -- validate-runtime-manifest runtime.manifest.json
 cargo run --bin theurgy-runtime -- validate-generated-runtime theurgy-runtime.json
@@ -54,11 +55,12 @@ cargo run --bin theurgy-runtime -- compile-app /path/to/app --target macos --out
 cargo run --bin theurgy-runtime -- run-state --manifest runtime.manifest.json
 cargo run --bin theurgy-runtime -- run-status --manifest runtime.manifest.json
 cargo run --bin theurgy-runtime -- subscribe-status --manifest runtime.manifest.json --once
+cargo run --bin theurgy-runtime -- run-operation-status operation-id --manifest runtime.manifest.json
 cargo run --bin theurgy-runtime -- run-history deployment-slug 40 --manifest runtime.manifest.json
 cargo run --bin theurgy-runtime -- run-action refresh_state --json '{}' --manifest runtime.manifest.json
 ```
 
-`compile-native` is the raw Product IR entrypoint and may project default surfaces and runtime command names from the product contract. `compile-app` is the real application compiler entrypoint: it reads `theurgy.project.toml`, validates the declared Product IR, Runtime Manifest, and target-appropriate Surface IR, rejects manifest path drift between those contracts, then emits adapter metadata from the declared app contracts. Generated runtime metadata exposes the bridge as `stateCommand`, `statusCommand`, `subscribeStatusCommand`, `actionCommand`, and `historyCommand`, with typed action contracts beside the commands. Runtime manifests may declare `subscribeStatusCommand`; if they omit it, Theurgy falls back to `statusCommand`. That keeps professional apps explicit while preserving the opt-in boundary for shell-first wizardry-apps.
+`compile-native` is the raw Product IR entrypoint and may project default surfaces and runtime command names from the product contract. `compile-app` is the real application compiler entrypoint: it reads `theurgy.project.toml`, validates the declared Product IR, Runtime Manifest, and target-appropriate Surface IR, rejects manifest path drift between those contracts, then emits adapter metadata from the declared app contracts. Generated runtime metadata exposes the bridge as `stateCommand`, `statusCommand`, `subscribeStatusCommand`, `operationStatusCommand`, `actionCommand`, and `historyCommand`, with typed action contracts beside the commands. Long-running generated runtimes must expose `operationStatusCommand` so native adapters can track progress/final state through a typed operation status contract. Runtime manifests may declare `subscribeStatusCommand`; if they omit it, Theurgy falls back to `statusCommand`. That keeps professional apps explicit while preserving the opt-in boundary for shell-first wizardry-apps.
 
 Install locally:
 
