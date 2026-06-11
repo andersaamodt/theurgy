@@ -30,6 +30,7 @@
 - Packaged native hosts must resolve staged runtime resources relative to the installed executable or bundle layout. Do not leave generated desktop hosts pointing at the source checkout as their only runtime path.
 - During source-tree development, backend wrappers should avoid preferring stale release binaries over freshly built debug binaries. Installed app bundles should prefer the bundled compiled binary.
 - Append-only logs are a good audit substrate, but migrated app features still need active-state projections. Memory, resident workers, artifacts, and desktop-control audits should not surface raw event logs as their primary UX or API.
+- Compiled core reasoning context should be passed through typed sidecar state keyed by durable run identifiers, not by mutating user-visible prompts or transcript messages.
 - Structured desktop-control adapters may call platform tools internally, but they must not expose freeform shell, AppleScript, or automation strings as the capability contract.
 
 ## Validation
