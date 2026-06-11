@@ -74,6 +74,9 @@ fn run(args: Vec<String>) -> Result<()> {
         Some("validate-action-ir") => command_validate_action_ir(&args[2..]),
         Some("validate-state-snapshot") => command_validate_state_snapshot(&args[2..]),
         Some("validate-runtime-status") => command_validate_runtime_status(&args[2..]),
+        Some("validate-runtime-action-request") => {
+            command_validate_runtime_action_request(&args[2..])
+        }
         Some("validate-runtime-action-result") => {
             command_validate_runtime_action_result(&args[2..])
         }
@@ -243,6 +246,19 @@ fn command_validate_runtime_action_result(args: &[String]) -> Result<()> {
     println!("app={}", summary.app_id);
     println!("action={}", summary.action_id);
     println!("operation={}", summary.operation_id);
+    Ok(())
+}
+
+fn command_validate_runtime_action_request(args: &[String]) -> Result<()> {
+    if args.len() != 1 {
+        return Err(TheurgyError::new("usage: validate-runtime-action-request PATH").into());
+    }
+    let value = read_json(Path::new(&args[0]))?;
+    let summary = validate_runtime_action_request(&value)?;
+    println!("status=ok");
+    println!("protocol=theurgy-runtime-action/v1");
+    println!("app={}", summary.app_id);
+    println!("action={}", summary.action_id);
     Ok(())
 }
 
@@ -1116,7 +1132,7 @@ fn run_action_output(
         return run_manifest_action(&runtime, action_id, params);
     }
     Ok(format!(
-        "{{\n  \"success\": true,\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"action\": \"{}\",\n  \"operation\": {{\n    \"id\": \"op-{}\",\n    \"status\": \"accepted\",\n    \"progress\": 0,\n    \"longRunning\": false\n  }},\n  \"params\": {}\n}}",
+        "{{\n  \"success\": true,\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"theurgy-runtime\",\n  \"action\": \"{}\",\n  \"operation\": {{\n    \"id\": \"op-{}\",\n    \"status\": \"accepted\",\n    \"progress\": 0,\n    \"longRunning\": false\n  }},\n  \"params\": {}\n}}",
         json_escape(action_id),
         json_escape(action_id),
         params
@@ -1599,6 +1615,12 @@ struct RuntimeStatusSummary {
 }
 
 #[derive(Debug, Eq, PartialEq)]
+struct RuntimeActionRequestSummary {
+    app_id: String,
+    action_id: String,
+}
+
+#[derive(Debug, Eq, PartialEq)]
 struct RuntimeActionResultSummary {
     app_id: String,
     action_id: String,
@@ -1737,6 +1759,11 @@ fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
     value_string(&value, "protocol")
         .filter(|protocol| !protocol.is_empty())
         .ok_or_else(|| TheurgyError::new("generated runtime protocol required"))?;
+    expect_value_string(
+        &value,
+        "runtimeActionRequestSchema",
+        "theurgy-runtime-action-request/v1",
+    )?;
     value_string(&value, "productIr")
         .filter(|path| !path.is_empty())
         .ok_or_else(|| TheurgyError::new("generated runtime productIr required"))?;
@@ -2099,6 +2126,28 @@ fn validate_runtime_status_value(value: &Value) -> Result<RuntimeStatusSummary> 
 fn validate_runtime_action_result(text: &str) -> Result<RuntimeActionResultSummary> {
     let value = parse_json(text)?;
     validate_runtime_action_result_value(&value)
+}
+
+fn validate_runtime_action_request(text: &str) -> Result<RuntimeActionRequestSummary> {
+    let value = parse_json(text)?;
+    validate_runtime_action_request_value(&value)
+}
+
+fn validate_runtime_action_request_value(value: &Value) -> Result<RuntimeActionRequestSummary> {
+    expect_value_string(value, "protocol", "theurgy-runtime-action/v1")?;
+    let app_id = value_string(value, "app")
+        .filter(|id| valid_slug(id))
+        .ok_or_else(|| TheurgyError::new("runtime action request app must be a lowercase slug"))?;
+    let action_id = value_string(value, "action")
+        .filter(|id| valid_action_id(id))
+        .ok_or_else(|| {
+            TheurgyError::new("runtime action request action must be a stable action id")
+        })?;
+    let params = value_object(value, "params")?;
+    if !params.is_object() {
+        return Err(TheurgyError::new("runtime action request params must be an object").into());
+    }
+    Ok(RuntimeActionRequestSummary { app_id, action_id })
 }
 
 fn validate_runtime_action_result_value(value: &Value) -> Result<RuntimeActionResultSummary> {
@@ -3375,6 +3424,10 @@ fn generated_runtime_metadata(
         Value::String(runtime.protocol.clone()),
     );
     object.insert(
+        "runtimeActionRequestSchema".to_string(),
+        Value::String("theurgy-runtime-action-request/v1".to_string()),
+    );
+    object.insert(
         "stateCommand".to_string(),
         string_vec_value(&runtime.state_command),
     );
@@ -4086,6 +4139,7 @@ struct RuntimeContract {
   var runtimeApp: String { runtimeString(runtimeMetadata, key: "app") }
   var runtimeTarget: String { runtimeString(runtimeMetadata, key: "target") }
   var runtimeTransport: String { runtimeString(runtimeMetadata, key: "adapterRuntimeTransport") }
+  var runtimeActionRequestSchema: String { runtimeString(runtimeMetadata, key: "runtimeActionRequestSchema") }
   var runtimeSurfaceActions: [String] { runtimeStringArray(runtimeMetadata, key: "surfaceActions") }
   let protocolName = "__PROTOCOL__"
   let stateCommand = __STATE_COMMAND__
@@ -4126,6 +4180,7 @@ struct RuntimeContractView: View {
           Text("Runtime app: \(contract.runtimeApp)")
           Text("Runtime target: \(contract.runtimeTarget)")
           Text("Runtime transport: \(contract.runtimeTransport)")
+          Text("Runtime action request schema: \(contract.runtimeActionRequestSchema)")
           Text("Runtime surface actions: \(contract.runtimeSurfaceActions.joined(separator: ", "))")
           Text(contract.stateCommand.joined(separator: " "))
           Text(contract.statusCommand.joined(separator: " "))
@@ -4334,6 +4389,7 @@ public final class MainActivity extends Activity {
       .append("\nRuntime app: ").append(runtimeApp)
       .append("\nRuntime target: ").append(jsonString(runtimeMetadata, "target"))
       .append("\nRuntime transport: ").append(jsonString(runtimeMetadata, "adapterRuntimeTransport"))
+      .append("\nRuntime action request schema: ").append(jsonString(runtimeMetadata, "runtimeActionRequestSchema"))
       .append("\nRuntime surface actions: ").append(jsonStringArray(runtimeMetadata, "surfaceActions"))
       .append("\nState: ").append(String.join(" ", STATE_COMMAND))
       .append("\nStatus: ").append(String.join(" ", STATUS_COMMAND))
@@ -5332,6 +5388,38 @@ mod tests {
     }
 
     #[test]
+    fn runtime_action_request_schema_declares_action_envelope_contract() {
+        let schema: Value = serde_json::from_str(include_str!(
+            "../schemas/theurgy-runtime-action-request-v1.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            schema
+                .pointer("/properties/protocol/const")
+                .and_then(Value::as_str),
+            Some("theurgy-runtime-action/v1")
+        );
+        assert_eq!(
+            schema
+                .pointer("/properties/app/pattern")
+                .and_then(Value::as_str),
+            Some("^[a-z][a-z0-9-]*$")
+        );
+        assert_eq!(
+            schema
+                .pointer("/properties/action/pattern")
+                .and_then(Value::as_str),
+            Some("^[a-z][a-z0-9_.-]*$")
+        );
+        assert_eq!(
+            schema
+                .pointer("/properties/params/type")
+                .and_then(Value::as_str),
+            Some("object")
+        );
+    }
+
+    #[test]
     fn surface_ir_schemas_allow_family_targets() {
         let desktop_schema: Value = serde_json::from_str(include_str!(
             "../schemas/theurgy-desktop-surface-ir-v1.json"
@@ -5588,6 +5676,28 @@ mod tests {
     }
 
     #[test]
+    fn validates_runtime_action_request_contract() {
+        let request = "{\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments\",\n  \"action\": \"publish_changes\",\n  \"params\": {\"deployment\": \"site-one\"}\n}";
+        let summary = validate_runtime_action_request(request).unwrap();
+        assert_eq!(summary.app_id, "deployments");
+        assert_eq!(summary.action_id, "publish_changes");
+
+        let error = validate_runtime_action_request(
+            "{\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"Deployments\",\n  \"action\": \"publish_changes\",\n  \"params\": {}\n}",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("runtime action request app must be a lowercase slug"));
+
+        let error = validate_runtime_action_request(
+            "{\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments\",\n  \"action\": \"publish_changes\",\n  \"params\": []\n}",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("missing JSON object key: params"));
+    }
+
+    #[test]
     fn run_action_without_manifest_returns_protocol_envelope() {
         let output = run_action_output("refresh_state", "{\"force\":true}", None).unwrap();
         let value: Value = serde_json::from_str(&output).unwrap();
@@ -5595,6 +5705,10 @@ mod tests {
         assert_eq!(
             value.get("protocol").and_then(Value::as_str),
             Some("theurgy-runtime-action/v1")
+        );
+        assert_eq!(
+            value.get("app").and_then(Value::as_str),
+            Some("theurgy-runtime")
         );
         assert_eq!(
             value.get("action").and_then(Value::as_str),
@@ -6050,6 +6164,12 @@ mod tests {
         );
         assert_eq!(
             runtime_json
+                .get("runtimeActionRequestSchema")
+                .and_then(Value::as_str),
+            Some("theurgy-runtime-action-request/v1")
+        );
+        assert_eq!(
+            runtime_json
                 .get("adapterRuntimeTransport")
                 .and_then(Value::as_str),
             Some("local-process-json")
@@ -6443,6 +6563,12 @@ mod tests {
         assert_eq!(
             runtime_json.get("operationStatusCommand").unwrap(),
             &serde_json::json!(["custom-core", "operation-status"])
+        );
+        assert_eq!(
+            runtime_json
+                .get("runtimeActionRequestSchema")
+                .and_then(Value::as_str),
+            Some("theurgy-runtime-action-request/v1")
         );
         assert_eq!(
             runtime_json
@@ -7042,10 +7168,14 @@ mod tests {
         assert!(ios.contains("runtimeString(runtimeMetadata, key: \"app\")"));
         assert!(ios.contains("runtimeString(runtimeMetadata, key: \"target\")"));
         assert!(ios.contains("runtimeString(runtimeMetadata, key: \"adapterRuntimeTransport\")"));
+        assert!(ios.contains("runtimeString(runtimeMetadata, key: \"runtimeActionRequestSchema\")"));
         assert!(ios.contains("runtimeStringArray(runtimeMetadata, key: \"surfaceActions\")"));
         assert!(ios.contains("Runtime app: \\(contract.runtimeApp)"));
         assert!(ios.contains("Runtime target: \\(contract.runtimeTarget)"));
         assert!(ios.contains("Runtime transport: \\(contract.runtimeTransport)"));
+        assert!(
+            ios.contains("Runtime action request schema: \\(contract.runtimeActionRequestSchema)")
+        );
         assert!(ios.contains("Runtime surface actions: \\(contract.runtimeSurfaceActions.joined"));
         assert!(ios.contains("\"deployments-core\", \"runtime-state\""));
         assert!(ios.contains("\"deployments-core\", \"runtime-status\""));
@@ -7097,6 +7227,12 @@ mod tests {
         .unwrap();
         assert_eq!(
             ios_runtime
+                .get("runtimeActionRequestSchema")
+                .and_then(Value::as_str),
+            Some("theurgy-runtime-action-request/v1")
+        );
+        assert_eq!(
+            ios_runtime
                 .get("adapterRuntimeTransport")
                 .and_then(Value::as_str),
             Some("external-json-abi")
@@ -7114,10 +7250,12 @@ mod tests {
         assert!(android.contains("jsonString(runtimeMetadata, \"app\")"));
         assert!(android.contains("jsonString(runtimeMetadata, \"target\")"));
         assert!(android.contains("jsonString(runtimeMetadata, \"adapterRuntimeTransport\")"));
+        assert!(android.contains("jsonString(runtimeMetadata, \"runtimeActionRequestSchema\")"));
         assert!(android.contains("jsonStringArray(runtimeMetadata, \"surfaceActions\")"));
         assert!(android.contains("Runtime app: "));
         assert!(android.contains("Runtime target: "));
         assert!(android.contains("Runtime transport: "));
+        assert!(android.contains("Runtime action request schema: "));
         assert!(android.contains("Runtime surface actions: "));
         assert!(android.contains("new String[] {\"deployments-core\", \"runtime-action\"}"));
         assert!(android.contains("new String[] {\"deployments-core\", \"runtime-status\"}"));
@@ -7182,6 +7320,12 @@ mod tests {
             &fs::read_to_string(android_root.join("theurgy-runtime.json")).unwrap(),
         )
         .unwrap();
+        assert_eq!(
+            android_runtime
+                .get("runtimeActionRequestSchema")
+                .and_then(Value::as_str),
+            Some("theurgy-runtime-action-request/v1")
+        );
         assert_eq!(
             android_runtime
                 .get("adapterRuntimeTransport")

@@ -43,6 +43,7 @@ cargo run --bin theurgy-runtime -- validate-product-ir product.ir.json
 cargo run --bin theurgy-runtime -- validate-action-ir action.ir.json
 cargo run --bin theurgy-runtime -- validate-state-snapshot state.snapshot.json
 cargo run --bin theurgy-runtime -- validate-runtime-status runtime-status.json
+cargo run --bin theurgy-runtime -- validate-runtime-action-request action-request.json
 cargo run --bin theurgy-runtime -- validate-runtime-action-result action-result.json
 cargo run --bin theurgy-runtime -- validate-operation-status operation-status.json
 cargo run --bin theurgy-runtime -- validate-operation-history operation-history.json

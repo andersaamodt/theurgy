@@ -13,6 +13,7 @@
     "compatibilityWizardryAppsShellFirstStillSupported",
     "compatibilityTheurgyRequiredForLegacyWizardryApps",
     "protocol",
+    "runtimeActionRequestSchema",
     "targetReleaseTarget",
     "targetReleaseArtifact",
     "stateCommand",
@@ -42,6 +43,9 @@
     "compatibilityWizardryAppsShellFirstStillSupported": { "type": "boolean" },
     "compatibilityTheurgyRequiredForLegacyWizardryApps": { "type": "boolean" },
     "protocol": { "type": "string", "minLength": 1 },
+    "runtimeActionRequestSchema": {
+      "const": "theurgy-runtime-action-request/v1"
+    },
     "targetReleaseTarget": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
     "targetReleaseArtifact": { "type": "string", "minLength": 1 },
     "stateCommand": { "$ref": "#/$defs/command" },

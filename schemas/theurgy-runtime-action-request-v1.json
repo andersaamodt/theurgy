@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wizardry.app/schemas/theurgy-runtime-action-request-v1.json",
+  "title": "Theurgy Runtime Action Request v1",
+  "type": "object",
+  "required": ["protocol", "app", "action", "params"],
+  "properties": {
+    "protocol": { "const": "theurgy-runtime-action/v1" },
+    "app": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "action": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
+    "params": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}
