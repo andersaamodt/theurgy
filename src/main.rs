@@ -1566,6 +1566,35 @@ fn swift_string_array_literal(values: &[String]) -> String {
     format!("[{items}]")
 }
 
+fn swift_action_contracts_literal(contracts: &[ActionContract]) -> String {
+    let items = contracts
+        .iter()
+        .map(|contract| {
+            format!(
+                "ProductActionContract(id: \"{}\", label: \"{}\", effect: \"{}\", safe: {}, mutating: {}, longRunning: {}, privileged: {}, inputKeys: {})",
+                swift_escape(&contract.id),
+                swift_escape(&contract.label),
+                swift_escape(&contract.effect),
+                swift_bool(contract.safe),
+                swift_bool(contract.mutating),
+                swift_bool(contract.long_running),
+                swift_bool(contract.privileged),
+                swift_string_array_literal(&contract.input_keys)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("[{items}]")
+}
+
+fn swift_bool(value: bool) -> &'static str {
+    if value {
+        "true"
+    } else {
+        "false"
+    }
+}
+
 fn c_argv_tail_literal(values: &[String]) -> String {
     if values.is_empty() {
         String::new()
@@ -1588,6 +1617,35 @@ fn java_string_array_literal(values: &[String]) -> String {
         .collect::<Vec<_>>()
         .join(", ");
     format!("new String[] {{{items}}}")
+}
+
+fn java_action_contracts_literal(contracts: &[ActionContract]) -> String {
+    let items = contracts
+        .iter()
+        .map(|contract| {
+            format!(
+                "new ProductActionContract(\"{}\", \"{}\", \"{}\", {}, {}, {}, {}, {})",
+                java_escape(&contract.id),
+                java_escape(&contract.label),
+                java_escape(&contract.effect),
+                java_bool(contract.safe),
+                java_bool(contract.mutating),
+                java_bool(contract.long_running),
+                java_bool(contract.privileged),
+                java_string_array_literal(&contract.input_keys)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("new ProductActionContract[] {{{items}}}")
+}
+
+fn java_bool(value: bool) -> &'static str {
+    if value {
+        "true"
+    } else {
+        "false"
+    }
 }
 
 fn valid_slug(value: &str) -> bool {
@@ -2170,6 +2228,17 @@ fn ios_adapter_source(summary: &ProductSummary, runtime: &RuntimeContract) -> St
 // Surface: theurgy-surface.json
 import SwiftUI
 
+struct ProductActionContract {
+  let id: String
+  let label: String
+  let effect: String
+  let safe: Bool
+  let mutating: Bool
+  let longRunning: Bool
+  let privileged: Bool
+  let inputKeys: [String]
+}
+
 struct RuntimeContract {
   let protocolName = "__PROTOCOL__"
   let stateCommand = __STATE_COMMAND__
@@ -2177,6 +2246,7 @@ struct RuntimeContract {
   let actionCommand = __ACTION_COMMAND__
   let historyCommand = __HISTORY_COMMAND__
   let daemonCommand = __DAEMON_COMMAND__
+  let actionContracts = __ACTION_CONTRACTS__
 }
 
 struct RuntimeContractView: View {
@@ -2192,6 +2262,14 @@ struct RuntimeContractView: View {
           Text(contract.actionCommand.joined(separator: " "))
           Text(contract.historyCommand.joined(separator: " "))
           Text(contract.daemonCommand.joined(separator: " "))
+        }
+        Section("Actions") {
+          ForEach(contract.actionContracts, id: \.id) { action in
+            VStack(alignment: .leading) {
+              Text(action.label)
+              Text(action.effect)
+            }
+          }
         }
       }
       .navigationTitle("__APP_NAME__")
@@ -2231,6 +2309,10 @@ struct TheurgyMobileApp: App {
             "__DAEMON_COMMAND__",
             &swift_string_array_literal(&runtime.daemon_command),
         )
+        .replace(
+            "__ACTION_CONTRACTS__",
+            &swift_action_contracts_literal(&summary.action_contracts),
+        )
 }
 
 fn android_adapter_source(summary: &ProductSummary, runtime: &RuntimeContract) -> String {
@@ -2247,11 +2329,45 @@ public final class MainActivity extends Activity {
   private static final String[] ACTION_COMMAND = __ACTION_COMMAND__;
   private static final String[] HISTORY_COMMAND = __HISTORY_COMMAND__;
   private static final String[] DAEMON_COMMAND = __DAEMON_COMMAND__;
+  private static final ProductActionContract[] ACTION_CONTRACTS = __ACTION_CONTRACTS__;
+
+  private static final class ProductActionContract {
+    final String id;
+    final String label;
+    final String effect;
+    final boolean safe;
+    final boolean mutating;
+    final boolean longRunning;
+    final boolean privileged;
+    final String[] inputKeys;
+
+    ProductActionContract(String id, String label, String effect, boolean safe, boolean mutating, boolean longRunning, boolean privileged, String[] inputKeys) {
+      this.id = id;
+      this.label = label;
+      this.effect = effect;
+      this.safe = safe;
+      this.mutating = mutating;
+      this.longRunning = longRunning;
+      this.privileged = privileged;
+      this.inputKeys = inputKeys;
+    }
+  }
 
   @Override public void onCreate(Bundle state) {
     super.onCreate(state);
     TextView view = new TextView(this);
-    view.setText("__APP_NAME__\nRuntime: " + PROTOCOL + "\nState: " + String.join(" ", STATE_COMMAND) + "\nStatus: " + String.join(" ", STATUS_COMMAND) + "\nAction: " + String.join(" ", ACTION_COMMAND) + "\nHistory: " + String.join(" ", HISTORY_COMMAND) + "\nDaemon: " + String.join(" ", DAEMON_COMMAND));
+    StringBuilder text = new StringBuilder();
+    text.append("__APP_NAME__\nRuntime: ").append(PROTOCOL)
+      .append("\nState: ").append(String.join(" ", STATE_COMMAND))
+      .append("\nStatus: ").append(String.join(" ", STATUS_COMMAND))
+      .append("\nAction: ").append(String.join(" ", ACTION_COMMAND))
+      .append("\nHistory: ").append(String.join(" ", HISTORY_COMMAND))
+      .append("\nDaemon: ").append(String.join(" ", DAEMON_COMMAND))
+      .append("\nActions:");
+    for (ProductActionContract action : ACTION_CONTRACTS) {
+      text.append("\n").append(action.label).append(" [").append(action.effect).append("]");
+    }
+    view.setText(text.toString());
     setContentView(view);
   }
 }
@@ -2278,6 +2394,10 @@ public final class MainActivity extends Activity {
         .replace(
             "__DAEMON_COMMAND__",
             &java_string_array_literal(&runtime.daemon_command),
+        )
+        .replace(
+            "__ACTION_CONTRACTS__",
+            &java_action_contracts_literal(&summary.action_contracts),
         )
 }
 
@@ -3524,6 +3644,10 @@ mod tests {
         assert!(ios.contains("\"deployments-core\", \"runtime-status\""));
         assert!(ios.contains("\"deployments-core\", \"runtime-history\""));
         assert!(ios.contains("\"deployments-daemon\""));
+        assert!(ios.contains("struct ProductActionContract"));
+        assert!(ios.contains("let actionContracts = [ProductActionContract"));
+        assert!(ios.contains("id: \"publish_changes\""));
+        assert!(ios.contains("inputKeys: [\"deployment\"]"));
 
         let android = fs::read_to_string(
             android_root.join("app/src/main/java/app/theurgy/generated/MainActivity.java"),
@@ -3534,6 +3658,11 @@ mod tests {
         assert!(android.contains("new String[] {\"deployments-core\", \"runtime-status\"}"));
         assert!(android.contains("new String[] {\"deployments-core\", \"runtime-history\"}"));
         assert!(android.contains("new String[] {\"deployments-daemon\"}"));
+        assert!(android.contains("private static final ProductActionContract[] ACTION_CONTRACTS"));
+        assert!(android.contains(
+            "new ProductActionContract(\"publish_changes\", \"Push to Production\", \"release\""
+        ));
+        assert!(android.contains("new String[] {\"deployment\"}"));
 
         fs::remove_dir_all(ios_root).unwrap();
         fs::remove_dir_all(android_root).unwrap();
