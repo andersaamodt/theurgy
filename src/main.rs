@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::env;
 use std::error::Error;
 use std::fmt;
@@ -768,6 +769,12 @@ fn validate_runtime_action_params(
             .into());
         }
     }
+    validate_shape_object(
+        &contract.input_shape,
+        object,
+        "runtime action param",
+        action_id,
+    )?;
     Ok(())
 }
 
@@ -800,6 +807,12 @@ fn validate_runtime_action_result_keys(
             .into());
         }
     }
+    validate_shape_object(
+        &contract.output_shape,
+        object,
+        "runtime action result",
+        action_id,
+    )?;
     Ok(())
 }
 
@@ -835,7 +848,64 @@ fn validate_runtime_action_failure_keys(
             .into());
         }
     }
+    let failure_object = object
+        .iter()
+        .filter(|(key, _)| key.as_str() != "success")
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect::<serde_json::Map<_, _>>();
+    validate_shape_object(
+        &contract.failure_shape,
+        &failure_object,
+        "runtime action failure",
+        action_id,
+    )?;
     Ok(())
+}
+
+fn validate_shape_object(
+    shape: &BTreeMap<String, String>,
+    object: &serde_json::Map<String, Value>,
+    label: &str,
+    action_id: &str,
+) -> Result<()> {
+    for (key, descriptor) in shape {
+        if descriptor.ends_with('?') && !object.contains_key(key) {
+            continue;
+        }
+        let Some(value) = object.get(key) else {
+            continue;
+        };
+        if !value_matches_shape(value, descriptor) {
+            return Err(TheurgyError::new(format!(
+                "{label} type mismatch for {action_id}.{key}: expected {descriptor}"
+            ))
+            .into());
+        }
+    }
+    Ok(())
+}
+
+fn value_matches_shape(value: &Value, descriptor: &str) -> bool {
+    if value.is_null() {
+        return descriptor.ends_with('?');
+    }
+    let required = descriptor.strip_suffix('?').unwrap_or(descriptor);
+    if required.contains('|') {
+        return value
+            .as_str()
+            .map(|actual| required.split('|').any(|variant| variant == actual))
+            .unwrap_or(false);
+    }
+    match required {
+        "string" => value.is_string(),
+        "boolean" => value.is_boolean(),
+        "number" => value.is_number(),
+        "integer" => value.as_i64().is_some() || value.as_u64().is_some(),
+        "array" => value.is_array(),
+        "object" => value.is_object(),
+        "json" => true,
+        _ => false,
+    }
 }
 
 fn structured_failure_message(output: &str) -> Option<String> {
@@ -958,6 +1028,9 @@ struct ActionContract {
     input_keys: Vec<String>,
     output_keys: Vec<String>,
     failure_keys: Vec<String>,
+    input_shape: BTreeMap<String, String>,
+    output_shape: BTreeMap<String, String>,
+    failure_shape: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -1481,6 +1554,9 @@ fn validate_action_contract(action: &Value) -> Result<ActionContract> {
         input_keys: object_keys(input),
         output_keys: object_keys(output),
         failure_keys: object_keys(failure),
+        input_shape: object_shape(input, "product IR action.input")?,
+        output_shape: object_shape(output, "product IR action.output")?,
+        failure_shape: object_shape(failure, "product IR action.failure")?,
     })
 }
 
@@ -1689,6 +1765,55 @@ fn optional_object_keys(value: &Value, key: &str) -> Result<Vec<String>> {
     let mut keys = object.keys().cloned().collect::<Vec<_>>();
     keys.sort();
     Ok(keys)
+}
+
+fn object_shape(value: &Value, label: &str) -> Result<BTreeMap<String, String>> {
+    let Some(object) = value.as_object() else {
+        return Err(TheurgyError::new(format!("{label} must be an object")).into());
+    };
+    let mut shape = BTreeMap::new();
+    for (key, raw) in object {
+        let Some(type_name) = raw.as_str().filter(|type_name| !type_name.is_empty()) else {
+            return Err(TheurgyError::new(format!(
+                "{label}.{key} must be a non-empty type string"
+            ))
+            .into());
+        };
+        validate_shape_descriptor(type_name, &format!("{label}.{key}"))?;
+        shape.insert(key.clone(), type_name.to_string());
+    }
+    Ok(shape)
+}
+
+fn validate_shape_descriptor(descriptor: &str, label: &str) -> Result<()> {
+    let required = descriptor.strip_suffix('?').unwrap_or(descriptor);
+    if required.is_empty() {
+        return Err(TheurgyError::new(format!("{label} shape type required")).into());
+    }
+    if required.contains('|') {
+        for variant in required.split('|') {
+            if variant.is_empty()
+                || !variant.bytes().all(|byte| {
+                    byte.is_ascii_lowercase()
+                        || byte.is_ascii_digit()
+                        || matches!(byte, b'-' | b'_')
+                })
+            {
+                return Err(TheurgyError::new(format!(
+                    "{label} enum shape contains invalid variant"
+                ))
+                .into());
+            }
+        }
+        return Ok(());
+    }
+    if matches!(
+        required,
+        "string" | "boolean" | "number" | "integer" | "array" | "object" | "json"
+    ) {
+        return Ok(());
+    }
+    Err(TheurgyError::new(format!("{label} unsupported shape type: {descriptor}")).into())
 }
 
 fn object_keys(value: &Value) -> Vec<String> {
@@ -3110,6 +3235,9 @@ mod tests {
         let product = sample_product().replace("\"id\": \"server\"", "\"id\": \"\"");
         let error = validate_product_ir(&product).unwrap_err().to_string();
         assert!(error.contains("domain.objects object.id must be stable"));
+        let product = sample_product().replace("\"params\": \"object\"", "\"params\": \"blob\"");
+        let error = validate_product_ir(&product).unwrap_err().to_string();
+        assert!(error.contains("unsupported shape type: blob"));
     }
 
     #[test]
@@ -3490,6 +3618,21 @@ mod tests {
     }
 
     #[test]
+    fn run_action_with_manifest_rejects_param_type_mismatch() {
+        let root = runtime_fixture_root("run-action-param-type");
+        let manifest = root.join("runtime.manifest.json");
+
+        let error = run_action_output("publish_changes", "{\"deployment\":false}", Some(&manifest))
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "runtime action param type mismatch for publish_changes.deployment: expected string"
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn run_action_with_manifest_rejects_undeclared_result_key() {
         let root = runtime_fixture_root("run-action-undeclared-result");
         write_or_replace(
@@ -3503,6 +3646,25 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "runtime action result key not declared in Product IR output for refresh_state: params"
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn run_action_with_manifest_rejects_result_type_mismatch() {
+        let root = runtime_fixture_root("run-action-result-type");
+        write_or_replace(
+            &root.join("app-blueprint/product.ir.json"),
+            &sample_product().replace("\"params\": \"object\"", "\"params\": \"string\""),
+        )
+        .unwrap();
+        let manifest = root.join("runtime.manifest.json");
+
+        let error = run_action_output("refresh_state", "{}", Some(&manifest)).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "runtime action result type mismatch for refresh_state.params: expected string"
         );
 
         fs::remove_dir_all(root).unwrap();
@@ -3530,6 +3692,16 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "runtime action failure key not declared in Product IR failure for refresh_state: extra"
+        );
+        let error = validate_runtime_action_failure_keys(
+            "refresh_state",
+            "{\"success\":false,\"error\":false}",
+            &contracts,
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "runtime action failure type mismatch for refresh_state.error: expected string"
         );
     }
 
