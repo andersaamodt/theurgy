@@ -10,6 +10,7 @@ name = "theurgy-runtime"
 path = "src/main.rs"
 
 [dependencies]
+serde_json = "1"
 
 [package.metadata.theurgy.web_runtime]
 phase = "contract-and-adapter"

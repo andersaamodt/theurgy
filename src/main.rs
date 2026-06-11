@@ -6,6 +6,8 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
+use serde_json::Value;
+
 const AGPL_NOTICE: &str = "GNU AGPL-3.0-or-later\n";
 const WIZARDRY_ADDENDUM: &str = "Wizardry Addendum 1.0\n\nAdditional terms under GNU AGPL version 3,\nsection 7, apply to this project.\n\n1. No permission is granted to use the names\n\"Wizardry\" or \"Open Wizardry\", or any project\ntrade names, trademarks, or service marks,\nexcept for reasonable descriptive reference.\n\n2. Those names may not be used in advertising,\npublicity, product naming, or public statements\nin any way that misrepresents the origin of the\nsoftware or implies endorsement, sponsorship,\nofficial status, or association.\n\n3. Modified versions and derivative works must\nnot present themselves as the original Wizardry\nproject or as officially associated with it.\n\n4. Truthful descriptive references are allowed,\nincluding statements that a work was generated\nwith, built with, or adapted from Wizardry,\nprovided those statements do not imply\nendorsement, sponsorship, official status,\nor association.\n";
 
@@ -395,41 +397,44 @@ fn read_json(path: &Path) -> Result<String> {
 }
 
 fn validate_runtime_manifest(text: &str) -> Result<RuntimeManifestSummary> {
-    expect_json_string(text, "version", "theurgy-runtime-manifest/v1")?;
-    let app_id = json_string_value(text, "app")
+    let value = parse_json(text)?;
+    expect_value_string(&value, "version", "theurgy-runtime-manifest/v1")?;
+    let app_id = value_string(&value, "app")
         .filter(|id| valid_slug(id))
         .ok_or_else(|| TheurgyError::new("runtime manifest app must be a lowercase slug"))?;
-    json_string_value(text, "productIr")
+    value_string(&value, "productIr")
         .filter(|path| !path.is_empty())
         .ok_or_else(|| TheurgyError::new("runtime manifest productIr required"))?;
-    let runtime = json_object_for_key(text, "runtime")?;
-    let state_command = json_string_array(runtime, "stateCommand")?;
-    let action_command = json_string_array(runtime, "actionCommand")?;
+    let runtime = value_object(&value, "runtime")?;
+    let state_command = value_string_array(runtime, "stateCommand")?;
+    let action_command = value_string_array(runtime, "actionCommand")?;
     if state_command.is_empty() || action_command.is_empty() {
         return Err(TheurgyError::new("runtime manifest commands must be non-empty arrays").into());
     }
-    let protocol = json_string_value(runtime, "protocol")
+    let protocol = value_string(runtime, "protocol")
         .filter(|protocol| !protocol.is_empty())
         .ok_or_else(|| TheurgyError::new("runtime manifest protocol required"))?;
     Ok(RuntimeManifestSummary { app_id, protocol })
 }
 
 fn runtime_contract_from_manifest(text: &str) -> Result<RuntimeContract> {
-    let summary = validate_runtime_manifest(text)?;
-    let runtime = json_object_for_key(text, "runtime")?;
+    let value = parse_json(text)?;
+    let summary = validate_runtime_manifest_value(&value)?;
+    let runtime = value_object(&value, "runtime")?;
     Ok(RuntimeContract {
         app_id: summary.app_id,
         protocol: summary.protocol,
-        state_command: json_string_array(runtime, "stateCommand")?,
-        status_command: json_string_array(runtime, "statusCommand").unwrap_or_default(),
-        action_command: json_string_array(runtime, "actionCommand")?,
-        history_command: json_string_array(runtime, "historyCommand").unwrap_or_default(),
-        daemon_command: json_string_array(runtime, "daemonCommand").unwrap_or_default(),
+        state_command: value_string_array(runtime, "stateCommand")?,
+        status_command: value_string_array(runtime, "statusCommand").unwrap_or_default(),
+        action_command: value_string_array(runtime, "actionCommand")?,
+        history_command: value_string_array(runtime, "historyCommand").unwrap_or_default(),
+        daemon_command: value_string_array(runtime, "daemonCommand").unwrap_or_default(),
     })
 }
 
 fn validate_surface_ir(text: &str) -> Result<SurfaceSummary> {
-    let schema = json_string_value(text, "version")
+    let value = parse_json(text)?;
+    let schema = value_string(&value, "version")
         .ok_or_else(|| TheurgyError::new("surface IR version required"))?;
     if !matches!(
         schema.as_str(),
@@ -437,17 +442,17 @@ fn validate_surface_ir(text: &str) -> Result<SurfaceSummary> {
     ) {
         return Err(TheurgyError::new("surface IR version invalid").into());
     }
-    expect_json_string(text, "format", "json")?;
-    let product = json_string_value(text, "product")
+    expect_value_string(&value, "format", "json")?;
+    let product = value_string(&value, "product")
         .filter(|id| valid_slug(id))
         .ok_or_else(|| TheurgyError::new("surface IR product must be a lowercase slug"))?;
-    let target = json_string_value(text, "target")
+    let target = value_string(&value, "target")
         .filter(|target| !target.is_empty())
         .ok_or_else(|| TheurgyError::new("surface IR target required"))?;
     if schema == "theurgy-desktop-surface-ir/v1" {
-        json_object_for_key(text, "window")?;
+        value_object(&value, "window")?;
     } else {
-        json_array_for_key(text, "screens")?;
+        value_array(&value, "screens")?;
     }
     Ok(SurfaceSummary {
         schema,
@@ -457,16 +462,21 @@ fn validate_surface_ir(text: &str) -> Result<SurfaceSummary> {
 }
 
 fn validate_product_ir(text: &str) -> Result<ProductSummary> {
-    expect_json_string(text, "version", "theurgy-product-ir/v1")?;
-    expect_json_string(text, "format", "json")?;
-    let app = json_object_for_key(text, "app")?;
-    let app_id = json_string_value(app, "id")
+    let value = parse_json(text)?;
+    validate_product_ir_value(&value)
+}
+
+fn validate_product_ir_value(value: &Value) -> Result<ProductSummary> {
+    expect_value_string(value, "version", "theurgy-product-ir/v1")?;
+    expect_value_string(value, "format", "json")?;
+    let app = value_object(value, "app")?;
+    let app_id = value_string(app, "id")
         .filter(|id| valid_slug(id))
         .ok_or_else(|| TheurgyError::new("product IR app.id must be a lowercase slug"))?;
-    let app_name = json_string_value(app, "name")
+    let app_name = value_string(app, "name")
         .filter(|name| !name.is_empty())
         .ok_or_else(|| TheurgyError::new("product IR app.name required"))?;
-    let targets = json_string_array(app, "targets")?;
+    let targets = value_string_array(app, "targets")?;
     if targets.is_empty() {
         return Err(TheurgyError::new("product IR app.targets required").into());
     }
@@ -478,40 +488,59 @@ fn validate_product_ir(text: &str) -> Result<ProductSummary> {
             .into());
         }
     }
-    let actions_array = json_array_for_key(text, "actions")?;
-    let action_objects = top_level_objects(actions_array);
-    if action_objects.is_empty() {
+    let action_values = value_array(value, "actions")?;
+    if action_values.is_empty() {
         return Err(TheurgyError::new("product IR actions required").into());
     }
     let mut action_ids = Vec::new();
-    for action in &action_objects {
+    for action in action_values {
         action_ids.push(validate_action(action)?);
     }
-    let state = json_object_for_key(text, "state")?;
-    json_string_value(state, "snapshotSchema")
+    let state = value_object(value, "state")?;
+    value_string(state, "snapshotSchema")
         .filter(|schema| !schema.is_empty())
         .ok_or_else(|| TheurgyError::new("product IR state.snapshotSchema required"))?;
     Ok(ProductSummary {
         app_id,
         app_name,
         targets,
-        actions: action_objects.len(),
+        actions: action_values.len(),
         action_ids,
     })
 }
 
-fn validate_action(action: &str) -> Result<String> {
-    let id = json_string_value(action, "id")
+fn validate_runtime_manifest_value(value: &Value) -> Result<RuntimeManifestSummary> {
+    expect_value_string(value, "version", "theurgy-runtime-manifest/v1")?;
+    let app_id = value_string(value, "app")
+        .filter(|id| valid_slug(id))
+        .ok_or_else(|| TheurgyError::new("runtime manifest app must be a lowercase slug"))?;
+    value_string(value, "productIr")
+        .filter(|path| !path.is_empty())
+        .ok_or_else(|| TheurgyError::new("runtime manifest productIr required"))?;
+    let runtime = value_object(value, "runtime")?;
+    let state_command = value_string_array(runtime, "stateCommand")?;
+    let action_command = value_string_array(runtime, "actionCommand")?;
+    if state_command.is_empty() || action_command.is_empty() {
+        return Err(TheurgyError::new("runtime manifest commands must be non-empty arrays").into());
+    }
+    let protocol = value_string(runtime, "protocol")
+        .filter(|protocol| !protocol.is_empty())
+        .ok_or_else(|| TheurgyError::new("runtime manifest protocol required"))?;
+    Ok(RuntimeManifestSummary { app_id, protocol })
+}
+
+fn validate_action(action: &Value) -> Result<String> {
+    let id = value_string(action, "id")
         .filter(|id| valid_action_id(id))
         .ok_or_else(|| TheurgyError::new("product IR action.id must be a stable action id"))?;
-    json_string_value(action, "label")
+    value_string(action, "label")
         .filter(|label| !label.is_empty())
         .ok_or_else(|| TheurgyError::new("product IR action.label required"))?;
     for key in ["input", "output", "failure"] {
-        json_object_for_key(action, key)
+        value_object(action, key)
             .map_err(|_| TheurgyError::new(format!("product IR action.{key} object required")))?;
     }
-    let effect = json_string_value(action, "effect")
+    let effect = value_string(action, "effect")
         .ok_or_else(|| TheurgyError::new("product IR action.effect invalid"))?;
     if !matches!(
         effect.as_str(),
@@ -520,174 +549,68 @@ fn validate_action(action: &str) -> Result<String> {
         return Err(TheurgyError::new("product IR action.effect invalid").into());
     }
     for key in ["safe", "mutating", "longRunning", "privileged"] {
-        json_bool_value(action, key).ok_or_else(|| {
+        value_bool(action, key).ok_or_else(|| {
             TheurgyError::new(format!("product IR action.{key} boolean required"))
         })?;
     }
     Ok(id)
 }
 
-fn expect_json_string(text: &str, key: &str, expected: &str) -> Result<()> {
-    match json_string_value(text, key) {
+fn parse_json(text: &str) -> Result<Value> {
+    serde_json::from_str(text)
+        .map_err(|error| TheurgyError::new(format!("invalid JSON: {error}")).into())
+}
+
+fn expect_value_string(value: &Value, key: &str, expected: &str) -> Result<()> {
+    match value_string(value, key) {
         Some(actual) if actual == expected => Ok(()),
         _ => Err(TheurgyError::new(format!("expected {key} = {expected}")).into()),
     }
 }
 
 fn validate_json_params(raw: &str) -> Result<()> {
-    let trimmed = raw.trim();
-    let looks_like_json = (trimmed.starts_with('{') && trimmed.ends_with('}'))
-        || (trimmed.starts_with('[') && trimmed.ends_with(']'));
-    if looks_like_json {
+    let value = parse_json(raw)?;
+    if value.is_object() || value.is_array() {
         Ok(())
     } else {
         Err(TheurgyError::new("expected a JSON object or array literal").into())
     }
 }
 
-fn json_string_value(text: &str, key: &str) -> Option<String> {
-    let marker = format!("\"{key}\"");
-    let start = text.find(&marker)? + marker.len();
-    let after_colon = text[start..].find(':')? + start + 1;
-    let bytes = text.as_bytes();
-    let mut index = after_colon;
-    while index < bytes.len() && bytes[index].is_ascii_whitespace() {
-        index += 1;
-    }
-    if bytes.get(index) != Some(&b'"') {
-        return None;
-    }
-    index += 1;
-    let mut out = String::new();
-    let mut escaped = false;
-    for character in text[index..].chars() {
-        if escaped {
-            out.push(character);
-            escaped = false;
-        } else if character == '\\' {
-            escaped = true;
-        } else if character == '"' {
-            return Some(out);
-        } else {
-            out.push(character);
-        }
-    }
-    None
+fn value_string(value: &Value, key: &str) -> Option<String> {
+    value.get(key)?.as_str().map(String::from)
 }
 
-fn json_bool_value(text: &str, key: &str) -> Option<bool> {
-    let marker = format!("\"{key}\"");
-    let start = text.find(&marker)? + marker.len();
-    let after_colon = text[start..].find(':')? + start + 1;
-    let rest = text[after_colon..].trim_start();
-    if rest.starts_with("true") {
-        Some(true)
-    } else if rest.starts_with("false") {
-        Some(false)
-    } else {
-        None
-    }
+fn value_bool(value: &Value, key: &str) -> Option<bool> {
+    value.get(key)?.as_bool()
 }
 
-fn json_object_for_key<'a>(text: &'a str, key: &str) -> Result<&'a str> {
-    json_balanced_for_key(text, key, '{', '}')
+fn value_object<'a>(value: &'a Value, key: &str) -> Result<&'a Value> {
+    value
+        .get(key)
+        .filter(|candidate| candidate.is_object())
+        .ok_or_else(|| TheurgyError::new(format!("missing JSON object key: {key}")).into())
 }
 
-fn json_array_for_key<'a>(text: &'a str, key: &str) -> Result<&'a str> {
-    json_balanced_for_key(text, key, '[', ']')
+fn value_array<'a>(value: &'a Value, key: &str) -> Result<&'a Vec<Value>> {
+    value
+        .get(key)
+        .and_then(Value::as_array)
+        .ok_or_else(|| TheurgyError::new(format!("missing JSON array key: {key}")).into())
 }
 
-fn json_balanced_for_key<'a>(text: &'a str, key: &str, open: char, close: char) -> Result<&'a str> {
-    let marker = format!("\"{key}\"");
-    let start = text
-        .find(&marker)
-        .ok_or_else(|| TheurgyError::new(format!("missing JSON key: {key}")))?
-        + marker.len();
-    let after_colon = text[start..]
-        .find(':')
-        .ok_or_else(|| TheurgyError::new(format!("missing JSON key colon: {key}")))?
-        + start
-        + 1;
-    let relative_open = text[after_colon..]
-        .find(open)
-        .ok_or_else(|| TheurgyError::new(format!("missing JSON value for key: {key}")))?;
-    let value_start = after_colon + relative_open;
-    let value_end = balanced_end(text, value_start, open, close)?;
-    Ok(&text[value_start..=value_end])
-}
-
-fn balanced_end(text: &str, start: usize, open: char, close: char) -> Result<usize> {
-    let mut depth = 0usize;
-    let mut in_string = false;
-    let mut escaped = false;
-    for (offset, character) in text[start..].char_indices() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        if character == '\\' {
-            escaped = in_string;
-            continue;
-        }
-        if character == '"' {
-            in_string = !in_string;
-            continue;
-        }
-        if in_string {
-            continue;
-        }
-        if character == open {
-            depth += 1;
-        } else if character == close {
-            depth = depth.saturating_sub(1);
-            if depth == 0 {
-                return Ok(start + offset);
-            }
-        }
-    }
-    Err(TheurgyError::new("unterminated JSON object or array").into())
-}
-
-fn json_string_array(text: &str, key: &str) -> Result<Vec<String>> {
-    let array = json_array_for_key(text, key)?;
+fn value_string_array(value: &Value, key: &str) -> Result<Vec<String>> {
+    let array = value_array(value, key)?;
     let mut values = Vec::new();
-    let mut in_string = false;
-    let mut escaped = false;
-    let mut current = String::new();
-    for character in array.chars() {
-        if escaped {
-            if in_string {
-                current.push(character);
-            }
-            escaped = false;
-        } else if character == '\\' {
-            escaped = in_string;
-        } else if character == '"' {
-            if in_string {
-                values.push(current.clone());
-                current.clear();
-            }
-            in_string = !in_string;
-        } else if in_string {
-            current.push(character);
-        }
+    for item in array {
+        let Some(string) = item.as_str() else {
+            return Err(
+                TheurgyError::new(format!("JSON array key {key} must contain strings")).into(),
+            );
+        };
+        values.push(string.to_string());
     }
     Ok(values)
-}
-
-fn top_level_objects(array: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut index = 0usize;
-    while let Some(relative) = array[index..].find('{') {
-        let start = index + relative;
-        if let Ok(end) = balanced_end(array, start, '{', '}') {
-            out.push(array[start..=end].to_string());
-            index = end + 1;
-        } else {
-            break;
-        }
-    }
-    out
 }
 
 fn json_string_array_literal(values: &[String]) -> String {
@@ -1616,6 +1539,34 @@ mod tests {
             vec!["macos".to_string(), "linux".to_string()]
         );
         assert_eq!(summary.actions, 2);
+    }
+
+    #[test]
+    fn product_ir_validation_uses_structured_json_types() {
+        let product = sample_product().replace("\"safe\": true", "\"safe\": \"true\"");
+        let error = validate_product_ir(&product).unwrap_err().to_string();
+        assert!(error.contains("action.safe boolean required"));
+        assert!(validate_product_ir("{\"version\":\"theurgy-product-ir/v1\",").is_err());
+    }
+
+    #[test]
+    fn runtime_manifest_validation_requires_string_arrays() {
+        let manifest = sample_runtime_manifest().replace(
+            "\"stateCommand\": [\"custom-core\", \"state\"]",
+            "\"stateCommand\": [\"custom-core\", 7]",
+        );
+        let error = runtime_contract_from_manifest(&manifest)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("stateCommand must contain strings"));
+    }
+
+    #[test]
+    fn action_params_must_be_json_object_or_array() {
+        assert!(validate_json_params("{\"ok\":true}").is_ok());
+        assert!(validate_json_params("[1,2]").is_ok());
+        assert!(validate_json_params("\"scalar\"").is_err());
+        assert!(validate_json_params("{").is_err());
     }
 
     #[test]
