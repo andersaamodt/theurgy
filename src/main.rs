@@ -250,11 +250,47 @@ fn command_validate_runtime_action_result(args: &[String]) -> Result<()> {
 }
 
 fn command_validate_runtime_action_request(args: &[String]) -> Result<()> {
-    if args.len() != 1 {
-        return Err(TheurgyError::new("usage: validate-runtime-action-request PATH").into());
+    if args.is_empty() {
+        return Err(TheurgyError::new(
+            "usage: validate-runtime-action-request PATH [--manifest PATH]",
+        )
+        .into());
     }
-    let value = read_json(Path::new(&args[0]))?;
+    let mut path: Option<&str> = None;
+    let mut manifest_path: Option<&Path> = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--manifest" => {
+                index += 1;
+                let Some(raw) = args.get(index) else {
+                    return Err(TheurgyError::new("missing value for --manifest").into());
+                };
+                manifest_path = Some(Path::new(raw));
+            }
+            raw if path.is_none() => path = Some(raw),
+            other => {
+                return Err(TheurgyError::new(format!(
+                    "unexpected validate-runtime-action-request argument: {other}"
+                ))
+                .into())
+            }
+        }
+        index += 1;
+    }
+    let Some(path) = path else {
+        return Err(TheurgyError::new(
+            "usage: validate-runtime-action-request PATH [--manifest PATH]",
+        )
+        .into());
+    };
+    let value = read_json(Path::new(path))?;
     let summary = validate_runtime_action_request(&value)?;
+    if let Some(manifest_path) = manifest_path {
+        let runtime = runtime_contract_from_path_with_product_actions(manifest_path)?;
+        let parsed = parse_json(&value)?;
+        validate_runtime_action_request_against_runtime(&summary, &parsed, &runtime)?;
+    }
     println!("status=ok");
     println!("protocol=theurgy-runtime-action/v1");
     println!("app={}", summary.app_id);
@@ -2148,6 +2184,32 @@ fn validate_runtime_action_request_value(value: &Value) -> Result<RuntimeActionR
         return Err(TheurgyError::new("runtime action request params must be an object").into());
     }
     Ok(RuntimeActionRequestSummary { app_id, action_id })
+}
+
+fn validate_runtime_action_request_against_runtime(
+    summary: &RuntimeActionRequestSummary,
+    value: &Value,
+    runtime: &RuntimeContract,
+) -> Result<()> {
+    validate_runtime_output_app("runtime action request", &runtime.app_id, &summary.app_id)?;
+    if let Some(action_ids) = &runtime.product_action_ids {
+        if !action_ids
+            .iter()
+            .any(|declared| declared == &summary.action_id)
+        {
+            return Err(TheurgyError::new(format!(
+                "runtime action request not declared in Product IR: {}",
+                summary.action_id
+            ))
+            .into());
+        }
+    }
+    if let Some(contracts) = &runtime.product_action_contracts {
+        let params = serde_json::to_string(value_object(value, "params")?)
+            .map_err(|error| TheurgyError::new(format!("could not serialize params: {error}")))?;
+        validate_runtime_action_params(&summary.action_id, &params, contracts)?;
+    }
+    Ok(())
 }
 
 fn validate_runtime_action_result_value(value: &Value) -> Result<RuntimeActionResultSummary> {
@@ -5695,6 +5757,80 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(error.contains("missing JSON object key: params"));
+    }
+
+    #[test]
+    fn runtime_action_request_validation_uses_manifest_contract() {
+        let root = runtime_fixture_root("validate-action-request");
+        let manifest = root.join("runtime.manifest.json");
+        let valid_request = root.join("valid-action-request.json");
+        write_or_replace(
+            &valid_request,
+            "{\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments\",\n  \"action\": \"refresh_state\",\n  \"params\": {}\n}",
+        )
+        .unwrap();
+        command_validate_runtime_action_request(&[
+            valid_request.display().to_string(),
+            "--manifest".to_string(),
+            manifest.display().to_string(),
+        ])
+        .unwrap();
+
+        let app_mismatch = root.join("app-mismatch-action-request.json");
+        write_or_replace(
+            &app_mismatch,
+            "{\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"other-app\",\n  \"action\": \"refresh_state\",\n  \"params\": {}\n}",
+        )
+        .unwrap();
+        let error = command_validate_runtime_action_request(&[
+            app_mismatch.display().to_string(),
+            "--manifest".to_string(),
+            manifest.display().to_string(),
+        ])
+        .unwrap_err()
+        .to_string();
+        assert_eq!(
+            error,
+            "runtime action request app mismatch: expected deployments, got other-app"
+        );
+
+        let undeclared_action = root.join("undeclared-action-request.json");
+        write_or_replace(
+            &undeclared_action,
+            "{\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments\",\n  \"action\": \"not_declared\",\n  \"params\": {}\n}",
+        )
+        .unwrap();
+        let error = command_validate_runtime_action_request(&[
+            undeclared_action.display().to_string(),
+            "--manifest".to_string(),
+            manifest.display().to_string(),
+        ])
+        .unwrap_err()
+        .to_string();
+        assert_eq!(
+            error,
+            "runtime action request not declared in Product IR: not_declared"
+        );
+
+        let undeclared_param = root.join("undeclared-param-action-request.json");
+        write_or_replace(
+            &undeclared_param,
+            "{\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments\",\n  \"action\": \"refresh_state\",\n  \"params\": {\"force\": true}\n}",
+        )
+        .unwrap();
+        let error = command_validate_runtime_action_request(&[
+            undeclared_param.display().to_string(),
+            "--manifest".to_string(),
+            manifest.display().to_string(),
+        ])
+        .unwrap_err()
+        .to_string();
+        assert_eq!(
+            error,
+            "runtime action param not declared in Product IR input for refresh_state: force"
+        );
+
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
