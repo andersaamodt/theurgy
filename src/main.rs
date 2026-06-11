@@ -2074,6 +2074,7 @@ fn validate_runtime_manifest_value(value: &Value) -> Result<RuntimeManifestSumma
         .filter(|path| !path.is_empty())
         .ok_or_else(|| TheurgyError::new("runtime manifest productIr required"))?;
     let (desktop_surface_ir, mobile_surface_ir) = runtime_manifest_surface_paths(value)?;
+    validate_runtime_manifest_compatibility(value)?;
     let runtime = value_object(value, "runtime")?;
     let state_command = value_string_array(runtime, "stateCommand")?;
     let action_command = value_string_array(runtime, "actionCommand")?;
@@ -2123,6 +2124,28 @@ fn runtime_manifest_surface_paths(value: &Value) -> Result<(Option<String>, Opti
         optional_nonempty_string(surfaces, "desktop", "runtime manifest surfaces.desktop")?,
         optional_nonempty_string(surfaces, "mobile", "runtime manifest surfaces.mobile")?,
     ))
+}
+
+fn validate_runtime_manifest_compatibility(value: &Value) -> Result<()> {
+    let Some(compatibility) = value.get("compatibility") else {
+        return Ok(());
+    };
+    let compatibility = compatibility
+        .as_object()
+        .ok_or_else(|| TheurgyError::new("runtime manifest compatibility must be an object"))?;
+    for key in [
+        "wizardryAppsShellFirstStillSupported",
+        "theurgyRequiredForLegacyWizardryApps",
+    ] {
+        if let Some(value) = compatibility.get(key) {
+            value.as_bool().ok_or_else(|| {
+                TheurgyError::new(format!(
+                    "runtime manifest compatibility.{key} must be boolean"
+                ))
+            })?;
+        }
+    }
+    Ok(())
 }
 
 fn product_surface_paths(value: &Value) -> Result<(Option<String>, Option<String>)> {
@@ -4990,6 +5013,28 @@ mod tests {
             error,
             "runtime manifest subscribeStatusCommand must be non-empty"
         );
+    }
+
+    #[test]
+    fn runtime_manifest_validation_rejects_invalid_compatibility_flags() {
+        let manifest = sample_runtime_manifest().replace(
+            "\"compatibility\": {\n    \"wizardryAppsShellFirstStillSupported\": true,\n    \"theurgyRequiredForLegacyWizardryApps\": false\n  }",
+            "\"compatibility\": []",
+        );
+        let error = validate_runtime_manifest(&manifest)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("runtime manifest compatibility must be an object"));
+        let manifest = sample_runtime_manifest().replace(
+            "\"wizardryAppsShellFirstStillSupported\": true",
+            "\"wizardryAppsShellFirstStillSupported\": \"yes\"",
+        );
+        let error = validate_runtime_manifest(&manifest)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(
+            "runtime manifest compatibility.wizardryAppsShellFirstStillSupported must be boolean"
+        ));
     }
 
     #[test]
