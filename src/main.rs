@@ -4100,6 +4100,19 @@ struct RuntimeContract {
   func command(for action: ProductActionContract, json: String) -> [String] {
     actionCommand + [action.id, json]
   }
+
+  func actionEnvelope(for action: ProductActionContract, params: [String: Any]) -> String {
+    let envelope: [String: Any] = [
+      "protocol": protocolName,
+      "app": runtimeApp,
+      "action": action.id,
+      "params": params
+    ]
+    guard let data = try? JSONSerialization.data(withJSONObject: envelope, options: [.sortedKeys]) else {
+      return "{}"
+    }
+    return String(data: data, encoding: .utf8) ?? "{}"
+  }
 }
 
 struct RuntimeContractView: View {
@@ -4128,6 +4141,7 @@ struct RuntimeContractView: View {
               Text(action.label)
               Text(action.effect)
               Text(contract.command(for: action, json: "{}").joined(separator: " "))
+              Text(contract.actionEnvelope(for: action, params: [:]))
             }
           }
         }
@@ -4254,6 +4268,19 @@ public final class MainActivity extends Activity {
     return command;
   }
 
+  private static String actionEnvelope(String app, ProductActionContract action, JSONObject params) {
+    try {
+      JSONObject envelope = new JSONObject();
+      envelope.put("protocol", PROTOCOL);
+      envelope.put("app", app);
+      envelope.put("action", action.id);
+      envelope.put("params", params);
+      return envelope.toString();
+    } catch (JSONException error) {
+      return "{}";
+    }
+  }
+
   private String loadBundledContract(String name) {
     try (InputStream input = getAssets().open(name)) {
       ByteArrayOutputStream output = new ByteArrayOutputStream();
@@ -4301,9 +4328,10 @@ public final class MainActivity extends Activity {
     TextView view = new TextView(this);
     String runtimeMetadata = loadBundledContract("theurgy-runtime.json");
     String surfaceMetadata = loadBundledContract("theurgy-surface.json");
+    String runtimeApp = jsonString(runtimeMetadata, "app");
     StringBuilder text = new StringBuilder();
     text.append("__APP_NAME__\nRuntime: ").append(PROTOCOL)
-      .append("\nRuntime app: ").append(jsonString(runtimeMetadata, "app"))
+      .append("\nRuntime app: ").append(runtimeApp)
       .append("\nRuntime target: ").append(jsonString(runtimeMetadata, "target"))
       .append("\nRuntime transport: ").append(jsonString(runtimeMetadata, "adapterRuntimeTransport"))
       .append("\nRuntime surface actions: ").append(jsonStringArray(runtimeMetadata, "surfaceActions"))
@@ -4317,7 +4345,8 @@ public final class MainActivity extends Activity {
       .append("\nActions:");
     for (ProductActionContract action : ACTION_CONTRACTS) {
       text.append("\n").append(action.label).append(" [").append(action.effect).append("] ")
-        .append(String.join(" ", commandFor(action, "{}")));
+        .append(String.join(" ", commandFor(action, "{}")))
+        .append("\n  envelope: ").append(actionEnvelope(runtimeApp, action, new JSONObject()));
     }
     view.setText(text.toString());
     setContentView(view);
@@ -7033,6 +7062,15 @@ mod tests {
         assert!(ios
             .contains("func command(for action: ProductActionContract, json: String) -> [String]"));
         assert!(ios.contains("actionCommand + [action.id, json]"));
+        assert!(ios.contains(
+            "func actionEnvelope(for action: ProductActionContract, params: [String: Any]) -> String"
+        ));
+        assert!(ios.contains("\"protocol\": protocolName"));
+        assert!(ios.contains("\"app\": runtimeApp"));
+        assert!(ios.contains("\"action\": action.id"));
+        assert!(ios.contains("\"params\": params"));
+        assert!(ios.contains("JSONSerialization.data(withJSONObject: envelope"));
+        assert!(ios.contains("contract.actionEnvelope(for: action, params: [:])"));
         assert!(ios.contains("id: \"publish_changes\""));
         assert!(ios.contains("inputKeys: [\"deployment\"]"));
         assert!(ios.contains("outputKeys: [\"params\"]"));
@@ -7096,6 +7134,15 @@ mod tests {
             "private static String[] commandFor(ProductActionContract action, String json)"
         ));
         assert!(android.contains("command[ACTION_COMMAND.length] = action.id;"));
+        assert!(android.contains(
+            "private static String actionEnvelope(String app, ProductActionContract action, JSONObject params)"
+        ));
+        assert!(android.contains("envelope.put(\"protocol\", PROTOCOL);"));
+        assert!(android.contains("envelope.put(\"app\", app);"));
+        assert!(android.contains("envelope.put(\"action\", action.id);"));
+        assert!(android.contains("envelope.put(\"params\", params);"));
+        assert!(android.contains("String runtimeApp = jsonString(runtimeMetadata, \"app\");"));
+        assert!(android.contains("actionEnvelope(runtimeApp, action, new JSONObject())"));
         assert!(android.contains(
             "new ProductActionContract(\"publish_changes\", \"Push to Production\", \"release\""
         ));
