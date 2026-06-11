@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wizardry.app/schemas/theurgy-operation-status-v1.json",
+  "title": "Theurgy Operation Status v1",
+  "type": "object",
+  "required": ["schema", "app", "generatedAt", "operation"],
+  "properties": {
+    "schema": { "const": "theurgy-operation-status/v1" },
+    "app": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "generatedAt": { "type": "string", "minLength": 1 },
+    "operation": { "$ref": "#/$defs/operation" }
+  },
+  "$defs": {
+    "operation": {
+      "type": "object",
+      "required": ["id", "status", "progress", "longRunning"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["accepted", "running", "completed", "failed", "cancelled"] },
+        "progress": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "longRunning": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

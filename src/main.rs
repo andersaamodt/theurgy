@@ -77,6 +77,7 @@ fn run(args: Vec<String>) -> Result<()> {
         Some("validate-runtime-action-result") => {
             command_validate_runtime_action_result(&args[2..])
         }
+        Some("validate-operation-status") => command_validate_operation_status(&args[2..]),
         Some("validate-operation-history") => command_validate_operation_history(&args[2..]),
         Some("validate-runtime-manifest") => command_validate_runtime_manifest(&args[2..]),
         Some("validate-generated-runtime") => command_validate_generated_runtime(&args[2..]),
@@ -88,6 +89,7 @@ fn run(args: Vec<String>) -> Result<()> {
         Some("run-state") => command_run_state(&args[2..]),
         Some("run-status") => command_run_status(&args[2..]),
         Some("subscribe-status") => command_subscribe_status(&args[2..]),
+        Some("run-operation-status") => command_run_operation_status(&args[2..]),
         Some("run-history") => command_run_history(&args[2..]),
         Some("run-action") => command_run_action(&args[2..]),
         Some(other) => Err(TheurgyError::new(format!("unknown command: {other}")).into()),
@@ -240,6 +242,19 @@ fn command_validate_runtime_action_result(args: &[String]) -> Result<()> {
     println!("protocol=theurgy-runtime-action/v1");
     println!("app={}", summary.app_id);
     println!("action={}", summary.action_id);
+    println!("operation={}", summary.operation_id);
+    Ok(())
+}
+
+fn command_validate_operation_status(args: &[String]) -> Result<()> {
+    if args.len() != 1 {
+        return Err(TheurgyError::new("usage: validate-operation-status PATH").into());
+    }
+    let value = read_json(Path::new(&args[0]))?;
+    let summary = validate_operation_status(&value)?;
+    println!("status=ok");
+    println!("schema=theurgy-operation-status/v1");
+    println!("app={}", summary.app_id);
     println!("operation={}", summary.operation_id);
     Ok(())
 }
@@ -485,6 +500,42 @@ fn command_subscribe_status(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+fn command_run_operation_status(args: &[String]) -> Result<()> {
+    if args.is_empty() {
+        return Err(
+            TheurgyError::new("usage: run-operation-status OPERATION_ID --manifest PATH").into(),
+        );
+    }
+    let operation_id = &args[0];
+    if operation_id.is_empty() {
+        return Err(TheurgyError::new("run-operation-status OPERATION_ID required").into());
+    }
+    let mut manifest_path: Option<PathBuf> = None;
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--manifest" => {
+                let raw = args.get(index + 1).ok_or_else(|| {
+                    TheurgyError::new("run-operation-status --manifest requires PATH")
+                })?;
+                manifest_path = Some(PathBuf::from(raw));
+                index += 2;
+            }
+            other => {
+                return Err(TheurgyError::new(format!(
+                    "unknown run-operation-status option: {other}"
+                ))
+                .into())
+            }
+        }
+    }
+    let manifest_path = manifest_path
+        .ok_or_else(|| TheurgyError::new("run-operation-status --manifest PATH required"))?;
+    let output = run_operation_status_output(&manifest_path, operation_id)?;
+    print!("{output}");
+    Ok(())
+}
+
 fn parse_subscribe_status_args(args: &[String]) -> Result<PathBuf> {
     let mut manifest_path: Option<PathBuf> = None;
     let mut once = false;
@@ -621,6 +672,20 @@ fn run_status_output(manifest_path: &Path) -> Result<String> {
     }
     let output = run_manifest_command(&runtime.status_command, "status")?;
     validate_manifest_status_output(&runtime.app_id, &output)?;
+    Ok(output)
+}
+
+fn run_operation_status_output(manifest_path: &Path, operation_id: &str) -> Result<String> {
+    let runtime = runtime_contract_from_path(manifest_path)?;
+    if runtime.operation_status_command.is_empty() {
+        return Err(TheurgyError::new("runtime manifest operationStatusCommand required").into());
+    }
+    let output = run_manifest_command_with_args(
+        &runtime.operation_status_command,
+        &[operation_id.to_string()],
+        "operation status",
+    )?;
+    validate_manifest_operation_status_output(&runtime.app_id, &output)?;
     Ok(output)
 }
 
@@ -769,6 +834,13 @@ fn validate_manifest_status_output(expected_app: &str, output: &str) -> Result<(
     let result = manifest_payload_or_raw(&value);
     let summary = validate_runtime_status_value(result)?;
     validate_runtime_output_app("runtime status", expected_app, &summary.app_id)
+}
+
+fn validate_manifest_operation_status_output(expected_app: &str, output: &str) -> Result<()> {
+    let value = parse_json(output)?;
+    let result = manifest_payload_or_raw(&value);
+    let summary = validate_operation_status_value(result)?;
+    validate_runtime_output_app("operation status", expected_app, &summary.app_id)
 }
 
 fn validate_manifest_history_output(expected_app: &str, output: &str) -> Result<()> {
@@ -1137,6 +1209,13 @@ struct RuntimeActionResultSummary {
 }
 
 #[derive(Debug, Eq, PartialEq)]
+struct OperationStatusSummary {
+    app_id: String,
+    operation_id: String,
+    long_running: bool,
+}
+
+#[derive(Debug, Eq, PartialEq)]
 struct OperationHistorySummary {
     app_id: String,
     entries: usize,
@@ -1177,6 +1256,7 @@ struct RuntimeContract {
     state_command: Vec<String>,
     status_command: Vec<String>,
     subscribe_status_command: Vec<String>,
+    operation_status_command: Vec<String>,
     action_command: Vec<String>,
     history_command: Vec<String>,
     daemon_command: Vec<String>,
@@ -1220,6 +1300,7 @@ fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
     }
     for key in [
         "statusCommand",
+        "operationStatusCommand",
         "historyCommand",
         "daemonCommand",
         "productTargets",
@@ -1354,6 +1435,11 @@ fn runtime_contract_from_manifest(text: &str) -> Result<RuntimeContract> {
             runtime,
             "subscribeStatusCommand",
             "runtime manifest subscribeStatusCommand",
+        )?,
+        operation_status_command: optional_string_array(
+            runtime,
+            "operationStatusCommand",
+            "runtime manifest operationStatusCommand",
         )?,
         action_command: value_string_array(runtime, "actionCommand")?,
         history_command: value_string_array(runtime, "historyCommand").unwrap_or_default(),
@@ -1491,6 +1577,28 @@ fn validate_runtime_action_result_value(value: &Value) -> Result<RuntimeActionRe
     })
 }
 
+fn validate_operation_status(text: &str) -> Result<OperationStatusSummary> {
+    let value = parse_json(text)?;
+    validate_operation_status_value(&value)
+}
+
+fn validate_operation_status_value(value: &Value) -> Result<OperationStatusSummary> {
+    expect_value_string(value, "schema", "theurgy-operation-status/v1")?;
+    let app_id = value_string(value, "app")
+        .filter(|id| valid_slug(id))
+        .ok_or_else(|| TheurgyError::new("operation status app must be a lowercase slug"))?;
+    value_string(value, "generatedAt")
+        .filter(|generated_at| !generated_at.is_empty())
+        .ok_or_else(|| TheurgyError::new("operation status generatedAt required"))?;
+    let operation = value_object(value, "operation")?;
+    let (operation_id, long_running) = validate_operation_record(operation)?;
+    Ok(OperationStatusSummary {
+        app_id,
+        operation_id,
+        long_running,
+    })
+}
+
 fn validate_operation_history(text: &str) -> Result<OperationHistorySummary> {
     let value = parse_json(text)?;
     validate_operation_history_value(&value)
@@ -1601,6 +1709,16 @@ fn validate_runtime_manifest_value(value: &Value) -> Result<RuntimeManifestSumma
     if runtime.get("subscribeStatusCommand").is_some() && subscribe_status_command.is_empty() {
         return Err(
             TheurgyError::new("runtime manifest subscribeStatusCommand must be non-empty").into(),
+        );
+    }
+    let operation_status_command = optional_string_array(
+        runtime,
+        "operationStatusCommand",
+        "runtime manifest operationStatusCommand",
+    )?;
+    if runtime.get("operationStatusCommand").is_some() && operation_status_command.is_empty() {
+        return Err(
+            TheurgyError::new("runtime manifest operationStatusCommand must be non-empty").into(),
         );
     }
     let protocol = value_string(runtime, "protocol")
@@ -2234,6 +2352,7 @@ fn compile_native(product: &str, target: &str, out_dir: &Path) -> Result<()> {
             "runtime-status".to_string(),
         ],
         subscribe_status_command: Vec::new(),
+        operation_status_command: Vec::new(),
         action_command: vec![
             format!("{}-core", summary.app_id),
             "runtime-action".to_string(),
@@ -2352,6 +2471,12 @@ fn generated_runtime_metadata(
         object.insert(
             "statusCommand".to_string(),
             string_vec_value(&runtime.status_command),
+        );
+    }
+    if !runtime.operation_status_command.is_empty() {
+        object.insert(
+            "operationStatusCommand".to_string(),
+            string_vec_value(&runtime.operation_status_command),
         );
     }
     object.insert(
@@ -2497,6 +2622,7 @@ struct ProductActionContract {
 let runtimeStateCommand = __STATE_COMMAND__
 let runtimeStatusCommand = __STATUS_COMMAND__
 let runtimeSubscribeStatusCommand = __SUBSCRIBE_STATUS_COMMAND__
+let runtimeOperationStatusCommand = __OPERATION_STATUS_COMMAND__
 let runtimeActionCommand = __ACTION_COMMAND__
 let runtimeHistoryCommand = __HISTORY_COMMAND__
 let runtimeDaemonCommand = __DAEMON_COMMAND__
@@ -2518,6 +2644,7 @@ struct RuntimeStateView: View {
         Text("State: \(runtimeStateCommand.joined(separator: " "))")
         Text("Status: \(runtimeStatusCommand.joined(separator: " "))")
         Text("Subscribe: \(runtimeSubscribeStatusCommand.joined(separator: " "))")
+        Text("Operation status: \(runtimeOperationStatusCommand.joined(separator: " "))")
         Text("Action: \(runtimeActionCommand.joined(separator: " "))")
         Text("History: \(runtimeHistoryCommand.joined(separator: " "))")
         Text("Daemon: \(runtimeDaemonCommand.joined(separator: " "))")
@@ -2628,6 +2755,10 @@ struct TheurgyNativeApp: App {
             &swift_string_array_literal(&subscribe_status_command),
         )
         .replace(
+            "__OPERATION_STATUS_COMMAND__",
+            &swift_string_array_literal(&runtime.operation_status_command),
+        )
+        .replace(
             "__ACTION_COMMAND__",
             &swift_string_array_literal(&runtime.action_command),
         )
@@ -2674,6 +2805,7 @@ fn linux_adapter_source(
         .unwrap_or_default();
     let action_text = runtime.action_command.join(" ");
     let subscribe_status_text = subscribe_status_command.join(" ");
+    let operation_status_text = runtime.operation_status_command.join(" ");
     let history_text = runtime.history_command.join(" ");
     let daemon_text = runtime.daemon_command.join(" ");
     let template = r#"/* Generated by theurgy-runtime compile-native.
@@ -2787,7 +2919,7 @@ static void activate(GtkApplication *app, gpointer user_data) {
   (void)user_data;
   GtkWidget *window = gtk_application_window_new(app);
   GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
-  GtkWidget *contract = gtk_label_new("State: __STATE_COMMAND_TEXT__\nStatus: __STATUS_COMMAND_TEXT__\nSubscribe: __SUBSCRIBE_STATUS_COMMAND_TEXT__\nAction: __ACTION_COMMAND_TEXT__\nHistory: __HISTORY_COMMAND_TEXT__\nDaemon: __DAEMON_COMMAND_TEXT__\nSurface action contracts: __ACTION_CONTRACT_IDS__");
+  GtkWidget *contract = gtk_label_new("State: __STATE_COMMAND_TEXT__\nStatus: __STATUS_COMMAND_TEXT__\nSubscribe: __SUBSCRIBE_STATUS_COMMAND_TEXT__\nOperation status: __OPERATION_STATUS_COMMAND_TEXT__\nAction: __ACTION_COMMAND_TEXT__\nHistory: __HISTORY_COMMAND_TEXT__\nDaemon: __DAEMON_COMMAND_TEXT__\nSurface action contracts: __ACTION_CONTRACT_IDS__");
   GtkWidget *button_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
   GtkWidget *button = gtk_button_new_with_label("State");
   GtkWidget *status_button = gtk_button_new_with_label("Status");
@@ -2853,6 +2985,10 @@ int main(int argc, char **argv) {
         .replace(
             "__SUBSCRIBE_STATUS_COMMAND_TEXT__",
             &c_escape(&subscribe_status_text),
+        )
+        .replace(
+            "__OPERATION_STATUS_COMMAND_TEXT__",
+            &c_escape(&operation_status_text),
         )
         .replace("__ACTION_COMMAND_TEXT__", &c_escape(&action_text))
         .replace("__HISTORY_COMMAND_TEXT__", &c_escape(&history_text))
@@ -2936,6 +3072,7 @@ struct RuntimeContract {
   let stateCommand = __STATE_COMMAND__
   let statusCommand = __STATUS_COMMAND__
   let subscribeStatusCommand = __SUBSCRIBE_STATUS_COMMAND__
+  let operationStatusCommand = __OPERATION_STATUS_COMMAND__
   let actionCommand = __ACTION_COMMAND__
   let historyCommand = __HISTORY_COMMAND__
   let daemonCommand = __DAEMON_COMMAND__
@@ -2957,6 +3094,7 @@ struct RuntimeContractView: View {
           Text(contract.stateCommand.joined(separator: " "))
           Text(contract.statusCommand.joined(separator: " "))
           Text(contract.subscribeStatusCommand.joined(separator: " "))
+          Text(contract.operationStatusCommand.joined(separator: " "))
           Text(contract.actionCommand.joined(separator: " "))
           Text(contract.historyCommand.joined(separator: " "))
           Text(contract.daemonCommand.joined(separator: " "))
@@ -3001,6 +3139,10 @@ struct TheurgyMobileApp: App {
             &swift_string_array_literal(&subscribe_status_command),
         )
         .replace(
+            "__OPERATION_STATUS_COMMAND__",
+            &swift_string_array_literal(&runtime.operation_status_command),
+        )
+        .replace(
             "__ACTION_COMMAND__",
             &swift_string_array_literal(&runtime.action_command),
         )
@@ -3036,6 +3178,7 @@ public final class MainActivity extends Activity {
   private static final String[] STATE_COMMAND = __STATE_COMMAND__;
   private static final String[] STATUS_COMMAND = __STATUS_COMMAND__;
   private static final String[] SUBSCRIBE_STATUS_COMMAND = __SUBSCRIBE_STATUS_COMMAND__;
+  private static final String[] OPERATION_STATUS_COMMAND = __OPERATION_STATUS_COMMAND__;
   private static final String[] ACTION_COMMAND = __ACTION_COMMAND__;
   private static final String[] HISTORY_COMMAND = __HISTORY_COMMAND__;
   private static final String[] DAEMON_COMMAND = __DAEMON_COMMAND__;
@@ -3089,6 +3232,7 @@ public final class MainActivity extends Activity {
       .append("\nState: ").append(String.join(" ", STATE_COMMAND))
       .append("\nStatus: ").append(String.join(" ", STATUS_COMMAND))
       .append("\nSubscribe: ").append(String.join(" ", SUBSCRIBE_STATUS_COMMAND))
+      .append("\nOperation status: ").append(String.join(" ", OPERATION_STATUS_COMMAND))
       .append("\nAction: ").append(String.join(" ", ACTION_COMMAND))
       .append("\nHistory: ").append(String.join(" ", HISTORY_COMMAND))
       .append("\nDaemon: ").append(String.join(" ", DAEMON_COMMAND))
@@ -3116,6 +3260,10 @@ public final class MainActivity extends Activity {
         .replace(
             "__SUBSCRIBE_STATUS_COMMAND__",
             &java_string_array_literal(&subscribe_status_command),
+        )
+        .replace(
+            "__OPERATION_STATUS_COMMAND__",
+            &java_string_array_literal(&runtime.operation_status_command),
         )
         .replace(
             "__ACTION_COMMAND__",
@@ -3713,6 +3861,26 @@ mod tests {
     }
 
     #[test]
+    fn validates_operation_status_contract() {
+        let status = sample_operation_status();
+        let summary = validate_operation_status(&status).unwrap();
+        assert_eq!(summary.app_id, "deployments");
+        assert_eq!(summary.operation_id, "deployments-publish_changes-123");
+        assert!(summary.long_running);
+    }
+
+    #[test]
+    fn operation_status_validation_requires_typed_operation() {
+        let status = sample_operation_status().replace("\"progress\": 100", "\"progress\": 101");
+        let error = validate_operation_status(&status).unwrap_err().to_string();
+        assert!(error.contains("progress must be 0..100"));
+        let status =
+            sample_operation_status().replace("\"schema\": \"theurgy-operation-status/v1\",", "");
+        let error = validate_operation_status(&status).unwrap_err().to_string();
+        assert!(error.contains("expected schema = theurgy-operation-status/v1"));
+    }
+
+    #[test]
     fn operation_history_validation_requires_array_data() {
         let history = sample_operation_history().replace("\"data\": [", "\"data\": {");
         assert!(validate_operation_history(&history).is_err());
@@ -3863,6 +4031,25 @@ mod tests {
                 .pointer("/$defs/operation/properties/longRunning/type")
                 .and_then(Value::as_str),
             Some("boolean")
+        );
+        assert_eq!(
+            schema
+                .pointer("/$defs/operation/properties/progress/maximum")
+                .and_then(Value::as_u64),
+            Some(100)
+        );
+    }
+
+    #[test]
+    fn operation_status_schema_declares_operation_contract() {
+        let schema: Value =
+            serde_json::from_str(include_str!("../schemas/theurgy-operation-status-v1.json"))
+                .unwrap();
+        assert_eq!(
+            schema
+                .pointer("/properties/operation/$ref")
+                .and_then(Value::as_str),
+            Some("#/$defs/operation")
         );
         assert_eq!(
             schema
@@ -4289,6 +4476,25 @@ mod tests {
     }
 
     #[test]
+    fn run_operation_status_with_manifest_dispatches_operation_status_command() {
+        let root = runtime_fixture_root("run-operation-status");
+        let manifest = root.join("runtime.manifest.json");
+        let output =
+            run_operation_status_output(&manifest, "deployments-publish_changes-123").unwrap();
+        let value: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(
+            value.get("schema").and_then(Value::as_str),
+            Some("theurgy-operation-status/v1")
+        );
+        assert_eq!(
+            value.pointer("/operation/id").and_then(Value::as_str),
+            Some("deployments-publish_changes-123")
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn subscribe_status_requires_once_until_streaming_is_implemented() {
         let root = runtime_fixture_root("subscribe-status-requires-once");
         let error = command_subscribe_status(&[
@@ -4652,6 +4858,10 @@ mod tests {
             &serde_json::json!(["custom-core", "status"])
         );
         assert_eq!(
+            runtime_json.get("operationStatusCommand").unwrap(),
+            &serde_json::json!(["custom-core", "operation-status"])
+        );
+        assert_eq!(
             runtime_json.get("historyCommand").unwrap(),
             &serde_json::json!(["custom-core", "history"])
         );
@@ -4671,6 +4881,7 @@ mod tests {
         assert!(main_c.contains("\"custom-core\""));
         assert!(main_c.contains("\"state\""));
         assert!(main_c.contains("Status: custom-core status"));
+        assert!(main_c.contains("Operation status: custom-core operation-status"));
         assert!(main_c.contains("Action: custom-core action"));
         assert!(main_c.contains("History: custom-core history"));
         let surface = fs::read_to_string(out.join("theurgy-surface.json")).unwrap();
@@ -4828,6 +5039,9 @@ mod tests {
         assert!(swift.contains(
             "let runtimeSubscribeStatusCommand = [\"deployments-core\", \"runtime-status\"]"
         ));
+        assert!(swift.contains(
+            "let runtimeOperationStatusCommand = [\"deployments-core\", \"runtime-operation-status\"]"
+        ));
         assert!(
             swift.contains("let runtimeActionCommand = [\"deployments-core\", \"runtime-action\"]")
         );
@@ -4882,6 +5096,9 @@ mod tests {
         assert!(
             ios.contains("let subscribeStatusCommand = [\"deployments-core\", \"runtime-status\"]")
         );
+        assert!(ios.contains(
+            "let operationStatusCommand = [\"deployments-core\", \"runtime-operation-status\"]"
+        ));
         assert!(ios.contains("\"deployments-core\", \"runtime-history\""));
         assert!(ios.contains("\"deployments-daemon\""));
         assert!(ios.contains("struct ProductActionContract"));
@@ -4906,6 +5123,9 @@ mod tests {
         assert!(android.contains("new String[] {\"deployments-core\", \"runtime-status\"}"));
         assert!(android.contains(
             "private static final String[] SUBSCRIBE_STATUS_COMMAND = new String[] {\"deployments-core\", \"runtime-status\"};"
+        ));
+        assert!(android.contains(
+            "private static final String[] OPERATION_STATUS_COMMAND = new String[] {\"deployments-core\", \"runtime-operation-status\"};"
         ));
         assert!(android.contains("new String[] {\"deployments-core\", \"runtime-history\"}"));
         assert!(android.contains("new String[] {\"deployments-daemon\"}"));
@@ -4951,6 +5171,10 @@ mod tests {
                 "deployments-core".to_string(),
                 "runtime-status".to_string(),
             ],
+            operation_status_command: vec![
+                "deployments-core".to_string(),
+                "runtime-operation-status".to_string(),
+            ],
             action_command: vec!["deployments-core".to_string(), "runtime-action".to_string()],
             history_command: vec![
                 "deployments-core".to_string(),
@@ -4985,6 +5209,10 @@ mod tests {
         "{\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments\",\n  \"action\": \"publish_changes\",\n  \"operation\": {\n    \"id\": \"deployments-publish_changes-123\",\n    \"status\": \"completed\",\n    \"progress\": 100,\n    \"longRunning\": true\n  },\n  \"result\": {\"message\": \"published\"}\n}".to_string()
     }
 
+    fn sample_operation_status() -> String {
+        "{\n  \"schema\": \"theurgy-operation-status/v1\",\n  \"app\": \"deployments\",\n  \"generatedAt\": \"2026-06-11T00:00:00Z\",\n  \"operation\": {\n    \"id\": \"deployments-publish_changes-123\",\n    \"status\": \"completed\",\n    \"progress\": 100,\n    \"longRunning\": true\n  }\n}".to_string()
+    }
+
     fn sample_operation_history() -> String {
         "{\n  \"schema\": \"theurgy-operation-history/v1\",\n  \"app\": \"deployments\",\n  \"generatedAt\": \"2026-06-11T00:00:00Z\",\n  \"data\": [\n    {\"action\": \"publish\", \"status\": \"completed\"}\n  ]\n}".to_string()
     }
@@ -4997,14 +5225,15 @@ mod tests {
         let runtime = root.join("runtime-fixture");
         write_executable(
             &runtime,
-            "#!/bin/sh\nset -eu\ncase \"${1-}\" in\n  state) printf '{\"schema\":\"theurgy-state-snapshot/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"data\":{}}\\n' ;;\n  status) printf '{\"schema\":\"theurgy-runtime-status/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"state_ready\":true}\\n' ;;\n  subscribe) printf '{\"schema\":\"theurgy-runtime-status/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"state_ready\":false}\\n' ;;\n  history) printf '{\"schema\":\"theurgy-operation-history/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"data\":[],\"subject\":\"%s\",\"limit\":\"%s\"}\\n' \"${2-}\" \"${3-}\" ;;\n  action) printf '{\"success\":true,\"data\":{\"protocol\":\"theurgy-runtime-action/v1\",\"app\":\"deployments\",\"action\":\"%s\",\"operation\":{\"id\":\"op-%s\",\"status\":\"completed\",\"progress\":100,\"longRunning\":false},\"result\":{\"params\":%s}}}\\n' \"${2-}\" \"${2-}\" \"${3-}\" ;;\n  *) printf 'unknown fixture command\\n' >&2; exit 2 ;;\nesac\n",
+            "#!/bin/sh\nset -eu\ncase \"${1-}\" in\n  state) printf '{\"schema\":\"theurgy-state-snapshot/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"data\":{}}\\n' ;;\n  status) printf '{\"schema\":\"theurgy-runtime-status/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"state_ready\":true}\\n' ;;\n  subscribe) printf '{\"schema\":\"theurgy-runtime-status/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"state_ready\":false}\\n' ;;\n  operation-status) printf '{\"schema\":\"theurgy-operation-status/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"operation\":{\"id\":\"%s\",\"status\":\"completed\",\"progress\":100,\"longRunning\":true}}\\n' \"${2-}\" ;;\n  history) printf '{\"schema\":\"theurgy-operation-history/v1\",\"app\":\"deployments\",\"generatedAt\":\"2026-06-11T00:00:00Z\",\"data\":[],\"subject\":\"%s\",\"limit\":\"%s\"}\\n' \"${2-}\" \"${3-}\" ;;\n  action) printf '{\"success\":true,\"data\":{\"protocol\":\"theurgy-runtime-action/v1\",\"app\":\"deployments\",\"action\":\"%s\",\"operation\":{\"id\":\"op-%s\",\"status\":\"completed\",\"progress\":100,\"longRunning\":false},\"result\":{\"params\":%s}}}\\n' \"${2-}\" \"${2-}\" \"${3-}\" ;;\n  *) printf 'unknown fixture command\\n' >&2; exit 2 ;;\nesac\n",
         )
         .unwrap();
         write_or_replace(&blueprint.join("product.ir.json"), &sample_product()).unwrap();
         write_or_replace(
             &root.join("runtime.manifest.json"),
             &format!(
-                "{{\n  \"version\": \"theurgy-runtime-manifest/v1\",\n  \"app\": \"deployments\",\n  \"productIr\": \"app-blueprint/product.ir.json\",\n  \"runtime\": {{\n    \"stateCommand\": [\"{}\", \"state\"],\n    \"statusCommand\": [\"{}\", \"status\"],\n    \"actionCommand\": [\"{}\", \"action\"],\n    \"historyCommand\": [\"{}\", \"history\"],\n    \"protocol\": \"deployments-runtime/v1\"\n  }}\n}}",
+                "{{\n  \"version\": \"theurgy-runtime-manifest/v1\",\n  \"app\": \"deployments\",\n  \"productIr\": \"app-blueprint/product.ir.json\",\n  \"runtime\": {{\n    \"stateCommand\": [\"{}\", \"state\"],\n    \"statusCommand\": [\"{}\", \"status\"],\n    \"operationStatusCommand\": [\"{}\", \"operation-status\"],\n    \"actionCommand\": [\"{}\", \"action\"],\n    \"historyCommand\": [\"{}\", \"history\"],\n    \"protocol\": \"deployments-runtime/v1\"\n  }}\n}}",
+                json_escape(&runtime.display().to_string()),
                 json_escape(&runtime.display().to_string()),
                 json_escape(&runtime.display().to_string()),
                 json_escape(&runtime.display().to_string()),
@@ -5016,7 +5245,7 @@ mod tests {
     }
 
     fn sample_runtime_manifest() -> String {
-        "{\n  \"version\": \"theurgy-runtime-manifest/v1\",\n  \"app\": \"deployments\",\n  \"productIr\": \"app-blueprint/product.ir.json\",\n  \"runtime\": {\n    \"stateCommand\": [\"custom-core\", \"state\"],\n    \"statusCommand\": [\"custom-core\", \"status\"],\n    \"actionCommand\": [\"custom-core\", \"action\"],\n    \"historyCommand\": [\"custom-core\", \"history\"],\n    \"protocol\": \"deployments-runtime/v1\"\n  },\n  \"surfaces\": {\n    \"desktop\": \"app-blueprint/desktop.surface.ir.json\"\n  }\n}".to_string()
+        "{\n  \"version\": \"theurgy-runtime-manifest/v1\",\n  \"app\": \"deployments\",\n  \"productIr\": \"app-blueprint/product.ir.json\",\n  \"runtime\": {\n    \"stateCommand\": [\"custom-core\", \"state\"],\n    \"statusCommand\": [\"custom-core\", \"status\"],\n    \"operationStatusCommand\": [\"custom-core\", \"operation-status\"],\n    \"actionCommand\": [\"custom-core\", \"action\"],\n    \"historyCommand\": [\"custom-core\", \"history\"],\n    \"protocol\": \"deployments-runtime/v1\"\n  },\n  \"surfaces\": {\n    \"desktop\": \"app-blueprint/desktop.surface.ir.json\"\n  }\n}".to_string()
     }
 
     fn sample_desktop_surface() -> String {
