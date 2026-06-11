@@ -1606,20 +1606,35 @@ fn validate_generated_action_contract(contract: &Value) -> Result<String> {
             ))
         })?;
     }
-    for key in ["inputKeys", "outputKeys", "failureKeys"] {
-        value_string_array(contract, key).map_err(|_| {
+    for (keys_key, shape_key) in [
+        ("inputKeys", "inputShape"),
+        ("outputKeys", "outputShape"),
+        ("failureKeys", "failureShape"),
+    ] {
+        let keys = value_string_array(contract, keys_key).map_err(|_| {
             TheurgyError::new(format!(
-                "generated runtime action contract {key} must be a string array"
+                "generated runtime action contract {keys_key} must be a string array"
             ))
         })?;
-    }
-    for key in ["inputShape", "outputShape", "failureShape"] {
-        let shape = value_object(contract, key).map_err(|_| {
+        let shape = value_object(contract, shape_key).map_err(|_| {
             TheurgyError::new(format!(
-                "generated runtime action contract {key} object required"
+                "generated runtime action contract {shape_key} object required"
             ))
         })?;
-        object_shape(shape, &format!("generated runtime action contract {key}"))?;
+        object_shape(
+            shape,
+            &format!("generated runtime action contract {shape_key}"),
+        )?;
+        let mut shape_keys = object_keys(shape);
+        let mut sorted_keys = keys;
+        sorted_keys.sort();
+        shape_keys.sort();
+        if sorted_keys != shape_keys {
+            return Err(TheurgyError::new(format!(
+                "generated runtime action contract {keys_key} must match {shape_key} keys"
+            ))
+            .into());
+        }
     }
     Ok(id)
 }
@@ -4075,6 +4090,26 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("productActionContracts order must match productActions"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn generated_runtime_validation_rejects_action_shape_key_drift() {
+        let root = test_root("generated-runtime-shape-drift");
+        compile_native(&sample_product(), "linux", &root).unwrap();
+        let mut runtime_json: Value =
+            serde_json::from_str(&fs::read_to_string(root.join("theurgy-runtime.json")).unwrap())
+                .unwrap();
+        let shape = runtime_json
+            .pointer_mut("/productActionContracts/1/inputShape")
+            .and_then(Value::as_object_mut)
+            .unwrap();
+        shape.insert("other".to_string(), Value::String("string".to_string()));
+        let runtime = serde_json::to_string(&runtime_json).unwrap();
+        let error = validate_generated_runtime(&runtime)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("inputKeys must match inputShape keys"));
         fs::remove_dir_all(root).unwrap();
     }
 
