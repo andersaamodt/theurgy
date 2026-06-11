@@ -636,8 +636,23 @@ struct ProductSummary {
     background_job_ids: Vec<String>,
     release_target_ids: Vec<String>,
     audit_keys: Vec<String>,
+    action_contracts: Vec<ActionContract>,
     action_ids: Vec<String>,
     actions: usize,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct ActionContract {
+    id: String,
+    label: String,
+    effect: String,
+    safe: bool,
+    mutating: bool,
+    long_running: bool,
+    privileged: bool,
+    input_keys: Vec<String>,
+    output_keys: Vec<String>,
+    failure_keys: Vec<String>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -774,7 +789,8 @@ fn validate_action_ir(text: &str) -> Result<ActionSummary> {
     }
     let mut action_ids = Vec::new();
     for action in action_values {
-        action_ids.push(validate_action(action)?);
+        let contract = validate_action_contract(action)?;
+        action_ids.push(contract.id.clone());
     }
     Ok(ActionSummary {
         actions: action_values.len(),
@@ -864,8 +880,11 @@ fn validate_product_ir_value(value: &Value) -> Result<ProductSummary> {
         return Err(TheurgyError::new("product IR actions required").into());
     }
     let mut action_ids = Vec::new();
+    let mut action_contracts = Vec::new();
     for action in action_values {
-        action_ids.push(validate_action(action)?);
+        let contract = validate_action_contract(action)?;
+        action_ids.push(contract.id.clone());
+        action_contracts.push(contract);
     }
     let state = value_object(value, "state")?;
     value_string(state, "snapshotSchema")
@@ -888,6 +907,7 @@ fn validate_product_ir_value(value: &Value) -> Result<ProductSummary> {
         background_job_ids,
         release_target_ids,
         audit_keys,
+        action_contracts,
         actions: action_values.len(),
         action_ids,
     })
@@ -943,17 +963,19 @@ fn optional_nonempty_string(value: &Value, key: &str, label: &str) -> Result<Opt
     Ok(Some(text.to_string()))
 }
 
-fn validate_action(action: &Value) -> Result<String> {
+fn validate_action_contract(action: &Value) -> Result<ActionContract> {
     let id = value_string(action, "id")
         .filter(|id| valid_action_id(id))
         .ok_or_else(|| TheurgyError::new("product IR action.id must be a stable action id"))?;
-    value_string(action, "label")
+    let label = value_string(action, "label")
         .filter(|label| !label.is_empty())
         .ok_or_else(|| TheurgyError::new("product IR action.label required"))?;
-    for key in ["input", "output", "failure"] {
-        value_object(action, key)
-            .map_err(|_| TheurgyError::new(format!("product IR action.{key} object required")))?;
-    }
+    let input = value_object(action, "input")
+        .map_err(|_| TheurgyError::new("product IR action.input object required"))?;
+    let output = value_object(action, "output")
+        .map_err(|_| TheurgyError::new("product IR action.output object required"))?;
+    let failure = value_object(action, "failure")
+        .map_err(|_| TheurgyError::new("product IR action.failure object required"))?;
     let effect = value_string(action, "effect")
         .ok_or_else(|| TheurgyError::new("product IR action.effect invalid"))?;
     if !matches!(
@@ -967,7 +989,18 @@ fn validate_action(action: &Value) -> Result<String> {
             TheurgyError::new(format!("product IR action.{key} boolean required"))
         })?;
     }
-    Ok(id)
+    Ok(ActionContract {
+        id,
+        label,
+        effect,
+        safe: value_bool(action, "safe").unwrap_or(false),
+        mutating: value_bool(action, "mutating").unwrap_or(false),
+        long_running: value_bool(action, "longRunning").unwrap_or(false),
+        privileged: value_bool(action, "privileged").unwrap_or(false),
+        input_keys: object_keys(input),
+        output_keys: object_keys(output),
+        failure_keys: object_keys(failure),
+    })
 }
 
 fn validate_operation_record(operation: &Value) -> Result<String> {
@@ -1143,6 +1176,49 @@ fn optional_object_keys(value: &Value, key: &str) -> Result<Vec<String>> {
     let mut keys = object.keys().cloned().collect::<Vec<_>>();
     keys.sort();
     Ok(keys)
+}
+
+fn object_keys(value: &Value) -> Vec<String> {
+    let Some(object) = value.as_object() else {
+        return Vec::new();
+    };
+    let mut keys = object.keys().cloned().collect::<Vec<_>>();
+    keys.sort();
+    keys
+}
+
+fn action_contracts_value(contracts: &[ActionContract]) -> Value {
+    Value::Array(
+        contracts
+            .iter()
+            .map(|contract| {
+                let mut object = serde_json::Map::new();
+                object.insert("id".to_string(), Value::String(contract.id.clone()));
+                object.insert("label".to_string(), Value::String(contract.label.clone()));
+                object.insert("effect".to_string(), Value::String(contract.effect.clone()));
+                object.insert("safe".to_string(), Value::Bool(contract.safe));
+                object.insert("mutating".to_string(), Value::Bool(contract.mutating));
+                object.insert(
+                    "longRunning".to_string(),
+                    Value::Bool(contract.long_running),
+                );
+                object.insert("privileged".to_string(), Value::Bool(contract.privileged));
+                object.insert(
+                    "inputKeys".to_string(),
+                    string_vec_value(&contract.input_keys),
+                );
+                object.insert(
+                    "outputKeys".to_string(),
+                    string_vec_value(&contract.output_keys),
+                );
+                object.insert(
+                    "failureKeys".to_string(),
+                    string_vec_value(&contract.failure_keys),
+                );
+                Value::Object(object)
+            })
+            .collect(),
+    )
 }
 
 fn json_string_array_literal(values: &[String]) -> String {
@@ -1332,6 +1408,10 @@ fn generated_runtime_metadata(
     object.insert(
         "productActions".to_string(),
         string_vec_value(&summary.action_ids),
+    );
+    object.insert(
+        "productActionContracts".to_string(),
+        action_contracts_value(&summary.action_contracts),
     );
     object.insert(
         "productCapabilities".to_string(),
@@ -2306,6 +2386,17 @@ mod tests {
             summary.audit_keys,
             vec!["cliParity".to_string(), "operationHistory".to_string()]
         );
+        assert_eq!(summary.action_contracts.len(), 2);
+        let publish = summary
+            .action_contracts
+            .iter()
+            .find(|contract| contract.id == "publish_changes")
+            .unwrap();
+        assert_eq!(publish.label, "Push to Production");
+        assert_eq!(publish.effect, "release");
+        assert!(publish.long_running);
+        assert!(publish.privileged);
+        assert_eq!(publish.input_keys, vec!["deployment".to_string()]);
     }
 
     #[test]
@@ -2680,6 +2771,24 @@ mod tests {
             &serde_json::json!(["native-desktop", "runtime-actions"])
         );
         assert_eq!(
+            runtime_json
+                .pointer("/productActionContracts/1/id")
+                .and_then(Value::as_str),
+            Some("publish_changes")
+        );
+        assert_eq!(
+            runtime_json
+                .pointer("/productActionContracts/1/inputKeys")
+                .unwrap(),
+            &serde_json::json!(["deployment"])
+        );
+        assert_eq!(
+            runtime_json
+                .pointer("/productActionContracts/1/longRunning")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
             runtime_json.get("productDomainObjects").unwrap(),
             &serde_json::json!(["server", "deployment"])
         );
@@ -2979,7 +3088,7 @@ mod tests {
     }
 
     fn sample_product() -> String {
-        "{\n  \"version\": \"theurgy-product-ir/v1\",\n  \"format\": \"json\",\n  \"app\": {\n    \"id\": \"deployments\",\n    \"name\": \"Deployments\",\n    \"targets\": [\"macos\", \"linux\"],\n    \"capabilities\": [\"native-desktop\", \"runtime-actions\"],\n    \"permissions\": [\"files\"]\n  },\n  \"domain\": {\n    \"objects\": [\n      {\"id\": \"server\", \"label\": \"Server\"},\n      {\"id\": \"deployment\", \"label\": \"Deployment\"}\n    ]\n  },\n  \"actions\": [\n    {\"id\": \"refresh_state\", \"label\": \"Refresh\", \"input\": {}, \"output\": {}, \"effect\": \"read\", \"failure\": {}, \"safe\": true, \"mutating\": false, \"longRunning\": false, \"privileged\": false},\n    {\"id\": \"publish_changes\", \"label\": \"Push to Production\", \"input\": {}, \"output\": {}, \"effect\": \"release\", \"failure\": {}, \"safe\": false, \"mutating\": true, \"longRunning\": true, \"privileged\": true}\n  ],\n  \"state\": {\n    \"snapshotSchema\": \"deployments-state/v1\",\n    \"roots\": [{\"id\": \"headquarters-workspace\", \"kind\": \"xdg-state\"}]\n  },\n  \"backgroundJobs\": [\n    {\"id\": \"server-queue\", \"label\": \"Server Queue\"}\n  ],\n  \"releaseTargets\": [\n    {\"id\": \"macos-app\", \"target\": \"macos\"}\n  ],\n  \"audit\": {\n    \"operationHistory\": true,\n    \"cliParity\": true\n  }\n}".to_string()
+        "{\n  \"version\": \"theurgy-product-ir/v1\",\n  \"format\": \"json\",\n  \"app\": {\n    \"id\": \"deployments\",\n    \"name\": \"Deployments\",\n    \"targets\": [\"macos\", \"linux\"],\n    \"capabilities\": [\"native-desktop\", \"runtime-actions\"],\n    \"permissions\": [\"files\"]\n  },\n  \"domain\": {\n    \"objects\": [\n      {\"id\": \"server\", \"label\": \"Server\"},\n      {\"id\": \"deployment\", \"label\": \"Deployment\"}\n    ]\n  },\n  \"actions\": [\n    {\"id\": \"refresh_state\", \"label\": \"Refresh\", \"input\": {}, \"output\": {}, \"effect\": \"read\", \"failure\": {}, \"safe\": true, \"mutating\": false, \"longRunning\": false, \"privileged\": false},\n    {\"id\": \"publish_changes\", \"label\": \"Push to Production\", \"input\": {\"deployment\": \"string\"}, \"output\": {}, \"effect\": \"release\", \"failure\": {}, \"safe\": false, \"mutating\": true, \"longRunning\": true, \"privileged\": true}\n  ],\n  \"state\": {\n    \"snapshotSchema\": \"deployments-state/v1\",\n    \"roots\": [{\"id\": \"headquarters-workspace\", \"kind\": \"xdg-state\"}]\n  },\n  \"backgroundJobs\": [\n    {\"id\": \"server-queue\", \"label\": \"Server Queue\"}\n  ],\n  \"releaseTargets\": [\n    {\"id\": \"macos-app\", \"target\": \"macos\"}\n  ],\n  \"audit\": {\n    \"operationHistory\": true,\n    \"cliParity\": true\n  }\n}".to_string()
     }
 
     fn sample_mobile_product() -> String {
