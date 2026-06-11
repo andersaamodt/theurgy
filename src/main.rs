@@ -87,6 +87,7 @@ fn run(args: Vec<String>) -> Result<()> {
         Some("inspect-app") => command_inspect_app(&args[2..]),
         Some("run-state") => command_run_state(&args[2..]),
         Some("run-status") => command_run_status(&args[2..]),
+        Some("subscribe-status") => command_subscribe_status(&args[2..]),
         Some("run-history") => command_run_history(&args[2..]),
         Some("run-action") => command_run_action(&args[2..]),
         Some(other) => Err(TheurgyError::new(format!("unknown command: {other}")).into()),
@@ -477,6 +478,44 @@ fn command_run_status(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+fn command_subscribe_status(args: &[String]) -> Result<()> {
+    let manifest_path = parse_subscribe_status_args(args)?;
+    let output = subscribe_status_output(&manifest_path)?;
+    print!("{output}");
+    Ok(())
+}
+
+fn parse_subscribe_status_args(args: &[String]) -> Result<PathBuf> {
+    let mut manifest_path: Option<PathBuf> = None;
+    let mut once = false;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--manifest" => {
+                let raw = args.get(index + 1).ok_or_else(|| {
+                    TheurgyError::new("subscribe-status --manifest requires PATH")
+                })?;
+                manifest_path = Some(PathBuf::from(raw));
+                index += 2;
+            }
+            "--once" => {
+                once = true;
+                index += 1;
+            }
+            other => {
+                return Err(
+                    TheurgyError::new(format!("unknown subscribe-status option: {other}")).into(),
+                )
+            }
+        }
+    }
+    if !once {
+        return Err(TheurgyError::new("usage: subscribe-status --manifest PATH --once").into());
+    }
+    manifest_path
+        .ok_or_else(|| TheurgyError::new("subscribe-status --manifest PATH required").into())
+}
+
 fn command_run_history(args: &[String]) -> Result<()> {
     if args.is_empty() {
         return Err(TheurgyError::new("usage: run-history SUBJECT [LIMIT] --manifest PATH").into());
@@ -583,6 +622,10 @@ fn run_status_output(manifest_path: &Path) -> Result<String> {
     let output = run_manifest_command(&runtime.status_command, "status")?;
     validate_manifest_status_output(&runtime.app_id, &output)?;
     Ok(output)
+}
+
+fn subscribe_status_output(manifest_path: &Path) -> Result<String> {
+    run_status_output(manifest_path)
 }
 
 fn run_history_output(manifest_path: &Path, subject: &str, limit: Option<&str>) -> Result<String> {
@@ -4047,6 +4090,46 @@ mod tests {
         assert_eq!(
             value.get("state_ready").and_then(Value::as_bool),
             Some(true)
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn subscribe_status_once_reuses_typed_status_contract() {
+        let root = runtime_fixture_root("subscribe-status");
+        let manifest = root.join("runtime.manifest.json");
+        let output = subscribe_status_output(&manifest).unwrap();
+        let value: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(
+            value.get("schema").and_then(Value::as_str),
+            Some("theurgy-runtime-status/v1")
+        );
+        assert_eq!(
+            value.get("state_ready").and_then(Value::as_bool),
+            Some(true)
+        );
+
+        command_subscribe_status(&[
+            "--manifest".to_string(),
+            manifest.display().to_string(),
+            "--once".to_string(),
+        ])
+        .unwrap();
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn subscribe_status_requires_once_until_streaming_is_implemented() {
+        let root = runtime_fixture_root("subscribe-status-requires-once");
+        let error = command_subscribe_status(&[
+            "--manifest".to_string(),
+            root.join("runtime.manifest.json").display().to_string(),
+        ])
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "usage: subscribe-status --manifest PATH --once"
         );
         fs::remove_dir_all(root).unwrap();
     }
