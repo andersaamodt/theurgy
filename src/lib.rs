@@ -514,6 +514,101 @@ pub mod product_runtime {
         })
     }
 
+    pub fn project_surface_from_product_text(
+        product: &str,
+        target: &str,
+    ) -> ContractResult<String> {
+        let value: Value = serde_json::from_str(product)
+            .map_err(|error| ContractError::new(format!("invalid JSON: {error}")))?;
+        let product = validate_product_ir_value(&value)?;
+        let surface = project_surface_from_product(&product, target)?;
+        serde_json::to_string_pretty(&surface)
+            .map(|json| format!("{json}\n"))
+            .map_err(|error| ContractError::new(format!("could not serialize surface IR: {error}")))
+    }
+
+    pub fn project_surface_from_product(
+        product: &ProductIr,
+        target: &str,
+    ) -> ContractResult<Value> {
+        if !product
+            .targets
+            .iter()
+            .any(|candidate| candidate.as_str() == target)
+        {
+            return Err(ContractError::new(format!(
+                "product IR does not declare target: {target}"
+            )));
+        }
+        let actions = string_vec_value(&product.action_ids);
+        let surface = if is_desktop_target(target) {
+            serde_json::json!({
+                "version": DESKTOP_SURFACE_IR_SCHEMA,
+                "format": "json",
+                "product": product.app_id,
+                "target": target,
+                "actions": actions,
+                "window": {
+                    "id": "window.main",
+                    "type": "Window",
+                    "title": product.app_name,
+                    "role": "native-product-root",
+                    "child": {
+                        "id": "split.main",
+                        "type": "SplitPane",
+                        "role": "left-list-detail",
+                        "children": [
+                            {
+                                "id": "list.primary",
+                                "type": "TreeList",
+                                "role": "product-navigation"
+                            },
+                            {
+                                "id": "detail.primary",
+                                "type": "Detail",
+                                "role": "product-detail"
+                            }
+                        ]
+                    }
+                }
+            })
+        } else if is_mobile_target(target) {
+            serde_json::json!({
+                "version": MOBILE_SURFACE_IR_SCHEMA,
+                "format": "json",
+                "product": product.app_id,
+                "target": target,
+                "actions": actions,
+                "screens": [
+                    {
+                        "id": "overview",
+                        "title": product.app_name,
+                        "node": {
+                            "id": "screen.overview",
+                            "type": "NavigationStack",
+                            "role": "status-overview"
+                        }
+                    },
+                    {
+                        "id": "detail",
+                        "title": "Detail",
+                        "node": {
+                            "id": "screen.detail",
+                            "type": "Screen",
+                            "role": "focused-action-detail"
+                        }
+                    }
+                ]
+            })
+        } else {
+            return Err(ContractError::new(
+                "target must be macos, linux, ios, or android",
+            ));
+        };
+        validate_surface_ir_value(&surface)?;
+        Ok(surface)
+    }
+
     pub fn validate_action_ir_value(value: &Value) -> ContractResult<ActionIr> {
         expect_value_string(value, "version", ACTION_IR_SCHEMA)?;
         let action_values = value_array(value, "actions")?;
@@ -757,6 +852,10 @@ pub mod product_runtime {
             values.push(string.to_string());
         }
         Ok(values)
+    }
+
+    fn string_vec_value(values: &[String]) -> Value {
+        Value::Array(values.iter().cloned().map(Value::String).collect())
     }
 
     fn optional_string_array(value: &Value, key: &str, label: &str) -> ContractResult<Vec<String>> {
@@ -1641,5 +1740,79 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert_eq!(error, "mobile surface IR target invalid");
+    }
+
+    #[test]
+    fn product_runtime_projects_target_surface_ir() {
+        let product = serde_json::json!({
+            "version": product_runtime::PRODUCT_IR_SCHEMA,
+            "format": "json",
+            "app": {
+                "id": "deployments",
+                "name": "Deployments",
+                "targets": ["macos", "ios"]
+            },
+            "actions": [{
+                "id": "refresh_state",
+                "label": "Refresh",
+                "input": {},
+                "output": {},
+                "effect": "read",
+                "failure": {},
+                "safe": true,
+                "mutating": false,
+                "longRunning": false,
+                "privileged": false
+            }],
+            "state": {"snapshotSchema": "deployments-state/v1"},
+            "releaseTargets": [
+                {"id": "macos-native", "target": "macos", "surface": "desktop", "artifact": "generated/macos"},
+                {"id": "ios-native", "target": "ios", "surface": "mobile", "artifact": "generated/mobile/ios"}
+            ]
+        });
+        let product = product_runtime::validate_product_ir_value(&product).unwrap();
+        let desktop = product_runtime::project_surface_from_product(&product, "macos").unwrap();
+        let desktop = product_runtime::validate_surface_ir_value(&desktop).unwrap();
+        assert_eq!(desktop.schema, product_runtime::DESKTOP_SURFACE_IR_SCHEMA);
+        assert_eq!(desktop.target, "macos");
+        assert!(desktop.roles.contains(&"left-list-detail".to_string()));
+
+        let mobile_text = product_runtime::project_surface_from_product_text(
+            &serde_json::to_string(&serde_json::json!({
+                "version": product_runtime::PRODUCT_IR_SCHEMA,
+                "format": "json",
+                "app": {
+                    "id": "deployments",
+                    "name": "Deployments",
+                    "targets": ["ios"]
+                },
+                "actions": [{
+                    "id": "refresh_state",
+                    "label": "Refresh",
+                    "input": {},
+                    "output": {},
+                    "effect": "read",
+                    "failure": {},
+                    "safe": true,
+                    "mutating": false,
+                    "longRunning": false,
+                    "privileged": false
+                }],
+                "state": {"snapshotSchema": "deployments-state/v1"},
+                "releaseTargets": [
+                    {"id": "ios-native", "target": "ios", "surface": "mobile", "artifact": "generated/mobile/ios"}
+                ]
+            }))
+            .unwrap(),
+            "ios",
+        )
+        .unwrap();
+        assert!(mobile_text.contains("\"version\": \"theurgy-mobile-surface-ir/v1\""));
+        assert!(mobile_text.contains("\"role\": \"status-overview\""));
+
+        let error = product_runtime::project_surface_from_product(&product, "android")
+            .unwrap_err()
+            .to_string();
+        assert_eq!(error, "product IR does not declare target: android");
     }
 }

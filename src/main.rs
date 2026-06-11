@@ -2598,15 +2598,6 @@ fn shape_value(shape: &BTreeMap<String, String>) -> Value {
     Value::Object(object)
 }
 
-fn json_string_array_literal(values: &[String]) -> String {
-    let items = values
-        .iter()
-        .map(|value| format!("\"{}\"", json_escape(value)))
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!("[{items}]")
-}
-
 fn swift_string_array_literal(values: &[String]) -> String {
     let items = values
         .iter()
@@ -2771,30 +2762,7 @@ fn parse_compile_args<'a>(args: &'a [String]) -> Result<(&'a Path, &'a str, &'a 
 }
 
 fn project_surface(product: &str, target: &str) -> Result<String> {
-    let summary = validate_product_ir(product)?;
-    if !summary.targets.iter().any(|candidate| candidate == target) {
-        return Err(
-            TheurgyError::new(format!("product IR does not declare target: {target}")).into(),
-        );
-    }
-    let action_ids = json_string_array_literal(&summary.action_ids);
-    if product_runtime::is_desktop_target(target) {
-        Ok(format!(
-            "{{\n  \"version\": \"theurgy-desktop-surface-ir/v1\",\n  \"format\": \"json\",\n  \"product\": \"{}\",\n  \"target\": \"{}\",\n  \"actions\": {},\n  \"window\": {{\n    \"id\": \"window.main\",\n    \"type\": \"Window\",\n    \"title\": \"{}\",\n    \"role\": \"native-product-root\",\n    \"child\": {{\n      \"id\": \"split.main\",\n      \"type\": \"SplitPane\",\n      \"role\": \"left-list-detail\",\n      \"children\": [\n        {{\"id\": \"list.primary\", \"type\": \"TreeList\", \"role\": \"product-navigation\"}},\n        {{\"id\": \"detail.primary\", \"type\": \"Detail\", \"role\": \"product-detail\"}}\n      ]\n    }}\n  }}\n}}",
-            json_escape(&summary.app_id),
-            json_escape(target),
-            action_ids,
-            json_escape(&summary.app_name)
-        ))
-    } else {
-        Ok(format!(
-            "{{\n  \"version\": \"theurgy-mobile-surface-ir/v1\",\n  \"format\": \"json\",\n  \"product\": \"{}\",\n  \"target\": \"{}\",\n  \"actions\": {},\n  \"screens\": [\n    {{\n      \"id\": \"overview\",\n      \"title\": \"{}\",\n      \"node\": {{\"id\": \"screen.overview\", \"type\": \"NavigationStack\", \"role\": \"status-overview\"}}\n    }},\n    {{\n      \"id\": \"detail\",\n      \"title\": \"Detail\",\n      \"node\": {{\"id\": \"screen.detail\", \"type\": \"Screen\", \"role\": \"focused-action-detail\"}}\n    }}\n  ]\n}}",
-            json_escape(&summary.app_id),
-            json_escape(target),
-            action_ids,
-            json_escape(&summary.app_name)
-        ))
-    }
+    product_runtime::project_surface_from_product_text(product, target).map_err(Into::into)
 }
 
 fn compile_native(product: &str, target: &str, out_dir: &Path) -> Result<()> {
@@ -6985,13 +6953,13 @@ mod tests {
         let android_root = test_root("compile-android");
         let product = sample_mobile_product();
         let summary = validate_product_ir(&product).unwrap();
-        let ios_surface = project_surface(&product, "ios").unwrap().replace(
-            "\"actions\": [\"refresh_state\", \"publish_changes\"]",
-            "\"actions\": [\"publish_changes\"]",
+        let ios_surface = surface_with_actions(
+            &project_surface(&product, "ios").unwrap(),
+            &["publish_changes"],
         );
-        let android_surface = project_surface(&product, "android").unwrap().replace(
-            "\"actions\": [\"refresh_state\", \"publish_changes\"]",
-            "\"actions\": [\"publish_changes\"]",
+        let android_surface = surface_with_actions(
+            &project_surface(&product, "android").unwrap(),
+            &["publish_changes"],
         );
         let runtime = sample_full_runtime_contract();
         compile_native_with_contract(&summary, &ios_surface, &runtime, "ios", &ios_root, false)
@@ -7327,6 +7295,15 @@ mod tests {
 
         fs::remove_dir_all(ios_root).unwrap();
         fs::remove_dir_all(android_root).unwrap();
+    }
+
+    fn surface_with_actions(surface: &str, actions: &[&str]) -> String {
+        let mut value: Value = serde_json::from_str(surface).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .insert("actions".to_string(), serde_json::json!(actions));
+        format!("{}\n", serde_json::to_string_pretty(&value).unwrap())
     }
 
     fn sample_product() -> String {
