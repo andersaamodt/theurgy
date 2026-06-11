@@ -765,42 +765,55 @@ fn compile_native_with_contract(
 }
 
 fn generated_runtime_metadata(runtime: &RuntimeContract, target: &str) -> String {
-    let mut lines = vec![
-        "{".to_string(),
-        "  \"version\": \"theurgy-generated-runtime/v1\",".to_string(),
-        format!("  \"app\": \"{}\",", json_escape(&runtime.app_id)),
-        format!("  \"target\": \"{}\",", json_escape(target)),
-        format!("  \"protocol\": \"{}\",", json_escape(&runtime.protocol)),
-        format!(
-            "  \"stateCommand\": {},",
-            json_string_array_literal(&runtime.state_command)
-        ),
-    ];
+    let mut object = serde_json::Map::new();
+    object.insert(
+        "version".to_string(),
+        Value::String("theurgy-generated-runtime/v1".to_string()),
+    );
+    object.insert("app".to_string(), Value::String(runtime.app_id.clone()));
+    object.insert("target".to_string(), Value::String(target.to_string()));
+    object.insert(
+        "protocol".to_string(),
+        Value::String(runtime.protocol.clone()),
+    );
+    object.insert(
+        "stateCommand".to_string(),
+        string_vec_value(&runtime.state_command),
+    );
     if !runtime.status_command.is_empty() {
-        lines.push(format!(
-            "  \"statusCommand\": {},",
-            json_string_array_literal(&runtime.status_command)
-        ));
+        object.insert(
+            "statusCommand".to_string(),
+            string_vec_value(&runtime.status_command),
+        );
     }
-    lines.extend([format!(
-        "  \"actionCommand\": {},",
-        json_string_array_literal(&runtime.action_command)
-    )]);
+    object.insert(
+        "actionCommand".to_string(),
+        string_vec_value(&runtime.action_command),
+    );
     if !runtime.history_command.is_empty() {
-        lines.push(format!(
-            "  \"historyCommand\": {},",
-            json_string_array_literal(&runtime.history_command)
-        ));
+        object.insert(
+            "historyCommand".to_string(),
+            string_vec_value(&runtime.history_command),
+        );
     }
     if !runtime.daemon_command.is_empty() {
-        lines.push(format!(
-            "  \"daemonCommand\": {},",
-            json_string_array_literal(&runtime.daemon_command)
-        ));
+        object.insert(
+            "daemonCommand".to_string(),
+            string_vec_value(&runtime.daemon_command),
+        );
     }
-    lines.push("  \"surface\": \"theurgy-surface.json\"".to_string());
-    lines.push("}".to_string());
-    format!("{}\n", lines.join("\n"))
+    object.insert(
+        "surface".to_string(),
+        Value::String("theurgy-surface.json".to_string()),
+    );
+    format!(
+        "{}\n",
+        serde_json::to_string_pretty(&Value::Object(object)).expect("runtime metadata serializes")
+    )
+}
+
+fn string_vec_value(values: &[String]) -> Value {
+    Value::Array(values.iter().cloned().map(Value::String).collect())
 }
 
 fn compile_macos(
@@ -1592,7 +1605,11 @@ mod tests {
         assert!(root.join("theurgy-surface.json").exists());
         assert!(root.join("theurgy-runtime.json").exists());
         let runtime = fs::read_to_string(root.join("theurgy-runtime.json")).unwrap();
-        assert!(runtime.contains("\"stateCommand\": [\"deployments-core\", \"runtime-state\"]"));
+        let runtime_json: Value = serde_json::from_str(&runtime).unwrap();
+        assert_eq!(
+            runtime_json.get("stateCommand").unwrap(),
+            &serde_json::json!(["deployments-core", "runtime-state"])
+        );
         let main_c = fs::read_to_string(root.join("src/main.c")).unwrap();
         assert!(main_c.contains("gtk_application_window_new"));
         assert!(main_c.contains("Deployments"));
@@ -1641,10 +1658,23 @@ mod tests {
         .unwrap();
 
         let runtime = fs::read_to_string(out.join("theurgy-runtime.json")).unwrap();
-        assert!(runtime.contains("\"protocol\": \"deployments-runtime/v1\""));
-        assert!(runtime.contains("\"stateCommand\": [\"custom-core\", \"state\"]"));
-        assert!(runtime.contains("\"statusCommand\": [\"custom-core\", \"status\"]"));
-        assert!(runtime.contains("\"historyCommand\": [\"custom-core\", \"history\"]"));
+        let runtime_json: Value = serde_json::from_str(&runtime).unwrap();
+        assert_eq!(
+            runtime_json.get("protocol").and_then(Value::as_str),
+            Some("deployments-runtime/v1")
+        );
+        assert_eq!(
+            runtime_json.get("stateCommand").unwrap(),
+            &serde_json::json!(["custom-core", "state"])
+        );
+        assert_eq!(
+            runtime_json.get("statusCommand").unwrap(),
+            &serde_json::json!(["custom-core", "status"])
+        );
+        assert_eq!(
+            runtime_json.get("historyCommand").unwrap(),
+            &serde_json::json!(["custom-core", "history"])
+        );
         let main_c = fs::read_to_string(out.join("src/main.c")).unwrap();
         assert!(main_c.contains("\"custom-core\""));
         assert!(main_c.contains("\"state\""));
