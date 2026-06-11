@@ -302,6 +302,10 @@ fn command_validate_generated_runtime(args: &[String]) -> Result<()> {
     println!("schema=theurgy-generated-runtime/v1");
     println!("app={}", summary.app_id);
     println!("target={}", summary.target);
+    println!(
+        "product_state_snapshot_schema={}",
+        summary.state_snapshot_schema
+    );
     println!("actions={}", summary.actions);
     println!("product_actions={}", summary.product_actions);
     println!("surface_actions={}", summary.surface_actions);
@@ -522,6 +526,10 @@ fn inspect_app_lines(path: &Path) -> Result<Vec<String>> {
     if let Some(mobile_surface_ir) = &product.mobile_surface_ir {
         lines.push(format!("product_surface_mobile={mobile_surface_ir}"));
     }
+    lines.push(format!(
+        "product_state_snapshot_schema={}",
+        product.state_snapshot_schema
+    ));
     lines.push(format!("product_actions={}", product.actions));
     lines.push(format!(
         "product_long_running_actions={}",
@@ -1445,6 +1453,7 @@ struct ProductSummary {
     capabilities: Vec<String>,
     permissions: Vec<String>,
     domain_object_ids: Vec<String>,
+    state_snapshot_schema: String,
     persistence_root_ids: Vec<String>,
     background_job_ids: Vec<String>,
     release_targets: Vec<ReleaseTarget>,
@@ -1524,6 +1533,7 @@ struct GeneratedRuntimeSummary {
     target: String,
     release_target: String,
     release_artifact: String,
+    state_snapshot_schema: String,
     actions: usize,
     product_actions: usize,
     surface_actions: usize,
@@ -1615,6 +1625,11 @@ fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
     value_string(&value, "sourceSurfaceIr")
         .filter(|path| !path.is_empty())
         .ok_or_else(|| TheurgyError::new("generated runtime sourceSurfaceIr required"))?;
+    let state_snapshot_schema = value_string(&value, "productStateSnapshotSchema")
+        .filter(|schema| !schema.is_empty())
+        .ok_or_else(|| {
+            TheurgyError::new("generated runtime productStateSnapshotSchema required")
+        })?;
     let target_release_target = value_string(&value, "targetReleaseTarget")
         .filter(|release_target| valid_action_id(release_target))
         .ok_or_else(|| TheurgyError::new("generated runtime targetReleaseTarget required"))?;
@@ -1783,6 +1798,7 @@ fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
         target,
         release_target: target_release_target,
         release_artifact: target_release_artifact,
+        state_snapshot_schema,
         actions: product_actions.len(),
         product_actions: product_actions.len(),
         surface_actions: surface_actions.len(),
@@ -2038,7 +2054,7 @@ fn validate_product_ir_value(value: &Value) -> Result<ProductSummary> {
         action_contracts.push(contract);
     }
     let state = value_object(value, "state")?;
-    value_string(state, "snapshotSchema")
+    let state_snapshot_schema = value_string(state, "snapshotSchema")
         .filter(|schema| !schema.is_empty())
         .ok_or_else(|| TheurgyError::new("product IR state.snapshotSchema required"))?;
     let persistence_root_ids = optional_object_id_array(state, "roots", "product IR state.roots")?;
@@ -2061,6 +2077,7 @@ fn validate_product_ir_value(value: &Value) -> Result<ProductSummary> {
         capabilities,
         permissions,
         domain_object_ids,
+        state_snapshot_schema,
         persistence_root_ids,
         background_job_ids,
         release_targets,
@@ -3017,10 +3034,9 @@ fn compile_native_with_contract(
         &out_dir.join("theurgy-surface.json"),
         &format!("{}\n", surface.trim_end()),
     )?;
-    write_or_replace(
-        &out_dir.join("theurgy-runtime.json"),
-        &generated_runtime_metadata(summary, runtime, target, &surface_summary),
-    )?;
+    let runtime_metadata = generated_runtime_metadata(summary, runtime, target, &surface_summary);
+    validate_generated_runtime(&runtime_metadata)?;
+    write_or_replace(&out_dir.join("theurgy-runtime.json"), &runtime_metadata)?;
     match target {
         "macos" => compile_macos(summary, &surface_summary, runtime, out_dir),
         "linux" => compile_linux(summary, &surface_summary, runtime, out_dir),
@@ -3080,6 +3096,10 @@ fn generated_runtime_metadata(
     object.insert(
         "productDomainObjects".to_string(),
         string_vec_value(&summary.domain_object_ids),
+    );
+    object.insert(
+        "productStateSnapshotSchema".to_string(),
+        Value::String(summary.state_snapshot_schema.clone()),
     );
     object.insert(
         "productPersistenceRoots".to_string(),
@@ -4328,6 +4348,7 @@ mod tests {
         ));
         assert!(lines
             .contains(&"product_surface_mobile=app-blueprint/mobile.surface.ir.json".to_string()));
+        assert!(lines.contains(&"product_state_snapshot_schema=deployments-state/v1".to_string()));
         assert!(lines.contains(&"product_actions=2".to_string()));
         assert!(lines.contains(&"product_long_running_actions=1".to_string()));
         assert!(lines.contains(&"runtime_protocol=deployments-runtime/v1".to_string()));
@@ -4967,6 +4988,9 @@ mod tests {
             .any(|value| value.as_str() == Some("sourceSurfaceIr")));
         assert!(top_level_required
             .iter()
+            .any(|value| value.as_str() == Some("productStateSnapshotSchema")));
+        assert!(top_level_required
+            .iter()
             .any(|value| value.as_str() == Some("targetReleaseTarget")));
         assert!(top_level_required
             .iter()
@@ -4980,6 +5004,12 @@ mod tests {
         assert_eq!(
             schema
                 .pointer("/properties/productIr/minLength")
+                .and_then(Value::as_u64),
+            Some(1)
+        );
+        assert_eq!(
+            schema
+                .pointer("/properties/productStateSnapshotSchema/minLength")
                 .and_then(Value::as_u64),
             Some(1)
         );
@@ -5492,6 +5522,7 @@ mod tests {
         let generated = validate_generated_runtime(&runtime).unwrap();
         assert_eq!(generated.app_id, "deployments");
         assert_eq!(generated.target, "linux");
+        assert_eq!(generated.state_snapshot_schema, "deployments-state/v1");
         assert_eq!(
             runtime_json.get("productIr").and_then(Value::as_str),
             Some("direct-product-ir")
@@ -5503,6 +5534,12 @@ mod tests {
         assert_eq!(
             runtime_json.get("sourceSurfaceIr").and_then(Value::as_str),
             Some("projected-surface-ir")
+        );
+        assert_eq!(
+            runtime_json
+                .get("productStateSnapshotSchema")
+                .and_then(Value::as_str),
+            Some("deployments-state/v1")
         );
         assert_eq!(generated.actions, 2);
         assert_eq!(generated.product_actions, 2);
@@ -5668,6 +5705,10 @@ mod tests {
             ("productIr", "productIr required"),
             ("runtimeManifest", "runtimeManifest required"),
             ("sourceSurfaceIr", "sourceSurfaceIr required"),
+            (
+                "productStateSnapshotSchema",
+                "productStateSnapshotSchema required",
+            ),
         ] {
             let root = test_root(&format!("generated-runtime-source-{key}"));
             compile_native(&sample_product(), "linux", &root).unwrap();
