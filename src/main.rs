@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::env;
 use std::error::Error;
 use std::fmt;
@@ -2277,87 +2277,74 @@ fn validate_operation_history_value(value: &Value) -> Result<OperationHistorySum
 }
 
 fn validate_product_ir_value(value: &Value) -> Result<ProductSummary> {
-    expect_value_string(value, "version", product_runtime::PRODUCT_IR_SCHEMA)?;
-    expect_value_string(value, "format", "json")?;
-    let app = value_object(value, "app")?;
-    let app_id = value_string(app, "id")
-        .filter(|id| valid_slug(id))
-        .ok_or_else(|| TheurgyError::new("product IR app.id must be a lowercase slug"))?;
-    let app_name = value_string(app, "name")
-        .filter(|name| !name.is_empty())
-        .ok_or_else(|| TheurgyError::new("product IR app.name required"))?;
-    let targets = value_string_array(app, "targets")?;
-    if targets.is_empty() {
-        return Err(TheurgyError::new("product IR app.targets required").into());
+    let product = product_runtime::validate_product_ir_value(value)?;
+    Ok(product_summary_from_library(product))
+}
+
+fn product_summary_from_library(product: product_runtime::ProductIr) -> ProductSummary {
+    ProductSummary {
+        app_id: product.app_id,
+        app_name: product.app_name,
+        targets: product.targets,
+        desktop_surface_ir: product.desktop_surface_ir,
+        mobile_surface_ir: product.mobile_surface_ir,
+        capabilities: product.capabilities,
+        permissions: product.permissions,
+        domain_object_ids: product.domain_object_ids,
+        state_snapshot_schema: product.state_snapshot_schema,
+        state_command: product.state_command,
+        state_status_command: product.state_status_command,
+        persistence_truth: product.persistence_truth,
+        persistence_root_ids: product.persistence_root_ids,
+        background_jobs: product
+            .background_jobs
+            .into_iter()
+            .map(|job| BackgroundJob {
+                id: job.id,
+                command: job.command,
+            })
+            .collect(),
+        background_job_ids: product.background_job_ids,
+        release_targets: product
+            .release_targets
+            .into_iter()
+            .map(|target| ReleaseTarget {
+                id: target.id,
+                target: target.target,
+                surface: target.surface,
+                artifact: target.artifact,
+            })
+            .collect(),
+        audit_keys: product.audit_keys,
+        action_contracts: product
+            .action_contracts
+            .into_iter()
+            .map(action_contract_from_library)
+            .collect(),
+        action_ids: product.action_ids,
+        actions: product.actions,
     }
-    for target in &targets {
-        if !matches!(target.as_str(), "macos" | "linux" | "ios" | "android") {
-            return Err(TheurgyError::new(
-                "product IR target must be macos, linux, ios, or android",
-            )
-            .into());
-        }
+}
+
+fn action_contract_from_library(
+    contract: product_runtime::ProductActionContract,
+) -> ActionContract {
+    ActionContract {
+        id: contract.id,
+        label: contract.label,
+        effect: contract.effect,
+        safe: contract.safe,
+        mutating: contract.mutating,
+        long_running: contract.long_running,
+        privileged: contract.privileged,
+        command: contract.command,
+        input_keys: contract.input_keys,
+        output_keys: contract.output_keys,
+        failure_keys: contract.failure_keys,
+        input_shape: contract.input_shape,
+        output_shape: contract.output_shape,
+        failure_shape: contract.failure_shape,
     }
-    let capabilities = optional_string_array(app, "capabilities", "product IR app.capabilities")?;
-    let permissions = optional_string_array(app, "permissions", "product IR app.permissions")?;
-    let (desktop_surface_ir, mobile_surface_ir) = product_surface_paths(value)?;
-    let domain_object_ids = optional_object_id_array(
-        value.get("domain").unwrap_or(&Value::Null),
-        "objects",
-        "product IR domain.objects",
-    )?;
-    let action_values = value_array(value, "actions")?;
-    if action_values.is_empty() {
-        return Err(TheurgyError::new("product IR actions required").into());
-    }
-    let mut action_ids = Vec::new();
-    let mut action_contracts = Vec::new();
-    for action in action_values {
-        let contract = validate_action_contract(action)?;
-        action_ids.push(contract.id.clone());
-        action_contracts.push(contract);
-    }
-    let state = value_object(value, "state")?;
-    let state_snapshot_schema = value_string(state, "snapshotSchema")
-        .filter(|schema| !schema.is_empty())
-        .ok_or_else(|| TheurgyError::new("product IR state.snapshotSchema required"))?;
-    let state_command = optional_string_array(state, "command", "product IR state.command")?;
-    let state_status_command =
-        optional_string_array(state, "statusCommand", "product IR state.statusCommand")?;
-    let persistence_root_ids = optional_object_id_array(state, "roots", "product IR state.roots")?;
-    let persistence_truth = validate_product_persistence(value)?;
-    let background_jobs =
-        validate_product_background_jobs(value, "backgroundJobs", "product IR backgroundJobs")?;
-    let background_job_ids = background_jobs.iter().map(|job| job.id.clone()).collect();
-    let release_targets = validate_product_release_targets(
-        value,
-        "releaseTargets",
-        "product IR releaseTargets",
-        &targets,
-    )?;
-    let audit_keys = optional_object_keys(value, "audit")?;
-    Ok(ProductSummary {
-        app_id,
-        app_name,
-        targets,
-        desktop_surface_ir,
-        mobile_surface_ir,
-        capabilities,
-        permissions,
-        domain_object_ids,
-        state_snapshot_schema,
-        state_command,
-        state_status_command,
-        persistence_truth,
-        persistence_root_ids,
-        background_jobs,
-        background_job_ids,
-        release_targets,
-        audit_keys,
-        action_contracts,
-        actions: action_values.len(),
-        action_ids,
-    })
 }
 
 fn validate_runtime_manifest_value(value: &Value) -> Result<RuntimeManifestSummary> {
@@ -2386,19 +2373,6 @@ fn runtime_manifest_summary_from_library(
     }
 }
 
-fn product_surface_paths(value: &Value) -> Result<(Option<String>, Option<String>)> {
-    let Some(surfaces) = value.get("surfaces") else {
-        return Ok((None, None));
-    };
-    if !surfaces.is_object() {
-        return Err(TheurgyError::new("product IR surfaces must be an object").into());
-    }
-    Ok((
-        optional_nonempty_string(surfaces, "desktop", "product IR surfaces.desktop")?,
-        optional_nonempty_string(surfaces, "mobile", "product IR surfaces.mobile")?,
-    ))
-}
-
 fn optional_nonempty_string(value: &Value, key: &str, label: &str) -> Result<Option<String>> {
     let Some(raw) = value.get(key) else {
         return Ok(None);
@@ -2407,26 +2381,6 @@ fn optional_nonempty_string(value: &Value, key: &str, label: &str) -> Result<Opt
         return Err(TheurgyError::new(format!("{label} must be a non-empty string")).into());
     };
     Ok(Some(text.to_string()))
-}
-
-fn validate_action_contract(action: &Value) -> Result<ActionContract> {
-    let contract = product_runtime::validate_product_action_contract(action)?;
-    Ok(ActionContract {
-        id: contract.id,
-        label: contract.label,
-        effect: contract.effect,
-        safe: contract.safe,
-        mutating: contract.mutating,
-        long_running: contract.long_running,
-        privileged: contract.privileged,
-        command: contract.command,
-        input_keys: contract.input_keys,
-        output_keys: contract.output_keys,
-        failure_keys: contract.failure_keys,
-        input_shape: contract.input_shape,
-        output_shape: contract.output_shape,
-        failure_shape: contract.failure_shape,
-    })
 }
 
 fn validate_generated_action_contract(contract: &Value) -> Result<String> {
@@ -2602,199 +2556,6 @@ fn optional_string_array(value: &Value, key: &str, label: &str) -> Result<Vec<St
         values.push(text.to_string());
     }
     Ok(values)
-}
-
-fn optional_object_id_array(value: &Value, key: &str, label: &str) -> Result<Vec<String>> {
-    let Some(raw) = value.get(key) else {
-        return Ok(Vec::new());
-    };
-    let Some(array) = raw.as_array() else {
-        return Err(TheurgyError::new(format!("{label} must be an array")).into());
-    };
-    let mut ids = Vec::new();
-    for item in array {
-        let Some(object) = item.as_object() else {
-            return Err(TheurgyError::new(format!("{label} must contain objects")).into());
-        };
-        let Some(id) = object
-            .get("id")
-            .and_then(Value::as_str)
-            .filter(|id| valid_action_id(id))
-        else {
-            return Err(TheurgyError::new(format!("{label} object.id must be stable")).into());
-        };
-        ids.push(id.to_string());
-    }
-    Ok(ids)
-}
-
-fn validate_product_background_jobs(
-    value: &Value,
-    key: &str,
-    label: &str,
-) -> Result<Vec<BackgroundJob>> {
-    let Some(raw) = value.get(key) else {
-        return Ok(Vec::new());
-    };
-    let Some(array) = raw.as_array() else {
-        return Err(TheurgyError::new(format!("{label} must be an array")).into());
-    };
-    let mut jobs = Vec::new();
-    for item in array {
-        let Some(object) = item.as_object() else {
-            return Err(TheurgyError::new(format!("{label} must contain objects")).into());
-        };
-        let id = required_stable_id(item, &format!("{label} object.id"))?;
-        required_nonempty_object_string(item, "label", &format!("{label} object.label"))?;
-        optional_nonempty_object_string(item, "state", &format!("{label} object.state"))?;
-        let command = if object.get("command").is_some() {
-            let command =
-                optional_string_array(item, "command", &format!("{label} object.command"))?;
-            if command.is_empty() {
-                return Err(TheurgyError::new(format!("{label} object.command required")).into());
-            }
-            command
-        } else {
-            Vec::new()
-        };
-        jobs.push(BackgroundJob { id, command });
-    }
-    Ok(jobs)
-}
-
-fn validate_product_release_targets(
-    value: &Value,
-    key: &str,
-    label: &str,
-    app_targets: &[String],
-) -> Result<Vec<ReleaseTarget>> {
-    let raw = value
-        .get(key)
-        .ok_or_else(|| TheurgyError::new(format!("{label} required")))?;
-    let Some(array) = raw.as_array() else {
-        return Err(TheurgyError::new(format!("{label} must be an array")).into());
-    };
-    if array.is_empty() {
-        return Err(TheurgyError::new(format!("{label} required")).into());
-    }
-    let mut release_targets = Vec::new();
-    let mut ids = BTreeSet::new();
-    let mut target_names = BTreeSet::new();
-    for item in array {
-        let Some(_object) = item.as_object() else {
-            return Err(TheurgyError::new(format!("{label} must contain objects")).into());
-        };
-        let id = required_stable_id(item, &format!("{label} object.id"))?;
-        if !ids.insert(id.clone()) {
-            return Err(TheurgyError::new(format!("{label} object.id duplicated: {id}")).into());
-        }
-        let target =
-            required_nonempty_object_string(item, "target", &format!("{label} object.target"))?;
-        if !matches!(target.as_str(), "macos" | "linux" | "ios" | "android") {
-            return Err(TheurgyError::new(format!(
-                "{label} object.target must be macos, linux, ios, or android"
-            ))
-            .into());
-        }
-        if !app_targets.iter().any(|app_target| app_target == &target) {
-            return Err(TheurgyError::new(format!(
-                "{label} object.target not declared in app.targets: {target}"
-            ))
-            .into());
-        }
-        if !target_names.insert(target.clone()) {
-            return Err(
-                TheurgyError::new(format!("{label} object.target duplicated: {target}")).into(),
-            );
-        }
-        let surface =
-            required_nonempty_object_string(item, "surface", &format!("{label} object.surface"))?;
-        let expected_surface = if matches!(target.as_str(), "macos" | "linux") {
-            "desktop"
-        } else {
-            "mobile"
-        };
-        if surface != expected_surface {
-            return Err(TheurgyError::new(format!(
-                "{label} object.surface for {target} must be {expected_surface}"
-            ))
-            .into());
-        }
-        let artifact =
-            required_nonempty_object_string(item, "artifact", &format!("{label} object.artifact"))?;
-        release_targets.push(ReleaseTarget {
-            id,
-            target,
-            surface,
-            artifact,
-        });
-    }
-    for app_target in app_targets {
-        if !target_names.contains(app_target) {
-            return Err(TheurgyError::new(format!(
-                "{label} missing release target for app target: {app_target}"
-            ))
-            .into());
-        }
-    }
-    Ok(release_targets)
-}
-
-fn validate_product_persistence(value: &Value) -> Result<String> {
-    let Some(raw) = value.get("persistence") else {
-        return Ok("file-first".to_string());
-    };
-    let Some(_object) = raw.as_object() else {
-        return Err(TheurgyError::new("product IR persistence must be an object").into());
-    };
-    let truth = required_nonempty_object_string(raw, "truth", "product IR persistence.truth")?;
-    optional_nonempty_object_string(raw, "database", "product IR persistence.database")?;
-    optional_nonempty_object_string(raw, "history", "product IR persistence.history")?;
-    Ok(truth)
-}
-
-fn required_stable_id(value: &Value, label: &str) -> Result<String> {
-    value
-        .get("id")
-        .and_then(Value::as_str)
-        .filter(|id| valid_action_id(id))
-        .map(String::from)
-        .ok_or_else(|| TheurgyError::new(format!("{label} must be stable")).into())
-}
-
-fn required_nonempty_object_string(value: &Value, key: &str, label: &str) -> Result<String> {
-    value
-        .get(key)
-        .and_then(Value::as_str)
-        .filter(|text| !text.is_empty())
-        .map(String::from)
-        .ok_or_else(|| TheurgyError::new(format!("{label} required")).into())
-}
-
-fn optional_nonempty_object_string(
-    value: &Value,
-    key: &str,
-    label: &str,
-) -> Result<Option<String>> {
-    let Some(raw) = value.get(key) else {
-        return Ok(None);
-    };
-    let Some(text) = raw.as_str().filter(|text| !text.is_empty()) else {
-        return Err(TheurgyError::new(format!("{label} must be a non-empty string")).into());
-    };
-    Ok(Some(text.to_string()))
-}
-
-fn optional_object_keys(value: &Value, key: &str) -> Result<Vec<String>> {
-    let Some(raw) = value.get(key) else {
-        return Ok(Vec::new());
-    };
-    let Some(object) = raw.as_object() else {
-        return Err(TheurgyError::new(format!("product IR {key} must be an object")).into());
-    };
-    let mut keys = object.keys().cloned().collect::<Vec<_>>();
-    keys.sort();
-    Ok(keys)
 }
 
 fn object_shape(value: &Value, label: &str) -> Result<BTreeMap<String, String>> {

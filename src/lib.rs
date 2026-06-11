@@ -1,5 +1,5 @@
 pub mod product_runtime {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
     use std::error::Error;
     use std::fmt;
     use std::fs;
@@ -131,6 +131,44 @@ pub mod product_runtime {
         pub action_ids: Vec<String>,
         pub action_contracts: Vec<ProductActionContract>,
         pub actions: usize,
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct ProductIr {
+        pub app_id: String,
+        pub app_name: String,
+        pub targets: Vec<String>,
+        pub desktop_surface_ir: Option<String>,
+        pub mobile_surface_ir: Option<String>,
+        pub capabilities: Vec<String>,
+        pub permissions: Vec<String>,
+        pub domain_object_ids: Vec<String>,
+        pub state_snapshot_schema: String,
+        pub state_command: Vec<String>,
+        pub state_status_command: Vec<String>,
+        pub persistence_truth: String,
+        pub persistence_root_ids: Vec<String>,
+        pub background_jobs: Vec<BackgroundJob>,
+        pub background_job_ids: Vec<String>,
+        pub release_targets: Vec<ReleaseTarget>,
+        pub audit_keys: Vec<String>,
+        pub action_contracts: Vec<ProductActionContract>,
+        pub action_ids: Vec<String>,
+        pub actions: usize,
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct BackgroundJob {
+        pub id: String,
+        pub command: Vec<String>,
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct ReleaseTarget {
+        pub id: String,
+        pub target: String,
+        pub surface: String,
+        pub artifact: String,
     }
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -337,6 +375,91 @@ pub mod product_runtime {
         validate_runtime_manifest_value(&value)
     }
 
+    pub fn validate_product_ir_value(value: &Value) -> ContractResult<ProductIr> {
+        expect_value_string(value, "version", PRODUCT_IR_SCHEMA)?;
+        expect_value_string(value, "format", "json")?;
+        let app = value_object(value, "app")?;
+        let app_id = value_string(app, "id")
+            .filter(|id| valid_slug(id))
+            .ok_or_else(|| ContractError::new("product IR app.id must be a lowercase slug"))?;
+        let app_name = value_string(app, "name")
+            .filter(|name| !name.is_empty())
+            .ok_or_else(|| ContractError::new("product IR app.name required"))?;
+        let targets = value_string_array(app, "targets")?;
+        if targets.is_empty() {
+            return Err(ContractError::new("product IR app.targets required"));
+        }
+        for target in &targets {
+            if !matches!(target.as_str(), "macos" | "linux" | "ios" | "android") {
+                return Err(ContractError::new(
+                    "product IR target must be macos, linux, ios, or android",
+                ));
+            }
+        }
+        let capabilities =
+            optional_string_array(app, "capabilities", "product IR app.capabilities")?;
+        let permissions = optional_string_array(app, "permissions", "product IR app.permissions")?;
+        let (desktop_surface_ir, mobile_surface_ir) = product_surface_paths(value)?;
+        let domain_object_ids = optional_object_id_array(
+            value.get("domain").unwrap_or(&Value::Null),
+            "objects",
+            "product IR domain.objects",
+        )?;
+        let action_values = value_array(value, "actions")?;
+        if action_values.is_empty() {
+            return Err(ContractError::new("product IR actions required"));
+        }
+        let mut action_ids = Vec::new();
+        let mut action_contracts = Vec::new();
+        for action in action_values {
+            let contract = validate_product_action_contract(action)?;
+            action_ids.push(contract.id.clone());
+            action_contracts.push(contract);
+        }
+        let state = value_object(value, "state")?;
+        let state_snapshot_schema = value_string(state, "snapshotSchema")
+            .filter(|schema| !schema.is_empty())
+            .ok_or_else(|| ContractError::new("product IR state.snapshotSchema required"))?;
+        let state_command = optional_string_array(state, "command", "product IR state.command")?;
+        let state_status_command =
+            optional_string_array(state, "statusCommand", "product IR state.statusCommand")?;
+        let persistence_root_ids =
+            optional_object_id_array(state, "roots", "product IR state.roots")?;
+        let persistence_truth = validate_product_persistence(value)?;
+        let background_jobs =
+            validate_product_background_jobs(value, "backgroundJobs", "product IR backgroundJobs")?;
+        let background_job_ids = background_jobs.iter().map(|job| job.id.clone()).collect();
+        let release_targets = validate_product_release_targets(
+            value,
+            "releaseTargets",
+            "product IR releaseTargets",
+            &targets,
+        )?;
+        let audit_keys = optional_object_keys(value, "audit")?;
+        Ok(ProductIr {
+            app_id,
+            app_name,
+            targets,
+            desktop_surface_ir,
+            mobile_surface_ir,
+            capabilities,
+            permissions,
+            domain_object_ids,
+            state_snapshot_schema,
+            state_command,
+            state_status_command,
+            persistence_truth,
+            persistence_root_ids,
+            background_jobs,
+            background_job_ids,
+            release_targets,
+            audit_keys,
+            action_contracts,
+            actions: action_values.len(),
+            action_ids,
+        })
+    }
+
     pub fn validate_action_ir_value(value: &Value) -> ContractResult<ActionIr> {
         expect_value_string(value, "version", ACTION_IR_SCHEMA)?;
         let action_values = value_array(value, "actions")?;
@@ -426,6 +549,19 @@ pub mod product_runtime {
                 "legacyNativeDesktop",
                 "runtime manifest surfaces.legacyNativeDesktop",
             )?,
+        ))
+    }
+
+    fn product_surface_paths(value: &Value) -> ContractResult<(Option<String>, Option<String>)> {
+        let Some(surfaces) = value.get("surfaces") else {
+            return Ok((None, None));
+        };
+        if !surfaces.is_object() {
+            return Err(ContractError::new("product IR surfaces must be an object"));
+        }
+        Ok((
+            optional_nonempty_string(surfaces, "desktop", "product IR surfaces.desktop")?,
+            optional_nonempty_string(surfaces, "mobile", "product IR surfaces.mobile")?,
         ))
     }
 
@@ -574,6 +710,205 @@ pub mod product_runtime {
                     .ok_or_else(|| ContractError::new(format!("{label} must be boolean")))
             })
             .transpose()
+    }
+
+    fn optional_object_id_array(
+        value: &Value,
+        key: &str,
+        label: &str,
+    ) -> ContractResult<Vec<String>> {
+        let Some(raw) = value.get(key) else {
+            return Ok(Vec::new());
+        };
+        let Some(array) = raw.as_array() else {
+            return Err(ContractError::new(format!("{label} must be an array")));
+        };
+        let mut ids = Vec::new();
+        for item in array {
+            let Some(object) = item.as_object() else {
+                return Err(ContractError::new(format!("{label} must contain objects")));
+            };
+            let Some(id) = object
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|id| valid_action_id(id))
+            else {
+                return Err(ContractError::new(format!(
+                    "{label} object.id must be stable"
+                )));
+            };
+            ids.push(id.to_string());
+        }
+        Ok(ids)
+    }
+
+    fn validate_product_background_jobs(
+        value: &Value,
+        key: &str,
+        label: &str,
+    ) -> ContractResult<Vec<BackgroundJob>> {
+        let Some(raw) = value.get(key) else {
+            return Ok(Vec::new());
+        };
+        let Some(array) = raw.as_array() else {
+            return Err(ContractError::new(format!("{label} must be an array")));
+        };
+        let mut jobs = Vec::new();
+        for item in array {
+            let Some(object) = item.as_object() else {
+                return Err(ContractError::new(format!("{label} must contain objects")));
+            };
+            let id = required_stable_id(item, &format!("{label} object.id"))?;
+            required_nonempty_object_string(item, "label", &format!("{label} object.label"))?;
+            optional_nonempty_string(item, "state", &format!("{label} object.state"))?;
+            let command = if object.get("command").is_some() {
+                let command =
+                    optional_string_array(item, "command", &format!("{label} object.command"))?;
+                if command.is_empty() {
+                    return Err(ContractError::new(format!(
+                        "{label} object.command required"
+                    )));
+                }
+                command
+            } else {
+                Vec::new()
+            };
+            jobs.push(BackgroundJob { id, command });
+        }
+        Ok(jobs)
+    }
+
+    fn validate_product_release_targets(
+        value: &Value,
+        key: &str,
+        label: &str,
+        app_targets: &[String],
+    ) -> ContractResult<Vec<ReleaseTarget>> {
+        let raw = value
+            .get(key)
+            .ok_or_else(|| ContractError::new(format!("{label} required")))?;
+        let Some(array) = raw.as_array() else {
+            return Err(ContractError::new(format!("{label} must be an array")));
+        };
+        if array.is_empty() {
+            return Err(ContractError::new(format!("{label} required")));
+        }
+        let mut release_targets = Vec::new();
+        let mut ids = BTreeSet::new();
+        let mut target_names = BTreeSet::new();
+        for item in array {
+            let Some(_object) = item.as_object() else {
+                return Err(ContractError::new(format!("{label} must contain objects")));
+            };
+            let id = required_stable_id(item, &format!("{label} object.id"))?;
+            if !ids.insert(id.clone()) {
+                return Err(ContractError::new(format!(
+                    "{label} object.id duplicated: {id}"
+                )));
+            }
+            let target =
+                required_nonempty_object_string(item, "target", &format!("{label} object.target"))?;
+            if !matches!(target.as_str(), "macos" | "linux" | "ios" | "android") {
+                return Err(ContractError::new(format!(
+                    "{label} object.target must be macos, linux, ios, or android"
+                )));
+            }
+            if !app_targets.iter().any(|app_target| app_target == &target) {
+                return Err(ContractError::new(format!(
+                    "{label} object.target not declared in app.targets: {target}"
+                )));
+            }
+            if !target_names.insert(target.clone()) {
+                return Err(ContractError::new(format!(
+                    "{label} object.target duplicated: {target}"
+                )));
+            }
+            let surface = required_nonempty_object_string(
+                item,
+                "surface",
+                &format!("{label} object.surface"),
+            )?;
+            let expected_surface = if is_desktop_target(&target) {
+                "desktop"
+            } else {
+                "mobile"
+            };
+            if surface != expected_surface {
+                return Err(ContractError::new(format!(
+                    "{label} object.surface for {target} must be {expected_surface}"
+                )));
+            }
+            let artifact = required_nonempty_object_string(
+                item,
+                "artifact",
+                &format!("{label} object.artifact"),
+            )?;
+            release_targets.push(ReleaseTarget {
+                id,
+                target,
+                surface,
+                artifact,
+            });
+        }
+        for app_target in app_targets {
+            if !target_names.contains(app_target) {
+                return Err(ContractError::new(format!(
+                    "{label} missing release target for app target: {app_target}"
+                )));
+            }
+        }
+        Ok(release_targets)
+    }
+
+    fn validate_product_persistence(value: &Value) -> ContractResult<String> {
+        let Some(raw) = value.get("persistence") else {
+            return Ok("file-first".to_string());
+        };
+        let Some(_object) = raw.as_object() else {
+            return Err(ContractError::new(
+                "product IR persistence must be an object",
+            ));
+        };
+        let truth = required_nonempty_object_string(raw, "truth", "product IR persistence.truth")?;
+        optional_nonempty_string(raw, "database", "product IR persistence.database")?;
+        optional_nonempty_string(raw, "history", "product IR persistence.history")?;
+        Ok(truth)
+    }
+
+    fn required_stable_id(value: &Value, label: &str) -> ContractResult<String> {
+        value
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| valid_action_id(id))
+            .map(String::from)
+            .ok_or_else(|| ContractError::new(format!("{label} must be stable")))
+    }
+
+    fn required_nonempty_object_string(
+        value: &Value,
+        key: &str,
+        label: &str,
+    ) -> ContractResult<String> {
+        value
+            .get(key)
+            .and_then(Value::as_str)
+            .filter(|text| !text.is_empty())
+            .map(String::from)
+            .ok_or_else(|| ContractError::new(format!("{label} required")))
+    }
+
+    fn optional_object_keys(value: &Value, key: &str) -> ContractResult<Vec<String>> {
+        let Some(raw) = value.get(key) else {
+            return Ok(Vec::new());
+        };
+        let Some(object) = raw.as_object() else {
+            return Err(ContractError::new(format!(
+                "product IR {key} must be an object"
+            )));
+        };
+        let mut keys = object.keys().cloned().collect::<Vec<_>>();
+        keys.sort();
+        Ok(keys)
     }
 
     fn object_shape(value: &Value, label: &str) -> ContractResult<BTreeMap<String, String>> {
@@ -1004,6 +1339,143 @@ mod tests {
         assert_eq!(
             error,
             "product IR action.input.deployment unsupported shape type: String"
+        );
+    }
+
+    #[test]
+    fn product_runtime_validates_product_ir_contract() {
+        let product = serde_json::json!({
+            "version": product_runtime::PRODUCT_IR_SCHEMA,
+            "format": "json",
+            "app": {
+                "id": "deployments",
+                "name": "Deployments",
+                "targets": ["macos", "linux", "ios", "android"],
+                "capabilities": ["native-desktop", "typed-runtime-actions"],
+                "permissions": ["files", "network"]
+            },
+            "surfaces": {
+                "desktop": "app-blueprint/desktop.surface.ir.json",
+                "mobile": "app-blueprint/mobile.surface.ir.json"
+            },
+            "domain": {
+                "objects": [
+                    {"id": "server", "label": "Server"},
+                    {"id": "deployment", "label": "Deployment"}
+                ]
+            },
+            "actions": [
+                {
+                    "id": "refresh_state",
+                    "label": "Refresh",
+                    "input": {},
+                    "output": {"state": "object"},
+                    "effect": "read",
+                    "failure": {},
+                    "safe": true,
+                    "mutating": false,
+                    "longRunning": false,
+                    "privileged": false
+                }
+            ],
+            "state": {
+                "snapshotSchema": "deployments-state/v1",
+                "command": ["deployments-core", "runtime-state"],
+                "statusCommand": ["deployments-core", "runtime-status"],
+                "roots": [{"id": "headquarters-workspace", "kind": "xdg-state"}]
+            },
+            "persistence": {
+                "truth": "headquarters-compatible-file-first"
+            },
+            "backgroundJobs": [
+                {
+                    "id": "server-scoped-check-and-push-queue",
+                    "label": "Server Queue",
+                    "state": "server.queue_mode",
+                    "command": ["deployments-daemon"]
+                }
+            ],
+            "releaseTargets": [
+                {"id": "macos-native", "target": "macos", "surface": "desktop", "artifact": "generated/macos"},
+                {"id": "linux-native", "target": "linux", "surface": "desktop", "artifact": "generated/linux"},
+                {"id": "ios-native", "target": "ios", "surface": "mobile", "artifact": "generated/mobile/ios"},
+                {"id": "android-native", "target": "android", "surface": "mobile", "artifact": "generated/mobile/android"}
+            ],
+            "audit": {
+                "operationHistory": true,
+                "cliParity": true
+            }
+        });
+        let product = product_runtime::validate_product_ir_value(&product).unwrap();
+        assert_eq!(product.app_id, "deployments");
+        assert_eq!(product.targets, vec!["macos", "linux", "ios", "android"]);
+        assert_eq!(
+            product.desktop_surface_ir.as_deref(),
+            Some("app-blueprint/desktop.surface.ir.json")
+        );
+        assert_eq!(
+            product.mobile_surface_ir.as_deref(),
+            Some("app-blueprint/mobile.surface.ir.json")
+        );
+        assert_eq!(product.domain_object_ids, vec!["server", "deployment"]);
+        assert_eq!(
+            product.state_snapshot_schema,
+            "deployments-state/v1".to_string()
+        );
+        assert_eq!(
+            product.persistence_truth,
+            "headquarters-compatible-file-first".to_string()
+        );
+        assert_eq!(
+            product.background_job_ids,
+            vec!["server-scoped-check-and-push-queue".to_string()]
+        );
+        assert_eq!(
+            product
+                .release_targets
+                .iter()
+                .map(|target| target.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "macos-native",
+                "linux-native",
+                "ios-native",
+                "android-native"
+            ]
+        );
+        assert_eq!(product.audit_keys, vec!["cliParity", "operationHistory"]);
+
+        let invalid = serde_json::json!({
+            "version": product_runtime::PRODUCT_IR_SCHEMA,
+            "format": "json",
+            "app": {
+                "id": "deployments",
+                "name": "Deployments",
+                "targets": ["macos", "linux"]
+            },
+            "actions": [{
+                "id": "refresh_state",
+                "label": "Refresh",
+                "input": {},
+                "output": {},
+                "effect": "read",
+                "failure": {},
+                "safe": true,
+                "mutating": false,
+                "longRunning": false,
+                "privileged": false
+            }],
+            "state": {"snapshotSchema": "deployments-state/v1"},
+            "releaseTargets": [
+                {"id": "macos-native", "target": "macos", "surface": "desktop", "artifact": "generated/macos"}
+            ]
+        });
+        let error = product_runtime::validate_product_ir_value(&invalid)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            "product IR releaseTargets missing release target for app target: linux"
         );
     }
 }
