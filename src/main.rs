@@ -380,6 +380,7 @@ struct RuntimeContract {
     app_id: String,
     protocol: String,
     state_command: Vec<String>,
+    status_command: Vec<String>,
     action_command: Vec<String>,
     history_command: Vec<String>,
     daemon_command: Vec<String>,
@@ -420,6 +421,7 @@ fn runtime_contract_from_manifest(text: &str) -> Result<RuntimeContract> {
         app_id: summary.app_id,
         protocol: summary.protocol,
         state_command: json_string_array(runtime, "stateCommand")?,
+        status_command: json_string_array(runtime, "statusCommand").unwrap_or_default(),
         action_command: json_string_array(runtime, "actionCommand")?,
         history_command: json_string_array(runtime, "historyCommand").unwrap_or_default(),
         daemon_command: json_string_array(runtime, "daemonCommand").unwrap_or_default(),
@@ -803,6 +805,7 @@ fn compile_native(product: &str, target: &str, out_dir: &Path) -> Result<()> {
             format!("{}-core", summary.app_id),
             "runtime-state".to_string(),
         ],
+        status_command: Vec::new(),
         action_command: vec![
             format!("{}-core", summary.app_id),
             "runtime-action".to_string(),
@@ -849,11 +852,17 @@ fn generated_runtime_metadata(runtime: &RuntimeContract, target: &str) -> String
             "  \"stateCommand\": {},",
             json_string_array_literal(&runtime.state_command)
         ),
-        format!(
-            "  \"actionCommand\": {},",
-            json_string_array_literal(&runtime.action_command)
-        ),
     ];
+    if !runtime.status_command.is_empty() {
+        lines.push(format!(
+            "  \"statusCommand\": {},",
+            json_string_array_literal(&runtime.status_command)
+        ));
+    }
+    lines.extend([format!(
+        "  \"actionCommand\": {},",
+        json_string_array_literal(&runtime.action_command)
+    )]);
     if !runtime.history_command.is_empty() {
         lines.push(format!(
             "  \"historyCommand\": {},",
@@ -1683,6 +1692,7 @@ mod tests {
         let runtime = fs::read_to_string(out.join("theurgy-runtime.json")).unwrap();
         assert!(runtime.contains("\"protocol\": \"deployments-runtime/v1\""));
         assert!(runtime.contains("\"stateCommand\": [\"custom-core\", \"state\"]"));
+        assert!(runtime.contains("\"statusCommand\": [\"custom-core\", \"status\"]"));
         assert!(runtime.contains("\"historyCommand\": [\"custom-core\", \"history\"]"));
         let main_c = fs::read_to_string(out.join("src/main.c")).unwrap();
         assert!(main_c.contains("\"custom-core\""));
@@ -1730,7 +1740,7 @@ mod tests {
     }
 
     fn sample_runtime_manifest() -> String {
-        "{\n  \"version\": \"theurgy-runtime-manifest/v1\",\n  \"app\": \"deployments\",\n  \"productIr\": \"app-blueprint/product.ir.json\",\n  \"runtime\": {\n    \"stateCommand\": [\"custom-core\", \"state\"],\n    \"actionCommand\": [\"custom-core\", \"action\"],\n    \"historyCommand\": [\"custom-core\", \"history\"],\n    \"protocol\": \"deployments-runtime/v1\"\n  },\n  \"surfaces\": {\n    \"desktop\": \"app-blueprint/desktop.surface.ir.json\"\n  }\n}".to_string()
+        "{\n  \"version\": \"theurgy-runtime-manifest/v1\",\n  \"app\": \"deployments\",\n  \"productIr\": \"app-blueprint/product.ir.json\",\n  \"runtime\": {\n    \"stateCommand\": [\"custom-core\", \"state\"],\n    \"statusCommand\": [\"custom-core\", \"status\"],\n    \"actionCommand\": [\"custom-core\", \"action\"],\n    \"historyCommand\": [\"custom-core\", \"history\"],\n    \"protocol\": \"deployments-runtime/v1\"\n  },\n  \"surfaces\": {\n    \"desktop\": \"app-blueprint/desktop.surface.ir.json\"\n  }\n}".to_string()
     }
 
     fn sample_desktop_surface() -> String {
