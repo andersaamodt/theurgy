@@ -69,6 +69,32 @@
     },
     "surfaceRoles": { "$ref": "#/$defs/stringList" }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "target": { "enum": ["macos", "linux"] } },
+        "required": ["target"]
+      },
+      "then": {
+        "properties": {
+          "surfaceSchema": { "const": "theurgy-desktop-surface-ir/v1" },
+          "surfaceTarget": { "enum": ["desktop", "macos", "linux"] }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "target": { "enum": ["ios", "android"] } },
+        "required": ["target"]
+      },
+      "then": {
+        "properties": {
+          "surfaceSchema": { "const": "theurgy-mobile-surface-ir/v1" },
+          "surfaceTarget": { "enum": ["mobile", "ios", "android"] }
+        }
+      }
+    }
+  ],
   "$defs": {
     "command": {
       "type": "array",

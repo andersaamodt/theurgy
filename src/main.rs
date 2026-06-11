@@ -4922,6 +4922,18 @@ mod tests {
         );
         assert_eq!(
             schema
+                .pointer("/allOf/0/then/properties/surfaceSchema/const")
+                .and_then(Value::as_str),
+            Some("theurgy-desktop-surface-ir/v1")
+        );
+        assert_eq!(
+            schema
+                .pointer("/allOf/1/then/properties/surfaceSchema/const")
+                .and_then(Value::as_str),
+            Some("theurgy-mobile-surface-ir/v1")
+        );
+        assert_eq!(
+            schema
                 .pointer("/$defs/actionContract/properties/inputShape/$ref")
                 .and_then(Value::as_str),
             Some("#/$defs/shape")
