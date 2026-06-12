@@ -109,6 +109,24 @@ pub mod product_runtime {
     }
 
     #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct RuntimeBridge {
+        pub app_id: String,
+        pub protocol: String,
+        pub product_ir: String,
+        pub runtime_manifest: String,
+        pub source_surface_ir: String,
+        pub legacy_native_desktop_ir: Option<String>,
+        pub compatibility: RuntimeCompatibility,
+        pub state_command: Vec<String>,
+        pub status_command: Vec<String>,
+        pub subscribe_status_command: Vec<String>,
+        pub operation_status_command: Vec<String>,
+        pub action_command: Vec<String>,
+        pub history_command: Vec<String>,
+        pub daemon_command: Vec<String>,
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
     pub struct GeneratedRuntime {
         pub app_id: String,
         pub target: String,
@@ -1034,6 +1052,208 @@ pub mod product_runtime {
         Ok(surface)
     }
 
+    pub fn generated_runtime_metadata(
+        product: &ProductIr,
+        runtime: &RuntimeBridge,
+        target: &str,
+        surface: &SurfaceIr,
+    ) -> ContractResult<String> {
+        let release_target = release_target_for_target(product, target).ok_or_else(|| {
+            ContractError::new(format!(
+                "product IR release target missing for target: {target}"
+            ))
+        })?;
+        let mut object = serde_json::Map::new();
+        object.insert(
+            "version".to_string(),
+            Value::String(GENERATED_RUNTIME_SCHEMA.to_string()),
+        );
+        object.insert("app".to_string(), Value::String(runtime.app_id.clone()));
+        object.insert("target".to_string(), Value::String(target.to_string()));
+        object.insert(
+            "productIr".to_string(),
+            Value::String(runtime.product_ir.clone()),
+        );
+        object.insert(
+            "runtimeManifest".to_string(),
+            Value::String(runtime.runtime_manifest.clone()),
+        );
+        object.insert(
+            "sourceSurfaceIr".to_string(),
+            Value::String(runtime.source_surface_ir.clone()),
+        );
+        if let Some(legacy_native_desktop_ir) = &runtime.legacy_native_desktop_ir {
+            object.insert(
+                "legacyNativeDesktopIr".to_string(),
+                Value::String(legacy_native_desktop_ir.clone()),
+            );
+        }
+        object.insert(
+            "compatibilityWizardryAppsShellFirstStillSupported".to_string(),
+            Value::Bool(
+                runtime
+                    .compatibility
+                    .wizardry_apps_shell_first_still_supported,
+            ),
+        );
+        object.insert(
+            "compatibilityTheurgyRequiredForLegacyWizardryApps".to_string(),
+            Value::Bool(
+                runtime
+                    .compatibility
+                    .theurgy_required_for_legacy_wizardry_apps,
+            ),
+        );
+        object.insert(
+            "productTargets".to_string(),
+            string_vec_value(&product.targets),
+        );
+        object.insert(
+            "productActions".to_string(),
+            string_vec_value(&product.action_ids),
+        );
+        object.insert(
+            "productActionContracts".to_string(),
+            action_contracts_value(&product.action_contracts),
+        );
+        object.insert(
+            "productCapabilities".to_string(),
+            string_vec_value(&product.capabilities),
+        );
+        object.insert(
+            "productPermissions".to_string(),
+            string_vec_value(&product.permissions),
+        );
+        object.insert(
+            "productDomainObjects".to_string(),
+            string_vec_value(&product.domain_object_ids),
+        );
+        object.insert(
+            "productStateSnapshotSchema".to_string(),
+            Value::String(product.state_snapshot_schema.clone()),
+        );
+        object.insert(
+            "productPersistenceRoots".to_string(),
+            string_vec_value(&product.persistence_root_ids),
+        );
+        object.insert(
+            "productPersistenceTruth".to_string(),
+            Value::String(product.persistence_truth.clone()),
+        );
+        object.insert(
+            "adapterRuntimeTransport".to_string(),
+            Value::String(adapter_runtime_transport(target).to_string()),
+        );
+        object.insert(
+            "productBackgroundJobs".to_string(),
+            string_vec_value(&product.background_job_ids),
+        );
+        object.insert(
+            "productReleaseTargets".to_string(),
+            string_vec_value(&release_target_ids(product)),
+        );
+        object.insert(
+            "targetReleaseTarget".to_string(),
+            Value::String(release_target.id.clone()),
+        );
+        object.insert(
+            "targetReleaseArtifact".to_string(),
+            Value::String(release_target.artifact.clone()),
+        );
+        object.insert(
+            "productAuditKeys".to_string(),
+            string_vec_value(&product.audit_keys),
+        );
+        object.insert(
+            "protocol".to_string(),
+            Value::String(runtime.protocol.clone()),
+        );
+        object.insert(
+            "runtimeStatusSchema".to_string(),
+            Value::String(RUNTIME_STATUS_SCHEMA.to_string()),
+        );
+        object.insert(
+            "runtimeActionRequestSchema".to_string(),
+            Value::String(RUNTIME_ACTION_REQUEST_SCHEMA.to_string()),
+        );
+        object.insert(
+            "runtimeActionResultSchema".to_string(),
+            Value::String(RUNTIME_ACTION_RESULT_SCHEMA.to_string()),
+        );
+        object.insert(
+            "operationStatusSchema".to_string(),
+            Value::String(OPERATION_STATUS_SCHEMA.to_string()),
+        );
+        object.insert(
+            "operationHistorySchema".to_string(),
+            Value::String(OPERATION_HISTORY_SCHEMA.to_string()),
+        );
+        object.insert(
+            "stateCommand".to_string(),
+            string_vec_value(&runtime.state_command),
+        );
+        if !runtime.status_command.is_empty() {
+            object.insert(
+                "statusCommand".to_string(),
+                string_vec_value(&runtime.status_command),
+            );
+        }
+        if !runtime.operation_status_command.is_empty() {
+            object.insert(
+                "operationStatusCommand".to_string(),
+                string_vec_value(&runtime.operation_status_command),
+            );
+        }
+        object.insert(
+            "subscribeStatusCommand".to_string(),
+            string_vec_value(&effective_subscribe_status_command(runtime)),
+        );
+        object.insert(
+            "actionCommand".to_string(),
+            string_vec_value(&runtime.action_command),
+        );
+        if !runtime.history_command.is_empty() {
+            object.insert(
+                "historyCommand".to_string(),
+                string_vec_value(&runtime.history_command),
+            );
+        }
+        if !runtime.daemon_command.is_empty() {
+            object.insert(
+                "daemonCommand".to_string(),
+                string_vec_value(&runtime.daemon_command),
+            );
+        }
+        object.insert(
+            "surface".to_string(),
+            Value::String("theurgy-surface.json".to_string()),
+        );
+        object.insert(
+            "surfaceSchema".to_string(),
+            Value::String(surface.schema.clone()),
+        );
+        object.insert(
+            "surfaceTarget".to_string(),
+            Value::String(surface.target.clone()),
+        );
+        object.insert(
+            "surfaceActions".to_string(),
+            string_vec_value(&surface.action_ids),
+        );
+        object.insert(
+            "surfaceActionContracts".to_string(),
+            action_contracts_value(&surface_action_contracts(product, surface)),
+        );
+        object.insert("surfaceRoles".to_string(), string_vec_value(&surface.roles));
+        let metadata = Value::Object(object);
+        validate_generated_runtime_value(&metadata)?;
+        serde_json::to_string_pretty(&metadata)
+            .map(|json| format!("{json}\n"))
+            .map_err(|error| {
+                ContractError::new(format!("could not serialize generated runtime: {error}"))
+            })
+    }
+
     pub fn validate_action_ir_value(value: &Value) -> ContractResult<ActionIr> {
         expect_value_string(value, "version", ACTION_IR_SCHEMA)?;
         let action_values = value_array(value, "actions")?;
@@ -1250,6 +1470,108 @@ pub mod product_runtime {
             "json" => true,
             _ => false,
         }
+    }
+
+    fn release_target_ids(product: &ProductIr) -> Vec<String> {
+        product
+            .release_targets
+            .iter()
+            .map(|release_target| release_target.id.clone())
+            .collect()
+    }
+
+    fn release_target_for_target<'a>(
+        product: &'a ProductIr,
+        target: &str,
+    ) -> Option<&'a ReleaseTarget> {
+        product
+            .release_targets
+            .iter()
+            .find(|release_target| release_target.target == target)
+    }
+
+    fn effective_subscribe_status_command(runtime: &RuntimeBridge) -> Vec<String> {
+        if !runtime.subscribe_status_command.is_empty() {
+            return runtime.subscribe_status_command.clone();
+        }
+        if !runtime.status_command.is_empty() {
+            return runtime.status_command.clone();
+        }
+        vec![
+            "theurgy-runtime".to_string(),
+            "subscribe-status".to_string(),
+            "--manifest".to_string(),
+            "theurgy-runtime.json".to_string(),
+            "--once".to_string(),
+        ]
+    }
+
+    fn surface_action_contracts(
+        product: &ProductIr,
+        surface: &SurfaceIr,
+    ) -> Vec<ProductActionContract> {
+        surface
+            .action_ids
+            .iter()
+            .filter_map(|action_id| {
+                product
+                    .action_contracts
+                    .iter()
+                    .find(|contract| &contract.id == action_id)
+                    .cloned()
+            })
+            .collect()
+    }
+
+    fn action_contracts_value(contracts: &[ProductActionContract]) -> Value {
+        Value::Array(
+            contracts
+                .iter()
+                .map(|contract| {
+                    let mut object = serde_json::Map::new();
+                    object.insert("id".to_string(), Value::String(contract.id.clone()));
+                    object.insert("label".to_string(), Value::String(contract.label.clone()));
+                    object.insert("effect".to_string(), Value::String(contract.effect.clone()));
+                    object.insert("safe".to_string(), Value::Bool(contract.safe));
+                    object.insert("mutating".to_string(), Value::Bool(contract.mutating));
+                    object.insert(
+                        "longRunning".to_string(),
+                        Value::Bool(contract.long_running),
+                    );
+                    object.insert("privileged".to_string(), Value::Bool(contract.privileged));
+                    object.insert(
+                        "inputKeys".to_string(),
+                        string_vec_value(&contract.input_keys),
+                    );
+                    object.insert(
+                        "outputKeys".to_string(),
+                        string_vec_value(&contract.output_keys),
+                    );
+                    object.insert(
+                        "failureKeys".to_string(),
+                        string_vec_value(&contract.failure_keys),
+                    );
+                    object.insert("inputShape".to_string(), shape_value(&contract.input_shape));
+                    object.insert(
+                        "outputShape".to_string(),
+                        shape_value(&contract.output_shape),
+                    );
+                    object.insert(
+                        "failureShape".to_string(),
+                        shape_value(&contract.failure_shape),
+                    );
+                    Value::Object(object)
+                })
+                .collect(),
+        )
+    }
+
+    fn shape_value(shape: &BTreeMap<String, String>) -> Value {
+        let mut object = serde_json::Map::new();
+        for (key, type_name) in shape {
+            object.insert(key.clone(), Value::String(type_name.clone()));
+        }
+        Value::Object(object)
     }
 
     fn expect_value_string(value: &Value, key: &str, expected: &str) -> ContractResult<()> {
@@ -2539,5 +2861,82 @@ mod tests {
             error,
             "runtime action failure type mismatch for publish_changes.error: expected string"
         );
+    }
+
+    #[test]
+    fn product_runtime_builds_generated_runtime_metadata() {
+        let product = serde_json::json!({
+            "version": product_runtime::PRODUCT_IR_SCHEMA,
+            "format": "json",
+            "app": {
+                "id": "deployments",
+                "name": "Deployments",
+                "targets": ["macos"],
+                "capabilities": ["native-desktop"],
+                "permissions": ["files"]
+            },
+            "domain": {
+                "objects": [{"id": "deployment", "label": "Deployment"}]
+            },
+            "actions": [{
+                "id": "refresh_state",
+                "label": "Refresh",
+                "input": {},
+                "output": {"params": "object"},
+                "effect": "read",
+                "failure": {},
+                "safe": true,
+                "mutating": false,
+                "longRunning": false,
+                "privileged": false
+            }],
+            "state": {
+                "snapshotSchema": "deployments-state/v1",
+                "roots": [{"id": "headquarters-workspace", "kind": "xdg-state"}]
+            },
+            "releaseTargets": [
+                {"id": "macos-app", "target": "macos", "surface": "desktop", "artifact": "generated/macos"}
+            ],
+            "persistence": {"truth": "file-first"},
+            "audit": {"cliParity": true}
+        });
+        let product = product_runtime::validate_product_ir_value(&product).unwrap();
+        let surface = product_runtime::project_surface_from_product(&product, "macos").unwrap();
+        let surface = product_runtime::validate_surface_ir_value(&surface).unwrap();
+        let runtime = product_runtime::RuntimeBridge {
+            app_id: "deployments".to_string(),
+            protocol: product_runtime::RUNTIME_ACTION_PROTOCOL.to_string(),
+            product_ir: "app-blueprint/product.ir.json".to_string(),
+            runtime_manifest: "app-blueprint/runtime.manifest.json".to_string(),
+            source_surface_ir: "app-blueprint/desktop.surface.ir.json".to_string(),
+            legacy_native_desktop_ir: Some("app-blueprint/app.ir.yaml".to_string()),
+            compatibility: product_runtime::RuntimeCompatibility::shell_first_default(),
+            state_command: vec!["deployments-core".to_string(), "runtime-state".to_string()],
+            status_command: vec!["deployments-core".to_string(), "runtime-status".to_string()],
+            subscribe_status_command: Vec::new(),
+            operation_status_command: vec![
+                "deployments-core".to_string(),
+                "runtime-operation-status".to_string(),
+            ],
+            action_command: vec!["deployments-core".to_string(), "runtime-action".to_string()],
+            history_command: vec![
+                "deployments-core".to_string(),
+                "runtime-history".to_string(),
+            ],
+            daemon_command: Vec::new(),
+        };
+
+        let metadata =
+            product_runtime::generated_runtime_metadata(&product, &runtime, "macos", &surface)
+                .unwrap();
+        let summary = product_runtime::validate_generated_runtime_text(&metadata).unwrap();
+        assert_eq!(summary.release_target, "macos-app");
+        assert_eq!(summary.release_artifact, "generated/macos");
+        assert_eq!(
+            summary.adapter_runtime_transport,
+            product_runtime::DESKTOP_ADAPTER_TRANSPORT
+        );
+        assert_eq!(summary.surface_actions, 1);
+        assert!(metadata.contains("\"legacyNativeDesktopIr\": \"app-blueprint/app.ir.yaml\""));
     }
 }

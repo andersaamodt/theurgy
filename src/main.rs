@@ -1914,6 +1914,83 @@ fn product_action_contracts_from_cli(
         .collect()
 }
 
+fn product_ir_from_summary(summary: &ProductSummary) -> product_runtime::ProductIr {
+    product_runtime::ProductIr {
+        app_id: summary.app_id.clone(),
+        app_name: summary.app_name.clone(),
+        targets: summary.targets.clone(),
+        desktop_surface_ir: summary.desktop_surface_ir.clone(),
+        mobile_surface_ir: summary.mobile_surface_ir.clone(),
+        capabilities: summary.capabilities.clone(),
+        permissions: summary.permissions.clone(),
+        domain_object_ids: summary.domain_object_ids.clone(),
+        state_snapshot_schema: summary.state_snapshot_schema.clone(),
+        state_command: summary.state_command.clone(),
+        state_status_command: summary.state_status_command.clone(),
+        persistence_truth: summary.persistence_truth.clone(),
+        persistence_root_ids: summary.persistence_root_ids.clone(),
+        background_jobs: summary
+            .background_jobs
+            .iter()
+            .map(|job| product_runtime::BackgroundJob {
+                id: job.id.clone(),
+                command: job.command.clone(),
+            })
+            .collect(),
+        background_job_ids: summary.background_job_ids.clone(),
+        release_targets: summary
+            .release_targets
+            .iter()
+            .map(|target| product_runtime::ReleaseTarget {
+                id: target.id.clone(),
+                target: target.target.clone(),
+                surface: target.surface.clone(),
+                artifact: target.artifact.clone(),
+            })
+            .collect(),
+        audit_keys: summary.audit_keys.clone(),
+        action_contracts: product_action_contracts_from_cli(&summary.action_contracts),
+        action_ids: summary.action_ids.clone(),
+        actions: summary.actions,
+    }
+}
+
+fn surface_ir_from_summary(surface: &SurfaceSummary) -> product_runtime::SurfaceIr {
+    product_runtime::SurfaceIr {
+        schema: surface.schema.clone(),
+        product: surface.product.clone(),
+        target: surface.target.clone(),
+        action_ids: surface.action_ids.clone(),
+        roles: surface.roles.clone(),
+    }
+}
+
+fn runtime_bridge_from_contract(runtime: &RuntimeContract) -> product_runtime::RuntimeBridge {
+    product_runtime::RuntimeBridge {
+        app_id: runtime.app_id.clone(),
+        protocol: runtime.protocol.clone(),
+        product_ir: runtime.product_ir.clone(),
+        runtime_manifest: runtime.runtime_manifest.clone(),
+        source_surface_ir: runtime.source_surface_ir.clone(),
+        legacy_native_desktop_ir: runtime.legacy_native_desktop_ir.clone(),
+        compatibility: product_runtime::RuntimeCompatibility {
+            wizardry_apps_shell_first_still_supported: runtime
+                .compatibility
+                .wizardry_apps_shell_first_still_supported,
+            theurgy_required_for_legacy_wizardry_apps: runtime
+                .compatibility
+                .theurgy_required_for_legacy_wizardry_apps,
+        },
+        state_command: runtime.state_command.clone(),
+        status_command: runtime.status_command.clone(),
+        subscribe_status_command: runtime.subscribe_status_command.clone(),
+        operation_status_command: runtime.operation_status_command.clone(),
+        action_command: runtime.action_command.clone(),
+        history_command: runtime.history_command.clone(),
+        daemon_command: runtime.daemon_command.clone(),
+    }
+}
+
 fn validate_runtime_manifest_value(value: &Value) -> Result<RuntimeManifestSummary> {
     let manifest = product_runtime::validate_runtime_manifest_value(value)?;
     Ok(runtime_manifest_summary_from_library(manifest))
@@ -2350,194 +2427,13 @@ fn generated_runtime_metadata(
     target: &str,
     surface: &SurfaceSummary,
 ) -> String {
-    let release_target = release_target_for_target(summary, target)
-        .expect("validated product summary includes compile target release target");
-    let mut object = serde_json::Map::new();
-    object.insert(
-        "version".to_string(),
-        Value::String(product_runtime::GENERATED_RUNTIME_SCHEMA.to_string()),
-    );
-    object.insert("app".to_string(), Value::String(runtime.app_id.clone()));
-    object.insert("target".to_string(), Value::String(target.to_string()));
-    object.insert(
-        "productIr".to_string(),
-        Value::String(runtime.product_ir.clone()),
-    );
-    object.insert(
-        "runtimeManifest".to_string(),
-        Value::String(runtime.runtime_manifest.clone()),
-    );
-    object.insert(
-        "sourceSurfaceIr".to_string(),
-        Value::String(runtime.source_surface_ir.clone()),
-    );
-    if let Some(legacy_native_desktop_ir) = &runtime.legacy_native_desktop_ir {
-        object.insert(
-            "legacyNativeDesktopIr".to_string(),
-            Value::String(legacy_native_desktop_ir.clone()),
-        );
-    }
-    object.insert(
-        "compatibilityWizardryAppsShellFirstStillSupported".to_string(),
-        Value::Bool(
-            runtime
-                .compatibility
-                .wizardry_apps_shell_first_still_supported,
-        ),
-    );
-    object.insert(
-        "compatibilityTheurgyRequiredForLegacyWizardryApps".to_string(),
-        Value::Bool(
-            runtime
-                .compatibility
-                .theurgy_required_for_legacy_wizardry_apps,
-        ),
-    );
-    object.insert(
-        "productTargets".to_string(),
-        string_vec_value(&summary.targets),
-    );
-    object.insert(
-        "productActions".to_string(),
-        string_vec_value(&summary.action_ids),
-    );
-    object.insert(
-        "productActionContracts".to_string(),
-        action_contracts_value(&summary.action_contracts),
-    );
-    object.insert(
-        "productCapabilities".to_string(),
-        string_vec_value(&summary.capabilities),
-    );
-    object.insert(
-        "productPermissions".to_string(),
-        string_vec_value(&summary.permissions),
-    );
-    object.insert(
-        "productDomainObjects".to_string(),
-        string_vec_value(&summary.domain_object_ids),
-    );
-    object.insert(
-        "productStateSnapshotSchema".to_string(),
-        Value::String(summary.state_snapshot_schema.clone()),
-    );
-    object.insert(
-        "productPersistenceRoots".to_string(),
-        string_vec_value(&summary.persistence_root_ids),
-    );
-    object.insert(
-        "productPersistenceTruth".to_string(),
-        Value::String(summary.persistence_truth.clone()),
-    );
-    object.insert(
-        "adapterRuntimeTransport".to_string(),
-        Value::String(product_runtime::adapter_runtime_transport(target).to_string()),
-    );
-    object.insert(
-        "productBackgroundJobs".to_string(),
-        string_vec_value(&summary.background_job_ids),
-    );
-    object.insert(
-        "productReleaseTargets".to_string(),
-        string_vec_value(&release_target_ids(summary)),
-    );
-    object.insert(
-        "targetReleaseTarget".to_string(),
-        Value::String(release_target.id.clone()),
-    );
-    object.insert(
-        "targetReleaseArtifact".to_string(),
-        Value::String(release_target.artifact.clone()),
-    );
-    object.insert(
-        "productAuditKeys".to_string(),
-        string_vec_value(&summary.audit_keys),
-    );
-    object.insert(
-        "protocol".to_string(),
-        Value::String(runtime.protocol.clone()),
-    );
-    object.insert(
-        "runtimeStatusSchema".to_string(),
-        Value::String(product_runtime::RUNTIME_STATUS_SCHEMA.to_string()),
-    );
-    object.insert(
-        "runtimeActionRequestSchema".to_string(),
-        Value::String(product_runtime::RUNTIME_ACTION_REQUEST_SCHEMA.to_string()),
-    );
-    object.insert(
-        "runtimeActionResultSchema".to_string(),
-        Value::String(product_runtime::RUNTIME_ACTION_RESULT_SCHEMA.to_string()),
-    );
-    object.insert(
-        "operationStatusSchema".to_string(),
-        Value::String(product_runtime::OPERATION_STATUS_SCHEMA.to_string()),
-    );
-    object.insert(
-        "operationHistorySchema".to_string(),
-        Value::String(product_runtime::OPERATION_HISTORY_SCHEMA.to_string()),
-    );
-    object.insert(
-        "stateCommand".to_string(),
-        string_vec_value(&runtime.state_command),
-    );
-    if !runtime.status_command.is_empty() {
-        object.insert(
-            "statusCommand".to_string(),
-            string_vec_value(&runtime.status_command),
-        );
-    }
-    if !runtime.operation_status_command.is_empty() {
-        object.insert(
-            "operationStatusCommand".to_string(),
-            string_vec_value(&runtime.operation_status_command),
-        );
-    }
-    object.insert(
-        "subscribeStatusCommand".to_string(),
-        string_vec_value(&effective_subscribe_status_command(runtime)),
-    );
-    object.insert(
-        "actionCommand".to_string(),
-        string_vec_value(&runtime.action_command),
-    );
-    if !runtime.history_command.is_empty() {
-        object.insert(
-            "historyCommand".to_string(),
-            string_vec_value(&runtime.history_command),
-        );
-    }
-    if !runtime.daemon_command.is_empty() {
-        object.insert(
-            "daemonCommand".to_string(),
-            string_vec_value(&runtime.daemon_command),
-        );
-    }
-    object.insert(
-        "surface".to_string(),
-        Value::String("theurgy-surface.json".to_string()),
-    );
-    object.insert(
-        "surfaceSchema".to_string(),
-        Value::String(surface.schema.clone()),
-    );
-    object.insert(
-        "surfaceTarget".to_string(),
-        Value::String(surface.target.clone()),
-    );
-    object.insert(
-        "surfaceActions".to_string(),
-        string_vec_value(&surface.action_ids),
-    );
-    object.insert(
-        "surfaceActionContracts".to_string(),
-        action_contracts_value(&surface_action_contracts(summary, surface)),
-    );
-    object.insert("surfaceRoles".to_string(), string_vec_value(&surface.roles));
-    format!(
-        "{}\n",
-        serde_json::to_string_pretty(&Value::Object(object)).expect("runtime metadata serializes")
+    product_runtime::generated_runtime_metadata(
+        &product_ir_from_summary(summary),
+        &runtime_bridge_from_contract(runtime),
+        target,
+        &surface_ir_from_summary(surface),
     )
+    .expect("validated compile inputs produce generated runtime metadata")
 }
 
 fn release_target_ids(summary: &ProductSummary) -> Vec<String> {
