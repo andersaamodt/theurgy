@@ -2936,6 +2936,12 @@ mod tests {
         assert!(main_c.contains("runtime-status"));
         assert!(main_c
             .contains("GtkWidget *subscribe_button = gtk_button_new_with_label(\"Subscribe\")"));
+        assert!(main_c.contains("static char *load_operation_status(void)"));
+        assert!(main_c.contains("\"runtime-operation-status\", \"default\", NULL"));
+        assert!(main_c.contains(
+            "GtkWidget *operation_button = gtk_button_new_with_label(\"Operation Status\")"
+        ));
+        assert!(main_c.contains("G_CALLBACK(refresh_operation_status)"));
         assert!(main_c.contains("g_subprocess_newv"));
         assert!(main_c.contains("json-glib/json-glib.h"));
         assert!(main_c.contains("surface_action_contracts_json"));
@@ -3839,6 +3845,7 @@ mod tests {
         assert!(swift.contains("runtimeActionCommand + [action.id, json]"));
         assert!(swift.contains("ForEach(actionContracts, id: \\.id)"));
         assert!(swift.contains("runRuntimeCommand(runtimeSubscribeStatusCommand)"));
+        assert!(swift.contains("runRuntimeCommand(runtimeOperationStatusCommand + [\"default\"])"));
         assert!(swift.contains("inputShape: [\"deployment\": \"string\"]"));
         assert!(swift.contains("outputShape: [\"params\": \"object\"]"));
         assert!(swift.contains("Surface actions:"));
