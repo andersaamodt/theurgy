@@ -569,6 +569,7 @@ fn command_compile_native(args: &[String]) -> Result<()> {
 fn command_compile_app(args: &[String]) -> Result<()> {
     let (app_dir, target, out_dir) = parse_compile_args(args)?;
     let contract = product_runtime::load_app_compile_contract(app_dir, target)?;
+    let runtime_manifest_text = read_json(&app_dir.join(&contract.runtime_manifest_path))?;
     compile_native_with_contract(
         &contract.product,
         &contract.surface_text,
@@ -576,6 +577,7 @@ fn command_compile_app(args: &[String]) -> Result<()> {
         target,
         out_dir,
         contract.preserve_existing_legacy_desktop_adapter,
+        Some(runtime_manifest_text.as_str()),
     )?;
     println!("status=ok");
     println!("app={}", app_dir.display());
@@ -1415,7 +1417,7 @@ fn compile_native(product: &str, target: &str, out_dir: &Path) -> Result<()> {
     let summary = validate_product_ir(product)?;
     let surface = project_surface(product, target)?;
     let runtime = product_runtime::default_runtime_bridge_for_product(&summary);
-    compile_native_with_contract(&summary, &surface, &runtime, target, out_dir, false)
+    compile_native_with_contract(&summary, &surface, &runtime, target, out_dir, false, None)
 }
 
 fn compile_native_with_contract(
@@ -1425,6 +1427,7 @@ fn compile_native_with_contract(
     target: &str,
     out_dir: &Path,
     preserve_existing_legacy_desktop_adapter: bool,
+    runtime_manifest_text: Option<&str>,
 ) -> Result<()> {
     let surface_summary = validate_surface_ir(surface)?;
     fs::create_dir_all(out_dir)?;
@@ -1441,10 +1444,34 @@ fn compile_native_with_contract(
         }) {
             write_or_replace(&out_dir.join(file.path), &file.contents)?;
         }
+        write_runtime_manifest_resources(out_dir, target, runtime_manifest_text)?;
         return Ok(());
     }
     for file in files {
         write_or_replace(&out_dir.join(file.path), &file.contents)?;
+    }
+    write_runtime_manifest_resources(out_dir, target, runtime_manifest_text)?;
+    Ok(())
+}
+
+fn write_runtime_manifest_resources(
+    out_dir: &Path,
+    target: &str,
+    runtime_manifest_text: Option<&str>,
+) -> Result<()> {
+    let Some(runtime_manifest_text) = runtime_manifest_text else {
+        return Ok(());
+    };
+    if !product_runtime::is_desktop_target(target) {
+        return Ok(());
+    }
+    let text = format!("{}\n", runtime_manifest_text.trim_end());
+    write_or_replace(&out_dir.join("runtime.manifest.json"), &text)?;
+    if target == "macos" {
+        write_or_replace(
+            &out_dir.join("Sources/App/Resources/runtime.manifest.json"),
+            &text,
+        )?;
     }
     Ok(())
 }
@@ -4066,6 +4093,7 @@ mod tests {
             "linux",
             &linux_action_root,
             false,
+            None,
         )
         .unwrap();
         let publish_main_c = fs::read_to_string(linux_action_root.join("src/main.c")).unwrap();
@@ -4400,6 +4428,8 @@ mod tests {
         .unwrap();
 
         let runtime = fs::read_to_string(out.join("theurgy-runtime.json")).unwrap();
+        let staged_manifest = fs::read_to_string(out.join("runtime.manifest.json")).unwrap();
+        assert!(staged_manifest.contains("\"version\": \"theurgy-runtime-manifest/v1\""));
         let runtime_json: Value = serde_json::from_str(&runtime).unwrap();
         let generated = validate_generated_runtime(&runtime).unwrap();
         assert_eq!(generated.adapter_runtime_transport, "local-process-json");
@@ -4616,6 +4646,8 @@ mod tests {
         );
         let runtime = fs::read_to_string(out.join("theurgy-runtime.json")).unwrap();
         assert!(runtime.contains("\"legacyNativeDesktopIr\": \"app-blueprint/app.ir.yaml\""));
+        let staged_manifest = fs::read_to_string(out.join("runtime.manifest.json")).unwrap();
+        assert!(staged_manifest.contains("\"version\": \"theurgy-runtime-manifest/v1\""));
         let surface = fs::read_to_string(out.join("theurgy-surface.json")).unwrap();
         assert!(surface.contains("\"role\": \"declared-reference-surface\""));
 
@@ -5057,7 +5089,8 @@ mod tests {
         let summary = validate_product_ir(&product).unwrap();
         let surface = project_surface(&product, "macos").unwrap();
         let runtime = sample_full_runtime_contract();
-        compile_native_with_contract(&summary, &surface, &runtime, "macos", &root, false).unwrap();
+        compile_native_with_contract(&summary, &surface, &runtime, "macos", &root, false, None)
+            .unwrap();
 
         let swift = fs::read_to_string(root.join("Sources/App/App.swift")).unwrap();
         assert!(
@@ -5115,8 +5148,16 @@ mod tests {
             &["publish_changes"],
         );
         let runtime = sample_full_runtime_contract();
-        compile_native_with_contract(&summary, &ios_surface, &runtime, "ios", &ios_root, false)
-            .unwrap();
+        compile_native_with_contract(
+            &summary,
+            &ios_surface,
+            &runtime,
+            "ios",
+            &ios_root,
+            false,
+            None,
+        )
+        .unwrap();
         compile_native_with_contract(
             &summary,
             &android_surface,
@@ -5124,6 +5165,7 @@ mod tests {
             "android",
             &android_root,
             false,
+            None,
         )
         .unwrap();
 
