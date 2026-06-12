@@ -1449,7 +1449,7 @@ mod tests {
         fs::create_dir_all(app.join("app-blueprint")).unwrap();
         write_or_replace(
             &app.join("theurgy.project.toml"),
-            "name = \"deployments\"\nkind = \"desktop\"\nsource_root = \"src\"\nproduct_ir = \"app-blueprint/product.ir.json\"\ndesktop_surface_ir = \"app-blueprint/desktop.surface.ir.json\"\nruntime_manifest = \"app-blueprint/runtime.manifest.json\"\n",
+            "name = \"deployments\"\nkind = \"desktop\"\nsource_root = \"src\"\nproduct_ir = \"app-blueprint/product.ir.json\"\ndesktop_surface_ir = \"app-blueprint/desktop.surface.ir.json\"\nmobile_surface_ir = \"app-blueprint/mobile.surface.ir.json\"\nruntime_manifest = \"app-blueprint/runtime.manifest.json\"\n",
         )
         .unwrap();
         write_or_replace(
@@ -1459,12 +1459,20 @@ mod tests {
         .unwrap();
         write_or_replace(
             &app.join("app-blueprint/runtime.manifest.json"),
-            &sample_runtime_manifest(),
+            &sample_runtime_manifest().replace(
+                "\"desktop\": \"app-blueprint/desktop.surface.ir.json\",\n    \"legacyNativeDesktop\": \"app-blueprint/app.ir.yaml\"",
+                "\"desktop\": \"app-blueprint/desktop.surface.ir.json\",\n    \"mobile\": \"app-blueprint/mobile.surface.ir.json\",\n    \"legacyNativeDesktop\": \"app-blueprint/app.ir.yaml\"",
+            ),
         )
         .unwrap();
         write_or_replace(
             &app.join("app-blueprint/desktop.surface.ir.json"),
             &sample_desktop_surface(),
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/mobile.surface.ir.json"),
+            "{\n  \"version\": \"theurgy-mobile-surface-ir/v1\",\n  \"format\": \"json\",\n  \"product\": \"deployments\",\n  \"target\": \"mobile\",\n  \"actions\": [\"refresh_state\", \"publish_changes\"],\n  \"screens\": [\n    {\"id\": \"overview\", \"title\": \"Deployments\", \"node\": {\"id\": \"screen.overview\", \"type\": \"NavigationStack\", \"role\": \"status-overview\"}},\n    {\"id\": \"deployment-detail\", \"title\": \"Deployment\", \"node\": {\"id\": \"screen.deployment-detail\", \"type\": \"Screen\", \"role\": \"focused-action-detail\", \"children\": [{\"id\": \"section.actions\", \"type\": \"Section\", \"role\": \"safe-mobile-actions\"}]}}\n  ]\n}\n",
         )
         .unwrap();
 
@@ -1512,6 +1520,16 @@ mod tests {
             &"runtime_operation_status_command=custom-core operation-status".to_string()
         ));
         assert!(lines.contains(&"desktop_surface_actions=2".to_string()));
+        assert!(lines.contains(&"mobile_surface_actions=2".to_string()));
+        assert!(lines.contains(&"mobile_surface_screens=overview,deployment-detail".to_string()));
+        assert!(lines.contains(&"mobile_surface_screen_overview_node=screen.overview".to_string()));
+        assert!(lines.contains(
+            &"mobile_surface_screen_deployment-detail_role=focused-action-detail".to_string()
+        ));
+        assert!(lines.contains(
+            &"mobile_surface_screen_deployment-detail_roles=focused-action-detail,safe-mobile-actions"
+                .to_string()
+        ));
         assert!(lines.contains(&"compatibility_wizardry_apps_shell_first=true".to_string()));
         assert!(lines.contains(
             &"compatibility_theurgy_required_for_legacy_wizardry_apps=false".to_string()

@@ -2384,6 +2384,37 @@ pub mod product_runtime {
                 surface.action_ids.len()
             ));
             lines.push(format!("mobile_surface_roles={}", surface.roles.join(",")));
+            lines.push(format!(
+                "mobile_surface_screens={}",
+                surface
+                    .mobile_screens
+                    .iter()
+                    .map(|screen| screen.id.clone())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ));
+            for screen in &surface.mobile_screens {
+                lines.push(format!(
+                    "mobile_surface_screen_{}_title={}",
+                    screen.id, screen.title
+                ));
+                lines.push(format!(
+                    "mobile_surface_screen_{}_node={}",
+                    screen.id, screen.node_id
+                ));
+                lines.push(format!(
+                    "mobile_surface_screen_{}_node_type={}",
+                    screen.id, screen.node_type
+                ));
+                if let Some(role) = &screen.role {
+                    lines.push(format!("mobile_surface_screen_{}_role={role}", screen.id));
+                }
+                lines.push(format!(
+                    "mobile_surface_screen_{}_roles={}",
+                    screen.id,
+                    screen.roles.join(",")
+                ));
+            }
             if runtime_manifest.mobile_surface_ir.as_deref() != Some(mobile_surface_ir) {
                 return Err(ContractError::new(
                     "runtime manifest surfaces.mobile does not match theurgy.project.toml",
