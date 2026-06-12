@@ -2716,6 +2716,12 @@ mod tests {
                 .and_then(Value::as_u64),
             Some(1)
         );
+        assert_eq!(
+            schema
+                .pointer("/properties/app/pattern")
+                .and_then(Value::as_str),
+            Some("^[a-z][a-z0-9-]*$")
+        );
     }
 
     #[test]
