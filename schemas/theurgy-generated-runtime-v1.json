@@ -32,6 +32,7 @@
     "surface",
     "surfaceSchema",
     "surfaceTarget",
+    "productBackgroundJobContracts",
     "surfaceActions",
     "surfaceActionContracts",
     "surfaceRoles"
@@ -88,6 +89,10 @@
     },
     "productPersistenceRoots": { "$ref": "#/$defs/stringList" },
     "productBackgroundJobs": { "$ref": "#/$defs/stringList" },
+    "productBackgroundJobContracts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/backgroundJobContract" }
+    },
     "productReleaseTargets": { "$ref": "#/$defs/stringList" },
     "productAuditKeys": { "$ref": "#/$defs/stringList" },
     "surface": { "type": "string", "minLength": 1 },
@@ -175,6 +180,17 @@
         "inputShape": { "$ref": "#/$defs/shape" },
         "outputShape": { "$ref": "#/$defs/shape" },
         "failureShape": { "$ref": "#/$defs/shape" }
+      },
+      "additionalProperties": false
+    },
+    "backgroundJobContract": {
+      "type": "object",
+      "required": ["id", "label", "command"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
+        "label": { "type": "string", "minLength": 1 },
+        "command": { "$ref": "#/$defs/command" },
+        "state": { "type": "string", "minLength": 1 }
       },
       "additionalProperties": false
     },

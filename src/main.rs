@@ -1387,6 +1387,11 @@ mod tests {
         assert!(lines.contains(&"product_actions=2".to_string()));
         assert!(lines.contains(&"product_long_running_actions=1".to_string()));
         assert!(lines.contains(&"product_persistence_truth=file-first".to_string()));
+        assert!(
+            lines.contains(&"product_background_job_server-queue_label=Server Queue".to_string())
+        );
+        assert!(lines
+            .contains(&"product_background_job_server-queue_state=server.queue_mode".to_string()));
         assert!(lines.contains(
             &"product_background_job_server-queue_command=deployments-daemon".to_string()
         ));
@@ -1538,6 +1543,11 @@ mod tests {
             vec!["headquarters-workspace".to_string()]
         );
         assert_eq!(summary.background_job_ids, vec!["server-queue".to_string()]);
+        assert_eq!(summary.background_jobs[0].label, "Server Queue".to_string());
+        assert_eq!(
+            summary.background_jobs[0].state,
+            Some("server.queue_mode".to_string())
+        );
         assert_eq!(
             summary
                 .release_targets
@@ -2045,6 +2055,12 @@ mod tests {
         );
         assert_eq!(
             schema
+                .pointer("/properties/productBackgroundJobContracts/items/$ref")
+                .and_then(Value::as_str),
+            Some("#/$defs/backgroundJobContract")
+        );
+        assert_eq!(
+            schema
                 .pointer("/properties/subscribeStatusCommand/$ref")
                 .and_then(Value::as_str),
             Some("#/$defs/command")
@@ -2056,6 +2072,9 @@ mod tests {
         assert!(top_level_required
             .iter()
             .any(|value| value.as_str() == Some("subscribeStatusCommand")));
+        assert!(top_level_required
+            .iter()
+            .any(|value| value.as_str() == Some("productBackgroundJobContracts")));
         assert!(top_level_required
             .iter()
             .any(|value| value.as_str() == Some("productIr")));
@@ -2910,6 +2929,30 @@ mod tests {
             &serde_json::json!(["server-queue"])
         );
         assert_eq!(
+            runtime_json
+                .pointer("/productBackgroundJobContracts/0/id")
+                .and_then(Value::as_str),
+            Some("server-queue")
+        );
+        assert_eq!(
+            runtime_json
+                .pointer("/productBackgroundJobContracts/0/label")
+                .and_then(Value::as_str),
+            Some("Server Queue")
+        );
+        assert_eq!(
+            runtime_json
+                .pointer("/productBackgroundJobContracts/0/command")
+                .unwrap(),
+            &serde_json::json!(["deployments-daemon"])
+        );
+        assert_eq!(
+            runtime_json
+                .pointer("/productBackgroundJobContracts/0/state")
+                .and_then(Value::as_str),
+            Some("server.queue_mode")
+        );
+        assert_eq!(
             runtime_json.get("productReleaseTargets").unwrap(),
             &serde_json::json!(["macos-app", "linux-app"])
         );
@@ -2975,6 +3018,26 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("productActionContracts order must match productActions"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn generated_runtime_validation_rejects_background_job_contract_drift() {
+        let root = test_root("generated-runtime-background-job-drift");
+        compile_native(&sample_product(), "linux", &root).unwrap();
+        let mut runtime_json: Value =
+            serde_json::from_str(&fs::read_to_string(root.join("theurgy-runtime.json")).unwrap())
+                .unwrap();
+        *runtime_json
+            .pointer_mut("/productBackgroundJobContracts/0/id")
+            .unwrap() = Value::String("not_declared".to_string());
+        let runtime = serde_json::to_string(&runtime_json).unwrap();
+        let error = validate_generated_runtime(&runtime)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("productBackgroundJobContracts order must match productBackgroundJobs")
+        );
         fs::remove_dir_all(root).unwrap();
     }
 

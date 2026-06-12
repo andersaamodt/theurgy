@@ -254,7 +254,9 @@ pub mod product_runtime {
     #[derive(Clone, Debug, Eq, PartialEq)]
     pub struct BackgroundJob {
         pub id: String,
+        pub label: String,
         pub command: Vec<String>,
+        pub state: Option<String>,
     }
 
     #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1135,6 +1137,22 @@ pub mod product_runtime {
         ] {
             optional_string_array(value, key, &format!("generated runtime {key}"))?;
         }
+        let product_background_jobs = value_string_array(value, "productBackgroundJobs")?;
+        let background_job_contracts = value_array(value, "productBackgroundJobContracts")?;
+        if background_job_contracts.len() != product_background_jobs.len() {
+            return Err(ContractError::new(
+                "generated runtime productBackgroundJobContracts must match productBackgroundJobs length",
+            ));
+        }
+        let mut background_job_contract_ids = Vec::new();
+        for contract in background_job_contracts {
+            background_job_contract_ids.push(validate_generated_background_job_contract(contract)?);
+        }
+        if background_job_contract_ids != product_background_jobs {
+            return Err(ContractError::new(
+                "generated runtime productBackgroundJobContracts order must match productBackgroundJobs",
+            ));
+        }
         let product_release_targets = value_string_array(value, "productReleaseTargets")?;
         if !product_release_targets
             .iter()
@@ -1614,6 +1632,10 @@ pub mod product_runtime {
             string_vec_value(&product.background_job_ids),
         );
         object.insert(
+            "productBackgroundJobContracts".to_string(),
+            background_job_contracts_value(&product.background_jobs),
+        );
+        object.insert(
             "productReleaseTargets".to_string(),
             string_vec_value(&release_target_ids(product)),
         );
@@ -1994,6 +2016,13 @@ pub mod product_runtime {
             product.background_job_ids.join(",")
         ));
         for job in &product.background_jobs {
+            lines.push(format!(
+                "product_background_job_{}_label={}",
+                job.id, job.label
+            ));
+            if let Some(state) = &job.state {
+                lines.push(format!("product_background_job_{}_state={state}", job.id));
+            }
             if !job.command.is_empty() {
                 lines.push(format!(
                     "product_background_job_{}_command={}",
@@ -2909,6 +2938,23 @@ pub mod product_runtime {
                         "failureShape".to_string(),
                         shape_value(&contract.failure_shape),
                     );
+                    Value::Object(object)
+                })
+                .collect(),
+        )
+    }
+
+    fn background_job_contracts_value(jobs: &[BackgroundJob]) -> Value {
+        Value::Array(
+            jobs.iter()
+                .map(|job| {
+                    let mut object = serde_json::Map::new();
+                    object.insert("id".to_string(), Value::String(job.id.clone()));
+                    object.insert("label".to_string(), Value::String(job.label.clone()));
+                    object.insert("command".to_string(), string_vec_value(&job.command));
+                    if let Some(state) = &job.state {
+                        object.insert("state".to_string(), Value::String(state.clone()));
+                    }
                     Value::Object(object)
                 })
                 .collect(),
@@ -4368,6 +4414,35 @@ struct TheurgyNativeApp: App {
         Ok(id)
     }
 
+    fn validate_generated_background_job_contract(contract: &Value) -> ContractResult<String> {
+        let id = value_string(contract, "id")
+            .filter(|id| valid_action_id(id))
+            .ok_or_else(|| {
+                ContractError::new("generated runtime background job contract id invalid")
+            })?;
+        value_string(contract, "label")
+            .filter(|label| !label.is_empty())
+            .ok_or_else(|| {
+                ContractError::new("generated runtime background job contract label required")
+            })?;
+        let command = value_string_array(contract, "command").map_err(|_| {
+            ContractError::new(
+                "generated runtime background job contract command must be a string array",
+            )
+        })?;
+        if command.is_empty() {
+            return Err(ContractError::new(
+                "generated runtime background job contract command required",
+            ));
+        }
+        optional_nonempty_string(
+            contract,
+            "state",
+            "generated runtime background job contract state",
+        )?;
+        Ok(id)
+    }
+
     fn surface_action_ids(value: &Value) -> ContractResult<Vec<String>> {
         let Some(actions) = value.get("actions") else {
             return Ok(Vec::new());
@@ -4597,8 +4672,9 @@ struct TheurgyNativeApp: App {
                 return Err(ContractError::new(format!("{label} must contain objects")));
             };
             let id = required_stable_id(item, &format!("{label} object.id"))?;
-            required_nonempty_object_string(item, "label", &format!("{label} object.label"))?;
-            optional_nonempty_string(item, "state", &format!("{label} object.state"))?;
+            let label =
+                required_nonempty_object_string(item, "label", &format!("{label} object.label"))?;
+            let state = optional_nonempty_string(item, "state", &format!("{label} object.state"))?;
             let command = if object.get("command").is_some() {
                 let command =
                     optional_string_array(item, "command", &format!("{label} object.command"))?;
@@ -4611,7 +4687,12 @@ struct TheurgyNativeApp: App {
             } else {
                 Vec::new()
             };
-            jobs.push(BackgroundJob { id, command });
+            jobs.push(BackgroundJob {
+                id,
+                label,
+                command,
+                state,
+            });
         }
         Ok(jobs)
     }
@@ -5861,6 +5942,7 @@ binary = "deployments-core"
   "productPersistenceTruth": "file-first",
   "adapterRuntimeTransport": "local-process-json",
   "productBackgroundJobs": [],
+  "productBackgroundJobContracts": [],
   "productReleaseTargets": ["macos-app"],
   "targetReleaseTarget": "macos-app",
   "targetReleaseArtifact": "generated/macos",
@@ -6172,6 +6254,12 @@ binary = "deployments-core"
                 "snapshotSchema": "deployments-state/v1",
                 "roots": [{"id": "headquarters-workspace", "kind": "xdg-state"}]
             },
+            "backgroundJobs": [{
+                "id": "server-queue",
+                "label": "Server Queue",
+                "command": ["deployments-daemon"],
+                "state": "server.queue_mode"
+            }],
             "releaseTargets": [
                 {"id": "macos-app", "target": "macos", "surface": "desktop", "artifact": "generated/macos"},
                 {"id": "linux-app", "target": "linux", "surface": "desktop", "artifact": "generated/linux"},
@@ -6204,7 +6292,7 @@ binary = "deployments-core"
                 "deployments-core".to_string(),
                 "runtime-history".to_string(),
             ],
-            daemon_command: Vec::new(),
+            daemon_command: vec!["deployments-daemon".to_string()],
             product_action_ids: None,
             product_action_contracts: None,
         };
@@ -6221,6 +6309,20 @@ binary = "deployments-core"
         );
         assert_eq!(summary.surface_actions, 1);
         assert!(metadata.contains("\"legacyNativeDesktopIr\": \"app-blueprint/app.ir.yaml\""));
+        let runtime_json: serde_json::Value = serde_json::from_str(&metadata).unwrap();
+        assert_eq!(
+            runtime_json.get("productBackgroundJobs").unwrap(),
+            &serde_json::json!(["server-queue"])
+        );
+        assert_eq!(
+            runtime_json.get("productBackgroundJobContracts").unwrap(),
+            &serde_json::json!([{
+                "id": "server-queue",
+                "label": "Server Queue",
+                "command": ["deployments-daemon"],
+                "state": "server.queue_mode"
+            }])
+        );
         let runtime_manifest = product_runtime::RuntimeManifest {
             app_id: "deployments".to_string(),
             product_ir: "app-blueprint/product.ir.json".to_string(),
