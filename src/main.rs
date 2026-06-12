@@ -3078,6 +3078,25 @@ mod tests {
         assert!(main_c.contains("\\\"inputShape\\\""));
         assert!(main_c.contains("\\\"deployment\\\":\\\"string\\\""));
         assert!(main_c.contains("Surface action contracts: refresh_state, publish_changes"));
+        assert!(main_c.contains("static char *load_contract_text(const char *name)"));
+        assert!(main_c.contains("static char *contract_string_array_summary"));
+        assert!(main_c.contains("static char *contract_object_array_summary"));
+        assert!(main_c.contains(
+            "contract_string_array_summary(runtime_metadata, \"productStateProjections\")"
+        ));
+        assert!(main_c.contains(
+            "contract_object_array_summary(runtime_metadata, \"productDomainObjectContracts\""
+        ));
+        assert!(main_c.contains(
+            "contract_object_array_summary(runtime_metadata, \"productPersistenceRootContracts\""
+        ));
+        assert!(main_c.contains(
+            "contract_object_array_summary(runtime_metadata, \"productReleaseTargetContracts\""
+        ));
+        assert!(main_c.contains("Product state projections: %s"));
+        assert!(main_c.contains("Product domain objects: %s"));
+        assert!(main_c.contains("Product persistence roots: %s"));
+        assert!(main_c.contains("Product release targets: %s"));
         assert!(main_c.contains("static char *run_default_action(void)"));
         assert!(main_c.contains("\"runtime-action\""));
         assert!(main_c.contains("\"refresh_state\", \"{}\", NULL"));

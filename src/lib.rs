@@ -3295,6 +3295,104 @@ static char *load_contract_file(const char *name) {
   return g_strdup_printf("%s (%zu bytes)", path, (size_t)length);
 }
 
+static char *load_contract_text(const char *name) {
+  g_autofree char *path = resolve_contract_file(name);
+  if (path == NULL) {
+    return g_strdup("{}");
+  }
+  g_autofree char *contents = NULL;
+  gsize length = 0;
+  g_autoptr(GError) error = NULL;
+  if (!g_file_get_contents(path, &contents, &length, &error)) {
+    return g_strdup("{}");
+  }
+  return g_strdup(contents);
+}
+
+static JsonObject *contract_json_object(JsonParser *parser, const char *json) {
+  g_autoptr(GError) error = NULL;
+  if (!json_parser_load_from_data(parser, json != NULL ? json : "{}", -1, &error)) {
+    return NULL;
+  }
+  JsonNode *root = json_parser_get_root(parser);
+  if (root == NULL || !JSON_NODE_HOLDS_OBJECT(root)) {
+    return NULL;
+  }
+  return json_node_get_object(root);
+}
+
+static char *contract_string_array_summary(const char *json, const char *key) {
+  g_autoptr(JsonParser) parser = json_parser_new();
+  JsonObject *object = contract_json_object(parser, json);
+  if (object == NULL || !json_object_has_member(object, key)) {
+    return g_strdup("");
+  }
+  JsonArray *array = json_object_get_array_member(object, key);
+  if (array == NULL) {
+    return g_strdup("");
+  }
+  GString *out = g_string_new("");
+  guint length = json_array_get_length(array);
+  for (guint index = 0; index < length; index++) {
+    const char *value = json_array_get_string_element(array, index);
+    if (value == NULL || value[0] == '\0') {
+      continue;
+    }
+    if (out->len > 0) {
+      g_string_append(out, ", ");
+    }
+    g_string_append(out, value);
+  }
+  return g_string_free(out, FALSE);
+}
+
+static const char *contract_object_string(JsonObject *object, const char *key) {
+  if (object == NULL || !json_object_has_member(object, key)) {
+    return "";
+  }
+  const char *value = json_object_get_string_member(object, key);
+  return value != NULL ? value : "";
+}
+
+static char *contract_object_array_summary(const char *json, const char *key, const char *fields[], guint field_count) {
+  g_autoptr(JsonParser) parser = json_parser_new();
+  JsonObject *object = contract_json_object(parser, json);
+  if (object == NULL || !json_object_has_member(object, key)) {
+    return g_strdup("");
+  }
+  JsonArray *array = json_object_get_array_member(object, key);
+  if (array == NULL) {
+    return g_strdup("");
+  }
+  GString *out = g_string_new("");
+  guint length = json_array_get_length(array);
+  for (guint index = 0; index < length; index++) {
+    JsonObject *item = json_array_get_object_element(array, index);
+    if (item == NULL) {
+      continue;
+    }
+    GString *item_text = g_string_new("");
+    for (guint field_index = 0; field_index < field_count; field_index++) {
+      const char *value = contract_object_string(item, fields[field_index]);
+      if (value[0] == '\0') {
+        continue;
+      }
+      if (item_text->len > 0) {
+        g_string_append(item_text, " / ");
+      }
+      g_string_append(item_text, value);
+    }
+    if (item_text->len > 0) {
+      if (out->len > 0) {
+        g_string_append(out, ", ");
+      }
+      g_string_append(out, item_text->str);
+    }
+    g_string_free(item_text, TRUE);
+  }
+  return g_string_free(out, FALSE);
+}
+
 static char *run_runtime_command(const char *argv[]);
 
 static char *load_runtime_state(void) {
@@ -3405,7 +3503,15 @@ static void activate(GtkApplication *app, gpointer user_data) {
   GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
   g_autofree char *runtime_contract = load_contract_file("theurgy-runtime.json");
   g_autofree char *surface_contract = load_contract_file("theurgy-surface.json");
-  g_autofree char *contract_text = g_strdup_printf("Runtime contract: %s\nSurface contract: %s\nState: __STATE_COMMAND_TEXT__\nStatus: __STATUS_COMMAND_TEXT__\nSubscribe: __SUBSCRIBE_STATUS_COMMAND_TEXT__\nOperation status: __OPERATION_STATUS_COMMAND_TEXT__\nAction: __ACTION_COMMAND_TEXT__\nHistory: __HISTORY_COMMAND_TEXT__\nDaemon: __DAEMON_COMMAND_TEXT__\nSurface action contracts: __ACTION_CONTRACT_IDS__", runtime_contract, surface_contract);
+  g_autofree char *runtime_metadata = load_contract_text("theurgy-runtime.json");
+  const char *domain_fields[] = {"label", "source"};
+  const char *persistence_fields[] = {"kind", "path"};
+  const char *release_fields[] = {"target", "surface", "artifact"};
+  g_autofree char *product_state_projections = contract_string_array_summary(runtime_metadata, "productStateProjections");
+  g_autofree char *product_domain_objects = contract_object_array_summary(runtime_metadata, "productDomainObjectContracts", domain_fields, G_N_ELEMENTS(domain_fields));
+  g_autofree char *product_persistence_roots = contract_object_array_summary(runtime_metadata, "productPersistenceRootContracts", persistence_fields, G_N_ELEMENTS(persistence_fields));
+  g_autofree char *product_release_targets = contract_object_array_summary(runtime_metadata, "productReleaseTargetContracts", release_fields, G_N_ELEMENTS(release_fields));
+  g_autofree char *contract_text = g_strdup_printf("Runtime contract: %s\nSurface contract: %s\nState: __STATE_COMMAND_TEXT__\nStatus: __STATUS_COMMAND_TEXT__\nSubscribe: __SUBSCRIBE_STATUS_COMMAND_TEXT__\nOperation status: __OPERATION_STATUS_COMMAND_TEXT__\nAction: __ACTION_COMMAND_TEXT__\nHistory: __HISTORY_COMMAND_TEXT__\nDaemon: __DAEMON_COMMAND_TEXT__\nSurface action contracts: __ACTION_CONTRACT_IDS__\nProduct state projections: %s\nProduct domain objects: %s\nProduct persistence roots: %s\nProduct release targets: %s", runtime_contract, surface_contract, product_state_projections, product_domain_objects, product_persistence_roots, product_release_targets);
   GtkWidget *contract = gtk_label_new(contract_text);
   GtkWidget *button_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
   GtkWidget *button = gtk_button_new_with_label("State");
