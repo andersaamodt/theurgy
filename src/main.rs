@@ -107,6 +107,7 @@ fn run(args: Vec<String>) -> Result<()> {
         Some("run-state") => command_run_state(&args[2..]),
         Some("run-status") => command_run_status(&args[2..]),
         Some("subscribe-status") => command_subscribe_status(&args[2..]),
+        Some("run-request") => command_run_request(&args[2..]),
         Some("run-operation-status") => command_run_operation_status(&args[2..]),
         Some("run-history") => command_run_history(&args[2..]),
         Some("run-action") => command_run_action(&args[2..]),
@@ -612,6 +613,14 @@ fn command_subscribe_status(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+fn command_run_request(args: &[String]) -> Result<()> {
+    let (request_path, manifest_path) = parse_request_manifest_args(args)?;
+    let request = read_json(&request_path)?;
+    let output = run_request_output(&request, &manifest_path)?;
+    print!("{output}");
+    Ok(())
+}
+
 fn command_run_operation_status(args: &[String]) -> Result<()> {
     if args.is_empty() {
         return Err(
@@ -770,8 +779,104 @@ fn parse_manifest_only_args(args: &[String], usage: &str) -> Result<PathBuf> {
     Ok(PathBuf::from(&args[1]))
 }
 
+fn parse_request_manifest_args(args: &[String]) -> Result<(PathBuf, PathBuf)> {
+    if args.is_empty() {
+        return Err(TheurgyError::new("usage: run-request REQUEST_JSON --manifest PATH").into());
+    }
+    let request_path = PathBuf::from(&args[0]);
+    let mut manifest_path: Option<PathBuf> = None;
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--manifest" => {
+                let raw = args
+                    .get(index + 1)
+                    .ok_or_else(|| TheurgyError::new("run-request --manifest requires PATH"))?;
+                manifest_path = Some(PathBuf::from(raw));
+                index += 2;
+            }
+            other => {
+                return Err(
+                    TheurgyError::new(format!("unknown run-request option: {other}")).into(),
+                )
+            }
+        }
+    }
+    let manifest_path =
+        manifest_path.ok_or_else(|| TheurgyError::new("run-request --manifest PATH required"))?;
+    Ok((request_path, manifest_path))
+}
+
+fn run_request_output(request_text: &str, manifest_path: &Path) -> Result<String> {
+    let value = parse_json(request_text)?;
+    let schema = value
+        .get("schema")
+        .and_then(Value::as_str)
+        .ok_or_else(|| TheurgyError::new("runtime request schema required"))?;
+    match schema {
+        product_runtime::RUNTIME_STATE_REQUEST_SCHEMA => {
+            let summary = validate_runtime_state_request_value(&value)?;
+            let runtime = runtime_contract_from_path(manifest_path)?;
+            validate_runtime_request_app(&summary.app_id, &runtime.app_id, "state")?;
+            run_state_output_with_runtime(&runtime)
+        }
+        product_runtime::RUNTIME_STATUS_REQUEST_SCHEMA => {
+            let summary = validate_runtime_status_request_value(&value)?;
+            let runtime = runtime_contract_from_path(manifest_path)?;
+            validate_runtime_request_app(&summary.app_id, &runtime.app_id, "status")?;
+            run_status_output_with_runtime(&runtime)
+        }
+        product_runtime::RUNTIME_SUBSCRIBE_STATUS_REQUEST_SCHEMA => {
+            let summary = validate_runtime_subscribe_status_request_value(&value)?;
+            let runtime = runtime_contract_from_path(manifest_path)?;
+            validate_runtime_request_app(&summary.app_id, &runtime.app_id, "subscribe status")?;
+            subscribe_status_output_with_runtime(&runtime)
+        }
+        product_runtime::RUNTIME_ACTION_REQUEST_SCHEMA => {
+            let summary = validate_runtime_action_request_value(&value)?;
+            let runtime = runtime_contract_from_path_with_product_actions(manifest_path)?;
+            validate_runtime_action_request_against_runtime(&summary, &value, &runtime)?;
+            let params = value
+                .get("params")
+                .ok_or_else(|| TheurgyError::new("runtime action request params required"))?
+                .to_string();
+            run_manifest_action(&runtime, &summary.action_id, &params)
+        }
+        product_runtime::OPERATION_STATUS_REQUEST_SCHEMA => {
+            let summary = validate_operation_status_request_value(&value)?;
+            let runtime = runtime_contract_from_path(manifest_path)?;
+            validate_runtime_request_app(&summary.app_id, &runtime.app_id, "operation status")?;
+            run_operation_status_output_with_runtime(&runtime, &summary.operation_id)
+        }
+        product_runtime::OPERATION_HISTORY_REQUEST_SCHEMA => {
+            let summary = validate_operation_history_request_value(&value)?;
+            let runtime = runtime_contract_from_path(manifest_path)?;
+            validate_runtime_request_app(&summary.app_id, &runtime.app_id, "operation history")?;
+            let limit = summary.limit.to_string();
+            run_history_output_with_runtime(&runtime, &summary.subject, Some(limit.as_str()))
+        }
+        other => {
+            Err(TheurgyError::new(format!("unsupported runtime request schema: {other}")).into())
+        }
+    }
+}
+
+fn validate_runtime_request_app(request_app: &str, runtime_app: &str, label: &str) -> Result<()> {
+    if request_app != runtime_app {
+        return Err(TheurgyError::new(format!(
+            "runtime {label} request app mismatch: expected {runtime_app}, got {request_app}"
+        ))
+        .into());
+    }
+    Ok(())
+}
+
 fn run_state_output(manifest_path: &Path) -> Result<String> {
     let runtime = runtime_contract_from_path(manifest_path)?;
+    run_state_output_with_runtime(&runtime)
+}
+
+fn run_state_output_with_runtime(runtime: &RuntimeContract) -> Result<String> {
     let command = product_runtime::runtime_state_command(&runtime)?;
     let output = run_manifest_command(&command, "state")?;
     validate_manifest_state_output(&runtime.app_id, &output)?;
@@ -780,6 +885,10 @@ fn run_state_output(manifest_path: &Path) -> Result<String> {
 
 fn run_status_output(manifest_path: &Path) -> Result<String> {
     let runtime = runtime_contract_from_path(manifest_path)?;
+    run_status_output_with_runtime(&runtime)
+}
+
+fn run_status_output_with_runtime(runtime: &RuntimeContract) -> Result<String> {
     let command = product_runtime::runtime_status_command(&runtime)?;
     let output = run_manifest_command(&command, "status")?;
     validate_manifest_status_output(&runtime.app_id, &output)?;
@@ -788,6 +897,13 @@ fn run_status_output(manifest_path: &Path) -> Result<String> {
 
 fn run_operation_status_output(manifest_path: &Path, operation_id: &str) -> Result<String> {
     let runtime = runtime_contract_from_path(manifest_path)?;
+    run_operation_status_output_with_runtime(&runtime, operation_id)
+}
+
+fn run_operation_status_output_with_runtime(
+    runtime: &RuntimeContract,
+    operation_id: &str,
+) -> Result<String> {
     let command = product_runtime::runtime_operation_status_command(&runtime, operation_id)?;
     let output = run_manifest_command(&command, "operation status")?;
     validate_manifest_operation_status_output(&runtime.app_id, &output)?;
@@ -796,6 +912,10 @@ fn run_operation_status_output(manifest_path: &Path, operation_id: &str) -> Resu
 
 fn subscribe_status_output(manifest_path: &Path) -> Result<String> {
     let runtime = runtime_contract_from_path(manifest_path)?;
+    subscribe_status_output_with_runtime(&runtime)
+}
+
+fn subscribe_status_output_with_runtime(runtime: &RuntimeContract) -> Result<String> {
     let command = product_runtime::runtime_subscribe_status_command(&runtime)?;
     let output = run_manifest_command(&command, "status")?;
     validate_manifest_status_output(&runtime.app_id, &output)?;
@@ -804,6 +924,14 @@ fn subscribe_status_output(manifest_path: &Path) -> Result<String> {
 
 fn run_history_output(manifest_path: &Path, subject: &str, limit: Option<&str>) -> Result<String> {
     let runtime = runtime_contract_from_path(manifest_path)?;
+    run_history_output_with_runtime(&runtime, subject, limit)
+}
+
+fn run_history_output_with_runtime(
+    runtime: &RuntimeContract,
+    subject: &str,
+    limit: Option<&str>,
+) -> Result<String> {
     let command = product_runtime::runtime_history_command(&runtime, subject, limit)?;
     let output = run_manifest_command(&command, "history")?;
     validate_manifest_history_output(&runtime.app_id, &output)?;
@@ -3253,6 +3381,119 @@ mod tests {
             Some("site-one")
         );
         assert_eq!(value.get("limit").and_then(Value::as_str), Some("12"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn run_request_dispatches_typed_runtime_envelopes() {
+        let root = runtime_fixture_root("run-request");
+        let manifest = root.join("runtime.manifest.json");
+
+        let output = run_request_output(
+            "{\"schema\":\"theurgy-runtime-state-request/v1\",\"protocol\":\"theurgy-runtime-action/v1\",\"app\":\"deployments\",\"kind\":\"state\"}",
+            &manifest,
+        )
+        .unwrap();
+        let value: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(
+            value.get("schema").and_then(Value::as_str),
+            Some("theurgy-state-snapshot/v1")
+        );
+
+        let output = run_request_output(
+            "{\"schema\":\"theurgy-runtime-status-request/v1\",\"protocol\":\"theurgy-runtime-action/v1\",\"app\":\"deployments\",\"kind\":\"status\"}",
+            &manifest,
+        )
+        .unwrap();
+        let value: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(
+            value.get("schema").and_then(Value::as_str),
+            Some("theurgy-runtime-status/v1")
+        );
+        assert_eq!(
+            value.get("state_ready").and_then(Value::as_bool),
+            Some(true)
+        );
+
+        let output = run_request_output(
+            "{\"schema\":\"theurgy-runtime-subscribe-status-request/v1\",\"protocol\":\"theurgy-runtime-action/v1\",\"app\":\"deployments\",\"kind\":\"subscribe-status\"}",
+            &manifest,
+        )
+        .unwrap();
+        let value: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(
+            value.get("schema").and_then(Value::as_str),
+            Some("theurgy-runtime-status/v1")
+        );
+
+        let output = run_request_output(
+            "{\"schema\":\"theurgy-runtime-action-request/v1\",\"protocol\":\"theurgy-runtime-action/v1\",\"app\":\"deployments\",\"action\":\"refresh_state\",\"params\":{}}",
+            &manifest,
+        )
+        .unwrap();
+        let value: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(
+            value.pointer("/data/action").and_then(Value::as_str),
+            Some("refresh_state")
+        );
+
+        let output = run_request_output(
+            "{\"schema\":\"theurgy-operation-status-request/v1\",\"protocol\":\"theurgy-runtime-action/v1\",\"app\":\"deployments\",\"kind\":\"operation-status\",\"operation\":\"op-refresh_state\"}",
+            &manifest,
+        )
+        .unwrap();
+        let value: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(
+            value.pointer("/operation/id").and_then(Value::as_str),
+            Some("op-refresh_state")
+        );
+
+        let output = run_request_output(
+            "{\"schema\":\"theurgy-operation-history-request/v1\",\"protocol\":\"theurgy-runtime-action/v1\",\"app\":\"deployments\",\"kind\":\"operation-history\",\"subject\":\"site-one\",\"limit\":7}",
+            &manifest,
+        )
+        .unwrap();
+        let value: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(
+            value.get("schema").and_then(Value::as_str),
+            Some("theurgy-operation-history/v1")
+        );
+        assert_eq!(
+            value.get("subject").and_then(Value::as_str),
+            Some("site-one")
+        );
+        assert_eq!(value.get("limit").and_then(Value::as_str), Some("7"));
+
+        let error = run_request_output(
+            "{\"schema\":\"theurgy-runtime-state-request/v1\",\"protocol\":\"theurgy-runtime-action/v1\",\"app\":\"other-app\",\"kind\":\"state\"}",
+            &manifest,
+        )
+        .unwrap_err()
+        .to_string();
+        assert_eq!(
+            error,
+            "runtime state request app mismatch: expected deployments, got other-app"
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn command_run_request_dispatches_request_file() {
+        let root = runtime_fixture_root("run-request-command");
+        let request = root.join("request.json");
+        write_or_replace(
+            &request,
+            "{\"schema\":\"theurgy-runtime-status-request/v1\",\"protocol\":\"theurgy-runtime-action/v1\",\"app\":\"deployments\",\"kind\":\"status\"}",
+        )
+        .unwrap();
+        command_run_request(&[
+            request.display().to_string(),
+            "--manifest".to_string(),
+            root.join("runtime.manifest.json").display().to_string(),
+        ])
+        .unwrap();
+
         fs::remove_dir_all(root).unwrap();
     }
 

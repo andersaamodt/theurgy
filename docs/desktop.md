@@ -38,6 +38,7 @@ If `PATH` is omitted, the spell uses `NAME`. The generated desktop project is in
 `theurgy-runtime validate-operation-status-request PATH` validates the typed request envelope for operation progress lookup.
 `theurgy-runtime validate-operation-history-request PATH` validates the typed request envelope for operation history lookup.
 `theurgy-runtime validate-operation-status PATH` validates the typed status record for a runtime operation.
+`theurgy-runtime run-request REQUEST_JSON --manifest PATH` dispatches typed state, status, subscribe-status, action, operation-status, and operation-history envelopes through a runtime manifest.
 `theurgy-runtime project-surface PATH --target macos|linux|ios|android` emits a target surface projection.
 `theurgy-runtime compile-native PATH --target macos|linux|ios|android --out OUT_DIR` emits a deterministic native adapter root.
 `theurgy-runtime compile-app APP_DIR --target macos|linux|ios|android --out OUT_DIR` reads `theurgy.project.toml` and compiles from the app's declared Product IR.
