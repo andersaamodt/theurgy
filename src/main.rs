@@ -2574,6 +2574,12 @@ mod tests {
         );
         assert_eq!(
             schema
+                .pointer("/$defs/command/items/minLength")
+                .and_then(Value::as_u64),
+            Some(1)
+        );
+        assert_eq!(
+            schema
                 .pointer("/properties/surfaces/properties/desktop/type")
                 .and_then(Value::as_str),
             Some("string")
@@ -2928,6 +2934,18 @@ mod tests {
                 .and_then(Value::as_str),
             Some("desktop")
         );
+        assert_eq!(
+            desktop_schema
+                .pointer("/properties/actions/$ref")
+                .and_then(Value::as_str),
+            Some("#/$defs/actionIdList")
+        );
+        assert_eq!(
+            desktop_schema
+                .pointer("/$defs/actionIdList/items/pattern")
+                .and_then(Value::as_str),
+            Some("^[a-z][a-z0-9_.-]*$")
+        );
         let mobile_schema: Value =
             serde_json::from_str(include_str!("../schemas/theurgy-mobile-surface-ir-v1.json"))
                 .unwrap();
@@ -2936,6 +2954,12 @@ mod tests {
                 .pointer("/properties/target/enum/0")
                 .and_then(Value::as_str),
             Some("mobile")
+        );
+        assert_eq!(
+            mobile_schema
+                .pointer("/properties/actions/$ref")
+                .and_then(Value::as_str),
+            Some("#/$defs/actionIdList")
         );
         assert_eq!(
             mobile_schema
