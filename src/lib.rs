@@ -3626,6 +3626,7 @@ pub mod product_runtime {
  */
 #include <gtk/gtk.h>
 #include <json-glib/json-glib.h>
+#include <unistd.h>
 
 static const char *surface_action_contracts_json = "__ACTION_CONTRACTS_JSON__";
 
@@ -3797,42 +3798,57 @@ static char *contract_object_array_summary(const char *json, const char *key, co
   return g_string_free(out, FALSE);
 }
 
+static char *run_runtime_request(const char *request);
 static char *run_runtime_command(const char *argv[]);
 
 static char *load_runtime_state(void) {
-  g_autofree char *runtime = resolve_executable("__STATE_EXECUTABLE__");
-  const char *argv[] = { runtime, __STATE_ARGUMENTS__ NULL };
-  return run_runtime_command(argv);
+  return run_runtime_request("{\"schema\":\"theurgy-runtime-state-request/v1\",\"protocol\":\"theurgy-runtime-action/v1\",\"app\":\"__APP_ID__\",\"kind\":\"state\"}\n");
 }
 
 static char *load_runtime_status(void) {
-  g_autofree char *runtime = resolve_executable("__STATUS_EXECUTABLE__");
-  const char *argv[] = { runtime, __STATUS_ARGUMENTS__ NULL };
-  return run_runtime_command(argv);
+  return run_runtime_request("{\"schema\":\"theurgy-runtime-status-request/v1\",\"protocol\":\"theurgy-runtime-action/v1\",\"app\":\"__APP_ID__\",\"kind\":\"status\"}\n");
 }
 
 static char *subscribe_runtime_status(void) {
-  g_autofree char *runtime = resolve_executable("__SUBSCRIBE_STATUS_EXECUTABLE__");
-  const char *argv[] = { runtime, __SUBSCRIBE_STATUS_ARGUMENTS__ NULL };
-  return run_runtime_command(argv);
+  return run_runtime_request("{\"schema\":\"theurgy-runtime-subscribe-status-request/v1\",\"protocol\":\"theurgy-runtime-action/v1\",\"app\":\"__APP_ID__\",\"kind\":\"subscribe-status\"}\n");
 }
 
 static char *load_operation_status(void) {
-  g_autofree char *runtime = resolve_executable("__OPERATION_STATUS_EXECUTABLE__");
-  const char *argv[] = { runtime, __OPERATION_STATUS_ARGUMENTS__"default", NULL };
-  return run_runtime_command(argv);
+  return run_runtime_request("{\"schema\":\"theurgy-operation-status-request/v1\",\"protocol\":\"theurgy-runtime-action/v1\",\"app\":\"__APP_ID__\",\"kind\":\"operation-status\",\"operation\":\"default\"}\n");
 }
 
 static char *load_operation_history(void) {
-  g_autofree char *runtime = resolve_executable("__HISTORY_EXECUTABLE__");
-  const char *argv[] = { runtime, __HISTORY_ARGUMENTS__"default", "20", NULL };
-  return run_runtime_command(argv);
+  return run_runtime_request("{\"schema\":\"theurgy-operation-history-request/v1\",\"protocol\":\"theurgy-runtime-action/v1\",\"app\":\"__APP_ID__\",\"kind\":\"operation-history\",\"subject\":\"default\",\"limit\":20}\n");
 }
 
 static char *run_default_action(void) {
-  g_autofree char *runtime = resolve_executable("__ACTION_EXECUTABLE__");
-  const char *argv[] = { runtime, __ACTION_ARGUMENTS__ "__DEFAULT_ACTION_ID__", "__DEFAULT_ACTION_PARAMS_JSON__", NULL };
-  return run_runtime_command(argv);
+  g_autofree char *request = g_strdup_printf("{\"schema\":\"theurgy-runtime-action-request/v1\",\"protocol\":\"theurgy-runtime-action/v1\",\"app\":\"__APP_ID__\",\"action\":\"__DEFAULT_ACTION_ID__\",\"params\":%s}\n", "__DEFAULT_ACTION_PARAMS_JSON__");
+  return run_runtime_request(request);
+}
+
+static char *run_runtime_request(const char *request) {
+  g_autofree char *request_path = NULL;
+  g_autoptr(GError) error = NULL;
+  int fd = g_file_open_tmp("__APP_ID__-runtime-request-XXXXXX.json", &request_path, &error);
+  if (fd < 0) {
+    return g_strdup(error != NULL ? error->message : "could not create runtime request file");
+  }
+  close(fd);
+  if (!g_file_set_contents(request_path, request, -1, &error)) {
+    g_autofree char *message = g_strdup(error != NULL ? error->message : "could not write runtime request file");
+    g_unlink(request_path);
+    return g_steal_pointer(&message);
+  }
+  g_autofree char *runtime = resolve_executable("theurgy-runtime");
+  g_autofree char *manifest = resolve_contract_file("__RUNTIME_MANIFEST__");
+  if (manifest == NULL) {
+    g_unlink(request_path);
+    return g_strdup("__RUNTIME_MANIFEST__ missing from installed resources");
+  }
+  const char *argv[] = { runtime, "run-request", request_path, "--manifest", manifest, NULL };
+  g_autofree char *output = run_runtime_command(argv);
+  g_unlink(request_path);
+  return g_steal_pointer(&output);
 }
 
 static char *run_runtime_command(const char *argv[]) {
@@ -3965,6 +3981,8 @@ int main(int argc, char **argv) {
                 &c_escape(&product.app_id.replace('-', "_")),
             )
             .replace("__APP_RESOURCE_ID__", &c_escape(&product.app_id))
+            .replace("__APP_ID__", &c_escape(&product.app_id))
+            .replace("__RUNTIME_MANIFEST__", &c_escape(&runtime.runtime_manifest))
             .replace("__STATE_EXECUTABLE__", &c_escape(&executable))
             .replace("__STATE_ARGUMENTS__", &arguments)
             .replace("__STATUS_EXECUTABLE__", &c_escape(&status_executable))
@@ -8031,9 +8049,15 @@ binary = "deployments-core"
         assert!(linux_source.contains("\"share\", \"theurgy\", \"deployments\""));
         assert!(linux_source.contains("g_get_system_data_dirs()"));
         assert!(linux_source.contains("static char *load_contract_file(const char *name)"));
+        assert!(linux_source.contains("static char *run_runtime_request(const char *request)"));
+        assert!(linux_source.contains("\"run-request\", request_path, \"--manifest\", manifest"));
+        assert!(linux_source.contains("\"schema\":\"theurgy-runtime-state-request/v1\""));
+        assert!(linux_source.contains("\"schema\":\"theurgy-runtime-action-request/v1\""));
+        assert!(linux_source.contains("resolve_contract_file(\"runtime.manifest.json\")"));
         assert!(linux_source.contains("Runtime contract: %s\\nSurface contract: %s"));
         assert!(!linux_source.contains("__APP_RESOURCE_ID__"));
         assert!(!linux_source.contains("__APP_GAPPLICATION_ID__"));
+        assert!(!linux_source.contains("\"runtime-action\", \"refresh_state\", \"{}\", NULL"));
         assert!(!linux_source.contains("gtk_paned_new(GTK_ORIENTATION_HORIZONTAL)"));
         let mut operations_surface = linux_surface.clone();
         operations_surface.roles = vec![

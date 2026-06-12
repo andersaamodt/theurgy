@@ -4430,8 +4430,11 @@ mod tests {
         assert!(main_c.contains("Product persistence roots: %s"));
         assert!(main_c.contains("Product release targets: %s"));
         assert!(main_c.contains("static char *run_default_action(void)"));
-        assert!(main_c.contains("\"runtime-action\""));
-        assert!(main_c.contains("\"refresh_state\", \"{}\", NULL"));
+        assert!(main_c.contains("static char *run_runtime_request(const char *request)"));
+        assert!(main_c.contains("\"run-request\", request_path, \"--manifest\", manifest"));
+        assert!(main_c.contains("\"schema\":\"theurgy-runtime-action-request/v1\""));
+        assert!(main_c.contains("\"action\":\"refresh_state\",\"params\":%s"));
+        assert!(!main_c.contains("\"runtime-action\", \"refresh_state\", \"{}\", NULL"));
         assert!(main_c.contains("GtkWidget *action_button = gtk_button_new_with_label(\"Action\")"));
         assert!(main_c.contains("G_CALLBACK(run_action)"));
         let linux_action_root = test_root("compile-linux-action-defaults");
@@ -4453,9 +4456,11 @@ mod tests {
         )
         .unwrap();
         let publish_main_c = fs::read_to_string(linux_action_root.join("src/main.c")).unwrap();
-        assert!(
-            publish_main_c.contains("\"publish_changes\", \"{\\\"deployment\\\":\\\"\\\"}\", NULL")
-        );
+        assert!(publish_main_c.contains("\"action\":\"publish_changes\",\"params\":%s"));
+        assert!(publish_main_c.contains("\"{\\\"deployment\\\":\\\"\\\"}\""));
+        assert!(!publish_main_c.contains(
+            "\"runtime-action\", \"publish_changes\", \"{\\\"deployment\\\":\\\"\\\"}\", NULL"
+        ));
         fs::remove_dir_all(linux_action_root).unwrap();
         let meson = fs::read_to_string(root.join("meson.build")).unwrap();
         assert!(meson.contains("json-glib-1.0"));
