@@ -1364,6 +1364,70 @@ pub mod product_runtime {
         Ok(release_target.clone())
     }
 
+    pub fn native_compile_files(
+        product: &ProductIr,
+        surface: &SurfaceIr,
+        surface_text: &str,
+        runtime: &RuntimeBridge,
+        target: &str,
+    ) -> ContractResult<Vec<GeneratedNativeFile>> {
+        validate_native_compile_contract(product, surface, target)?;
+        let runtime_metadata = generated_runtime_metadata(product, runtime, target, surface)?;
+        validate_generated_runtime_text(&runtime_metadata)?;
+
+        let surface_resource = format!("{}\n", surface_text.trim_end());
+        let mut files = vec![
+            GeneratedNativeFile {
+                path: "theurgy-surface.json".to_string(),
+                contents: surface_resource.clone(),
+            },
+            GeneratedNativeFile {
+                path: "theurgy-runtime.json".to_string(),
+                contents: runtime_metadata.clone(),
+            },
+        ];
+        files.extend(adapter_files_for_target(product, surface, runtime, target)?);
+        match target {
+            "ios" => {
+                files.push(GeneratedNativeFile {
+                    path: "Host/Resources/theurgy-runtime.json".to_string(),
+                    contents: runtime_metadata,
+                });
+                files.push(GeneratedNativeFile {
+                    path: "Host/Resources/theurgy-surface.json".to_string(),
+                    contents: surface_resource,
+                });
+            }
+            "android" => {
+                files.push(GeneratedNativeFile {
+                    path: "app/src/main/assets/theurgy-runtime.json".to_string(),
+                    contents: runtime_metadata,
+                });
+                files.push(GeneratedNativeFile {
+                    path: "app/src/main/assets/theurgy-surface.json".to_string(),
+                    contents: surface_resource,
+                });
+            }
+            _ => {}
+        }
+        Ok(files)
+    }
+
+    pub fn adapter_files_for_target(
+        product: &ProductIr,
+        surface: &SurfaceIr,
+        runtime: &RuntimeBridge,
+        target: &str,
+    ) -> ContractResult<Vec<GeneratedNativeFile>> {
+        match target {
+            "macos" => Ok(macos_adapter_files(product, surface, runtime)),
+            "linux" => Ok(linux_adapter_files(product, surface, runtime)),
+            "ios" => Ok(ios_adapter_files(product, surface, runtime)),
+            "android" => Ok(android_adapter_files(product, surface, runtime)),
+            _ => Err(ContractError::new("unsupported target")),
+        }
+    }
+
     pub fn macos_adapter_files(
         product: &ProductIr,
         surface: &SurfaceIr,
@@ -1701,7 +1765,7 @@ pub mod product_runtime {
             .find(|release_target| release_target.target == target)
     }
 
-    fn effective_subscribe_status_command(runtime: &RuntimeBridge) -> Vec<String> {
+    pub fn effective_subscribe_status_command(runtime: &RuntimeBridge) -> Vec<String> {
         if !runtime.subscribe_status_command.is_empty() {
             return runtime.subscribe_status_command.clone();
         }
@@ -4209,6 +4273,25 @@ mod tests {
             && file
                 .contents
                 .contains("runtimeActionCommand + [action.id, json]")));
+        let compiled = product_runtime::native_compile_files(
+            &product,
+            &surface,
+            "  {\"surface\": true}\n",
+            &runtime,
+            "macos",
+        )
+        .unwrap();
+        assert!(compiled
+            .iter()
+            .any(|file| file.path == "theurgy-surface.json"
+                && file.contents == "  {\"surface\": true}\n"));
+        assert!(compiled
+            .iter()
+            .any(|file| file.path == "theurgy-runtime.json"
+                && file.contents.contains("\"target\": \"macos\"")));
+        assert!(compiled
+            .iter()
+            .any(|file| file.path == "Sources/App/App.swift"));
         let linux_surface =
             product_runtime::project_surface_from_product(&product, "linux").unwrap();
         let linux_surface = product_runtime::validate_surface_ir_value(&linux_surface).unwrap();
@@ -4233,6 +4316,22 @@ mod tests {
             && file
                 .contents
                 .contains("func actionEnvelope(for action: ProductActionContract")));
+        let compiled = product_runtime::native_compile_files(
+            &product,
+            &ios_surface,
+            "{\"mobileSurface\": true}",
+            &runtime,
+            "ios",
+        )
+        .unwrap();
+        assert!(compiled
+            .iter()
+            .any(|file| file.path == "Host/Resources/theurgy-runtime.json"
+                && file.contents.contains("\"target\": \"ios\"")));
+        assert!(compiled
+            .iter()
+            .any(|file| file.path == "Host/Resources/theurgy-surface.json"
+                && file.contents == "{\"mobileSurface\": true}\n"));
         let android_surface =
             product_runtime::project_surface_from_product(&product, "android").unwrap();
         let android_surface = product_runtime::validate_surface_ir_value(&android_surface).unwrap();
@@ -4252,5 +4351,19 @@ mod tests {
             && file
                 .contents
                 .contains("private static String actionEnvelope")));
+        let compiled = product_runtime::native_compile_files(
+            &product,
+            &android_surface,
+            "{\"mobileSurface\": true}",
+            &runtime,
+            "android",
+        )
+        .unwrap();
+        assert!(compiled.iter().any(|file| file.path
+            == "app/src/main/assets/theurgy-runtime.json"
+            && file.contents.contains("\"target\": \"android\"")));
+        assert!(compiled.iter().any(|file| file.path
+            == "app/src/main/assets/theurgy-surface.json"
+            && file.contents == "{\"mobileSurface\": true}\n"));
     }
 }

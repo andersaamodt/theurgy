@@ -696,7 +696,9 @@ fn inspect_app_lines(path: &Path) -> Result<Vec<String>> {
     ));
     lines.push(format!(
         "runtime_subscribe_status_command={}",
-        command_text(&effective_subscribe_status_command(&runtime))
+        command_text(&product_runtime::effective_subscribe_status_command(
+            &runtime_bridge_from_contract(&runtime)
+        ))
     ));
     lines.push(format!(
         "runtime_operation_status_command={}",
@@ -2116,32 +2118,32 @@ fn compile_native_with_contract(
     preserve_existing_legacy_desktop_adapter: bool,
 ) -> Result<()> {
     let surface_summary = validate_surface_ir(surface)?;
-    product_runtime::validate_native_compile_contract(
-        &product_ir_from_summary(summary),
-        &surface_ir_from_summary(&surface_summary),
+    fs::create_dir_all(out_dir)?;
+    let product = product_ir_from_summary(summary);
+    let surface_ir = surface_ir_from_summary(&surface_summary);
+    let runtime_bridge = runtime_bridge_from_contract(runtime);
+    let files = product_runtime::native_compile_files(
+        &product,
+        &surface_ir,
+        surface,
+        &runtime_bridge,
         target,
     )?;
-    fs::create_dir_all(out_dir)?;
-    write_or_replace(
-        &out_dir.join("theurgy-surface.json"),
-        &format!("{}\n", surface.trim_end()),
-    )?;
-    let runtime_metadata = generated_runtime_metadata(summary, runtime, target, &surface_summary);
-    validate_generated_runtime(&runtime_metadata)?;
-    write_or_replace(&out_dir.join("theurgy-runtime.json"), &runtime_metadata)?;
     if preserve_existing_legacy_desktop_adapter
         && product_runtime::is_desktop_target(target)
         && desktop_adapter_source_exists(target, out_dir)
     {
+        for file in files.into_iter().filter(|file| {
+            file.path == "theurgy-surface.json" || file.path == "theurgy-runtime.json"
+        }) {
+            write_or_replace(&out_dir.join(file.path), &file.contents)?;
+        }
         return Ok(());
     }
-    match target {
-        "macos" => compile_macos(summary, &surface_summary, runtime, out_dir),
-        "linux" => compile_linux(summary, &surface_summary, runtime, out_dir),
-        "ios" => compile_ios(summary, &surface_summary, runtime, out_dir),
-        "android" => compile_android(summary, &surface_summary, runtime, out_dir),
-        _ => Err(TheurgyError::new("unsupported target").into()),
+    for file in files {
+        write_or_replace(&out_dir.join(file.path), &file.contents)?;
     }
+    Ok(())
 }
 
 fn desktop_adapter_source_exists(target: &str, out_dir: &Path) -> bool {
@@ -2154,123 +2156,12 @@ fn desktop_adapter_source_exists(target: &str, out_dir: &Path) -> bool {
     }
 }
 
-fn generated_runtime_metadata(
-    summary: &ProductSummary,
-    runtime: &RuntimeContract,
-    target: &str,
-    surface: &SurfaceSummary,
-) -> String {
-    product_runtime::generated_runtime_metadata(
-        &product_ir_from_summary(summary),
-        &runtime_bridge_from_contract(runtime),
-        target,
-        &surface_ir_from_summary(surface),
-    )
-    .expect("validated compile inputs produce generated runtime metadata")
-}
-
 fn release_target_ids(summary: &ProductSummary) -> Vec<String> {
     summary
         .release_targets
         .iter()
         .map(|release_target| release_target.id.clone())
         .collect()
-}
-
-fn effective_subscribe_status_command(runtime: &RuntimeContract) -> Vec<String> {
-    if !runtime.subscribe_status_command.is_empty() {
-        return runtime.subscribe_status_command.clone();
-    }
-    if !runtime.status_command.is_empty() {
-        return runtime.status_command.clone();
-    }
-    vec![
-        "theurgy-runtime".to_string(),
-        "subscribe-status".to_string(),
-        "--manifest".to_string(),
-        "theurgy-runtime.json".to_string(),
-        "--once".to_string(),
-    ]
-}
-
-fn compile_macos(
-    summary: &ProductSummary,
-    surface: &SurfaceSummary,
-    runtime: &RuntimeContract,
-    out_dir: &Path,
-) -> Result<()> {
-    for file in product_runtime::macos_adapter_files(
-        &product_ir_from_summary(summary),
-        &surface_ir_from_summary(surface),
-        &runtime_bridge_from_contract(runtime),
-    ) {
-        write_or_replace(&out_dir.join(file.path), &file.contents)?;
-    }
-    Ok(())
-}
-
-fn compile_linux(
-    summary: &ProductSummary,
-    surface: &SurfaceSummary,
-    runtime: &RuntimeContract,
-    out_dir: &Path,
-) -> Result<()> {
-    for file in product_runtime::linux_adapter_files(
-        &product_ir_from_summary(summary),
-        &surface_ir_from_summary(surface),
-        &runtime_bridge_from_contract(runtime),
-    ) {
-        write_or_replace(&out_dir.join(file.path), &file.contents)?;
-    }
-    Ok(())
-}
-
-fn compile_ios(
-    summary: &ProductSummary,
-    surface: &SurfaceSummary,
-    runtime: &RuntimeContract,
-    out_dir: &Path,
-) -> Result<()> {
-    for file in product_runtime::ios_adapter_files(
-        &product_ir_from_summary(summary),
-        &surface_ir_from_summary(surface),
-        &runtime_bridge_from_contract(runtime),
-    ) {
-        write_or_replace(&out_dir.join(file.path), &file.contents)?;
-    }
-    copy_generated_contract_resources(out_dir, &out_dir.join("Host/Resources"))?;
-    Ok(())
-}
-
-fn compile_android(
-    summary: &ProductSummary,
-    surface: &SurfaceSummary,
-    runtime: &RuntimeContract,
-    out_dir: &Path,
-) -> Result<()> {
-    for file in product_runtime::android_adapter_files(
-        &product_ir_from_summary(summary),
-        &surface_ir_from_summary(surface),
-        &runtime_bridge_from_contract(runtime),
-    ) {
-        write_or_replace(&out_dir.join(file.path), &file.contents)?;
-    }
-    copy_generated_contract_resources(out_dir, &out_dir.join("app/src/main/assets"))?;
-    Ok(())
-}
-
-fn copy_generated_contract_resources(out_dir: &Path, resources_dir: &Path) -> Result<()> {
-    fs::create_dir_all(resources_dir)?;
-    for name in ["theurgy-runtime.json", "theurgy-surface.json"] {
-        let contents = fs::read_to_string(out_dir.join(name)).map_err(|error| {
-            TheurgyError::new(format!(
-                "could not read generated contract resource {}: {error}",
-                out_dir.join(name).display()
-            ))
-        })?;
-        write_or_replace(&resources_dir.join(name), &contents)?;
-    }
-    Ok(())
 }
 
 fn write_or_replace(path: &Path, contents: &str) -> Result<()> {
