@@ -171,6 +171,20 @@ pub mod product_runtime {
     }
 
     #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct AppCompileContract {
+        pub project_manifest: ProjectManifest,
+        pub product_ir_path: String,
+        pub runtime_manifest_path: String,
+        pub surface_ir_path: String,
+        pub product: ProductIr,
+        pub runtime_manifest: RuntimeManifest,
+        pub runtime: RuntimeBridge,
+        pub surface_text: String,
+        pub surface: SurfaceIr,
+        pub preserve_existing_legacy_desktop_adapter: bool,
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
     pub struct ProductActionContract {
         pub id: String,
         pub label: String,
@@ -829,6 +843,70 @@ pub mod product_runtime {
         })
     }
 
+    pub fn load_app_compile_contract(
+        app_dir: impl AsRef<Path>,
+        target: &str,
+    ) -> ContractResult<AppCompileContract> {
+        let app_dir = app_dir.as_ref();
+        let manifest_path = app_dir.join("theurgy.project.toml");
+        let manifest_text = read_text(&manifest_path)?;
+        let project_manifest = validate_project_manifest_text(&manifest_text)?;
+        let product_ir_path =
+            required_project_manifest_path(&project_manifest.product_ir, "product_ir")?;
+        let runtime_manifest_path =
+            required_project_manifest_path(&project_manifest.runtime_manifest, "runtime_manifest")?;
+        let surface_key = if is_desktop_target(target) {
+            "desktop_surface_ir"
+        } else {
+            "mobile_surface_ir"
+        };
+        let surface_ir_path = if is_desktop_target(target) {
+            required_project_manifest_path(&project_manifest.desktop_surface_ir, surface_key)?
+        } else if is_mobile_target(target) {
+            required_project_manifest_path(&project_manifest.mobile_surface_ir, surface_key)?
+        } else {
+            return Err(ContractError::new(
+                "target must be macos, linux, ios, or android",
+            ));
+        };
+
+        let product_text = read_text(&app_dir.join(&product_ir_path))?;
+        let product = validate_product_ir_text(&product_text)?;
+        let runtime_text = read_text(&app_dir.join(&runtime_manifest_path))?;
+        let runtime_manifest = validate_runtime_manifest_text(&runtime_text)?;
+        let runtime = runtime_bridge_from_manifest_text(&runtime_text)?.with_sources(
+            product_ir_path.clone(),
+            runtime_manifest_path.clone(),
+            surface_ir_path.clone(),
+        );
+        let surface_text = read_text(&app_dir.join(&surface_ir_path))?;
+        let surface = validate_surface_ir_text(&surface_text)?;
+        validate_app_compile_contract(
+            &product,
+            &product_ir_path,
+            &runtime_manifest_path,
+            &surface_ir_path,
+            &runtime_manifest,
+            &runtime,
+            &surface,
+            target,
+        )?;
+        let preserve_existing_legacy_desktop_adapter =
+            runtime.legacy_native_desktop_ir.is_some() && is_desktop_target(target);
+        Ok(AppCompileContract {
+            project_manifest,
+            product_ir_path,
+            runtime_manifest_path,
+            surface_ir_path,
+            product,
+            runtime_manifest,
+            runtime,
+            surface_text,
+            surface,
+            preserve_existing_legacy_desktop_adapter,
+        })
+    }
+
     pub fn runtime_bridge_from_manifest_value(value: &Value) -> ContractResult<RuntimeBridge> {
         let manifest = validate_runtime_manifest_value(value)?;
         let runtime = value_object(value, "runtime")?;
@@ -1277,6 +1355,12 @@ pub mod product_runtime {
             action_ids,
             roles,
         })
+    }
+
+    pub fn validate_surface_ir_text(text: &str) -> ContractResult<SurfaceIr> {
+        let value: Value = serde_json::from_str(text)
+            .map_err(|error| ContractError::new(format!("invalid JSON: {error}")))?;
+        validate_surface_ir_value(&value)
     }
 
     pub fn project_surface_from_product_text(
@@ -2459,6 +2543,18 @@ pub mod product_runtime {
                 "project manifest {key} must be a string array"
             ))),
         }
+    }
+
+    fn required_project_manifest_path(value: &Option<String>, key: &str) -> ContractResult<String> {
+        value
+            .clone()
+            .ok_or_else(|| ContractError::new(format!("manifest missing string key: {key}")))
+    }
+
+    fn read_text(path: &Path) -> ContractResult<String> {
+        fs::read_to_string(path).map_err(|error| {
+            ContractError::new(format!("could not read {}: {error}", path.display()))
+        })
     }
 
     fn release_target_ids(product: &ProductIr) -> Vec<String> {
@@ -5174,6 +5270,106 @@ binary = "deployments-core"
             .unwrap_err()
             .to_string();
         assert_eq!(error, "product IR does not declare target: android");
+    }
+
+    #[test]
+    fn product_runtime_loads_app_compile_contract_from_disk() {
+        let mut root = std::env::temp_dir();
+        root.push(format!(
+            "theurgy-app-compile-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let blueprint = root.join("app-blueprint");
+        std::fs::create_dir_all(&blueprint).unwrap();
+        std::fs::write(
+            root.join("theurgy.project.toml"),
+            "name = \"deployments\"\nkind = \"desktop\"\nsource_root = \"src\"\nproduct_ir = \"app-blueprint/product.ir.json\"\ndesktop_surface_ir = \"app-blueprint/desktop.surface.ir.json\"\nruntime_manifest = \"app-blueprint/runtime.manifest.json\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            blueprint.join("product.ir.json"),
+            serde_json::json!({
+                "version": product_runtime::PRODUCT_IR_SCHEMA,
+                "format": "json",
+                "app": {"id": "deployments", "name": "Deployments", "targets": ["macos"]},
+                "surfaces": {"desktop": "app-blueprint/desktop.surface.ir.json"},
+                "state": {"snapshotSchema": "deployments-state/v1"},
+                "actions": [{
+                    "id": "refresh_state",
+                    "label": "Refresh",
+                    "input": {},
+                    "output": {"schema": "string"},
+                    "effect": "read",
+                    "failure": {"error": "string"},
+                    "safe": true,
+                    "mutating": false,
+                    "longRunning": false,
+                    "privileged": false,
+                    "command": ["deployments-core", "runtime-action", "refresh_state", "{}"]
+                }],
+                "releaseTargets": [{
+                    "id": "macos-native",
+                    "target": "macos",
+                    "surface": "desktop",
+                    "artifact": "generated/macos"
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            blueprint.join("runtime.manifest.json"),
+            serde_json::json!({
+                "version": product_runtime::RUNTIME_MANIFEST_SCHEMA,
+                "app": "deployments",
+                "productIr": "app-blueprint/product.ir.json",
+                "runtime": {
+                    "protocol": product_runtime::RUNTIME_ACTION_PROTOCOL,
+                    "stateCommand": ["deployments-core", "runtime-state"],
+                    "actionCommand": ["deployments-core", "runtime-action"]
+                },
+                "surfaces": {
+                    "desktop": "app-blueprint/desktop.surface.ir.json"
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            blueprint.join("desktop.surface.ir.json"),
+            serde_json::json!({
+                "version": product_runtime::DESKTOP_SURFACE_IR_SCHEMA,
+                "format": "json",
+                "product": "deployments",
+                "target": "desktop",
+                "actions": ["refresh_state"],
+                "window": {
+                    "id": "window.main",
+                    "type": "Window",
+                    "role": "left-list-detail"
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let contract = product_runtime::load_app_compile_contract(&root, "macos").unwrap();
+        assert_eq!(contract.product.app_id, "deployments");
+        assert_eq!(contract.product_ir_path, "app-blueprint/product.ir.json");
+        assert_eq!(
+            contract.surface_ir_path,
+            "app-blueprint/desktop.surface.ir.json"
+        );
+        assert_eq!(
+            contract.surface.action_ids,
+            vec!["refresh_state".to_string()]
+        );
+        assert!(!contract.preserve_existing_legacy_desktop_adapter);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

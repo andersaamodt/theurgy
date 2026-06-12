@@ -442,59 +442,14 @@ fn command_compile_native(args: &[String]) -> Result<()> {
 
 fn command_compile_app(args: &[String]) -> Result<()> {
     let (app_dir, target, out_dir) = parse_compile_args(args)?;
-    let manifest_path = app_dir.join("theurgy.project.toml");
-    let manifest = fs::read_to_string(&manifest_path).map_err(|error| {
-        TheurgyError::new(format!(
-            "could not read {}: {error}",
-            manifest_path.display()
-        ))
-    })?;
-    let project_manifest = inspect_manifest(&manifest)?;
-    let product_ir = required_project_manifest_path(&project_manifest.product_ir, "product_ir")?;
-    let runtime_manifest =
-        required_project_manifest_path(&project_manifest.runtime_manifest, "runtime_manifest")?;
-    let surface_key = if matches!(target, "macos" | "linux") {
-        "desktop_surface_ir"
-    } else {
-        "mobile_surface_ir"
-    };
-    let surface_ir = if matches!(target, "macos" | "linux") {
-        required_project_manifest_path(&project_manifest.desktop_surface_ir, surface_key)?
-    } else {
-        required_project_manifest_path(&project_manifest.mobile_surface_ir, surface_key)?
-    };
-    let product_path = app_dir.join(&product_ir);
-    let runtime_path = app_dir.join(&runtime_manifest);
-    let surface_path = app_dir.join(&surface_ir);
-    let product = read_json(&product_path)?;
-    let product_summary = validate_product_ir(&product)?;
-    let runtime_text = read_json(&runtime_path)?;
-    let runtime_summary = validate_runtime_manifest(&runtime_text)?;
-    let runtime_contract = runtime_contract_from_manifest(&runtime_text)?;
-    let runtime_contract = runtime_contract.with_sources(
-        product_ir.clone(),
-        runtime_manifest.clone(),
-        surface_ir.clone(),
-    );
-    let surface = read_json(&surface_path)?;
-    let surface_summary = validate_surface_ir(&surface)?;
-    product_runtime::validate_app_compile_contract(
-        &product_summary,
-        &product_ir,
-        &runtime_manifest,
-        &surface_ir,
-        &runtime_summary,
-        &runtime_contract,
-        &surface_summary,
-        target,
-    )?;
+    let contract = product_runtime::load_app_compile_contract(app_dir, target)?;
     compile_native_with_contract(
-        &product_summary,
-        &surface,
-        &runtime_contract,
+        &contract.product,
+        &contract.surface_text,
+        &contract.runtime,
         target,
         out_dir,
-        runtime_contract.legacy_native_desktop_ir.is_some(),
+        contract.preserve_existing_legacy_desktop_adapter,
     )?;
     println!("status=ok");
     println!("app={}", app_dir.display());
