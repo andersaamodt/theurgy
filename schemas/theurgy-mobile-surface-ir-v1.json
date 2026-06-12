@@ -10,9 +10,15 @@
     "product": { "type": "string", "minLength": 1 },
     "target": { "enum": ["mobile", "ios", "android"] },
     "screens": { "type": "array", "items": { "$ref": "#/$defs/screen" }, "minItems": 1 },
-    "actions": { "type": "array", "items": { "type": "string" } }
+    "actions": { "type": "array", "items": { "type": "string" } },
+    "capabilities": { "$ref": "#/$defs/capabilityList" }
   },
   "$defs": {
+    "capabilityList": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
     "screen": {
       "type": "object",
       "required": ["id", "title", "node"],

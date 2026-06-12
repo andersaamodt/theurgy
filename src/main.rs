@@ -4134,6 +4134,10 @@ mod tests {
             &serde_json::json!(["refresh_state", "publish_changes"])
         );
         assert_eq!(
+            runtime_json.get("surfaceCapabilities").unwrap(),
+            &serde_json::json!([])
+        );
+        assert_eq!(
             runtime_json.get("surfaceRoles").unwrap(),
             &serde_json::json!([
                 "left-list-detail",
@@ -4819,6 +4823,10 @@ mod tests {
         assert_eq!(
             runtime_json.get("surfaceActions").unwrap(),
             &serde_json::json!(["refresh_state", "publish_changes"])
+        );
+        assert_eq!(
+            runtime_json.get("surfaceCapabilities").unwrap(),
+            &serde_json::json!([])
         );
         assert_eq!(
             runtime_json.get("surfaceRoles").unwrap(),

@@ -208,6 +208,7 @@ pub mod product_runtime {
         pub actions: usize,
         pub product_actions: usize,
         pub surface_actions: usize,
+        pub surface_capabilities: usize,
         pub surface_action_contracts: usize,
         pub surface_screens: usize,
         pub surface_screen_contracts: usize,
@@ -333,6 +334,7 @@ pub mod product_runtime {
         pub product: String,
         pub target: String,
         pub action_ids: Vec<String>,
+        pub capabilities: Vec<String>,
         pub roles: Vec<String>,
         pub mobile_screens: Vec<MobileScreenContract>,
     }
@@ -1341,6 +1343,7 @@ pub mod product_runtime {
             "productBackgroundJobs",
             "productAuditKeys",
             "surfaceActions",
+            "surfaceCapabilities",
             "surfaceRoles",
             "surfaceScreens",
         ] {
@@ -1431,6 +1434,7 @@ pub mod product_runtime {
             ));
         }
         let surface_actions = value_string_array(value, "surfaceActions")?;
+        let surface_capabilities = value_string_array(value, "surfaceCapabilities")?;
         for action_id in &surface_actions {
             if !product_actions
                 .iter()
@@ -1593,6 +1597,7 @@ pub mod product_runtime {
             actions: product_actions.len(),
             product_actions: product_actions.len(),
             surface_actions: surface_actions.len(),
+            surface_capabilities: surface_capabilities.len(),
             surface_action_contracts: surface_contracts.len(),
             surface_screens: surface_screens.len(),
             surface_screen_contracts: surface_screen_contracts.len(),
@@ -1721,6 +1726,10 @@ pub mod product_runtime {
             .filter(|target| !target.is_empty())
             .ok_or_else(|| ContractError::new("surface IR target required"))?;
         let action_ids = surface_action_ids(value)?;
+        let mut capabilities =
+            optional_string_array(value, "capabilities", "surface IR capabilities")?;
+        capabilities.sort();
+        capabilities.dedup();
         let mut roles = Vec::new();
         let mut mobile_screens = Vec::new();
         if schema == DESKTOP_SURFACE_IR_SCHEMA {
@@ -1747,6 +1756,7 @@ pub mod product_runtime {
             product,
             target,
             action_ids,
+            capabilities,
             roles,
             mobile_screens,
         })
@@ -2104,6 +2114,10 @@ pub mod product_runtime {
         object.insert(
             "surfaceActions".to_string(),
             string_vec_value(&surface.action_ids),
+        );
+        object.insert(
+            "surfaceCapabilities".to_string(),
+            string_vec_value(&surface.capabilities),
         );
         object.insert(
             "surfaceActionContracts".to_string(),
@@ -2518,6 +2532,10 @@ pub mod product_runtime {
                 "desktop_surface_actions={}",
                 surface.action_ids.len()
             ));
+            lines.push(format!(
+                "desktop_surface_capabilities={}",
+                surface.capabilities.join(",")
+            ));
             lines.push(format!("desktop_surface_roles={}", surface.roles.join(",")));
             if runtime_manifest.desktop_surface_ir.as_deref() != Some(desktop_surface_ir) {
                 return Err(ContractError::new(
@@ -2533,6 +2551,10 @@ pub mod product_runtime {
             lines.push(format!(
                 "mobile_surface_actions={}",
                 surface.action_ids.len()
+            ));
+            lines.push(format!(
+                "mobile_surface_capabilities={}",
+                surface.capabilities.join(",")
             ));
             lines.push(format!("mobile_surface_roles={}", surface.roles.join(",")));
             lines.push(format!(
@@ -7418,6 +7440,7 @@ binary = "deployments-core"
   "surfaceSchema": "theurgy-desktop-surface-ir/v1",
   "surfaceTarget": "macos",
   "surfaceActions": ["refresh_state"],
+  "surfaceCapabilities": ["drawer-contracts"],
   "surfaceActionContracts": [{
     "id": "refresh_state",
     "label": "Refresh",

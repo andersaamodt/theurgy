@@ -10,9 +10,15 @@
     "product": { "type": "string", "minLength": 1 },
     "target": { "enum": ["desktop", "macos", "linux"] },
     "window": { "$ref": "#/$defs/node" },
-    "actions": { "type": "array", "items": { "type": "string" } }
+    "actions": { "type": "array", "items": { "type": "string" } },
+    "capabilities": { "$ref": "#/$defs/capabilityList" }
   },
   "$defs": {
+    "capabilityList": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
     "node": {
       "type": "object",
       "required": ["id", "type"],
