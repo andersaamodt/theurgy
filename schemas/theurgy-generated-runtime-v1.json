@@ -32,6 +32,7 @@
     "surface",
     "surfaceSchema",
     "surfaceTarget",
+    "productPersistenceRootContracts",
     "productBackgroundJobContracts",
     "surfaceActions",
     "surfaceActionContracts",
@@ -88,6 +89,10 @@
       "enum": ["local-process-json", "external-json-abi"]
     },
     "productPersistenceRoots": { "$ref": "#/$defs/stringList" },
+    "productPersistenceRootContracts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/persistenceRootContract" }
+    },
     "productBackgroundJobs": { "$ref": "#/$defs/stringList" },
     "productBackgroundJobContracts": {
       "type": "array",
@@ -191,6 +196,16 @@
         "label": { "type": "string", "minLength": 1 },
         "command": { "$ref": "#/$defs/command" },
         "state": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "persistenceRootContract": {
+      "type": "object",
+      "required": ["id", "kind"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
+        "kind": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 }
       },
       "additionalProperties": false
     },

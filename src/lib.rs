@@ -223,6 +223,7 @@ pub mod product_runtime {
         pub state_command: Vec<String>,
         pub state_status_command: Vec<String>,
         pub persistence_truth: String,
+        pub persistence_roots: Vec<PersistenceRoot>,
         pub persistence_root_ids: Vec<String>,
         pub background_jobs: Vec<BackgroundJob>,
         pub background_job_ids: Vec<String>,
@@ -257,6 +258,13 @@ pub mod product_runtime {
         pub label: String,
         pub command: Vec<String>,
         pub state: Option<String>,
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct PersistenceRoot {
+        pub id: String,
+        pub kind: String,
+        pub path: Option<String>,
     }
 
     #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1128,7 +1136,6 @@ pub mod product_runtime {
             "productCapabilities",
             "productPermissions",
             "productDomainObjects",
-            "productPersistenceRoots",
             "productBackgroundJobs",
             "productReleaseTargets",
             "productAuditKeys",
@@ -1136,6 +1143,23 @@ pub mod product_runtime {
             "surfaceRoles",
         ] {
             optional_string_array(value, key, &format!("generated runtime {key}"))?;
+        }
+        let product_persistence_roots = value_string_array(value, "productPersistenceRoots")?;
+        let persistence_root_contracts = value_array(value, "productPersistenceRootContracts")?;
+        if persistence_root_contracts.len() != product_persistence_roots.len() {
+            return Err(ContractError::new(
+                "generated runtime productPersistenceRootContracts must match productPersistenceRoots length",
+            ));
+        }
+        let mut persistence_root_contract_ids = Vec::new();
+        for contract in persistence_root_contracts {
+            persistence_root_contract_ids
+                .push(validate_generated_persistence_root_contract(contract)?);
+        }
+        if persistence_root_contract_ids != product_persistence_roots {
+            return Err(ContractError::new(
+                "generated runtime productPersistenceRootContracts order must match productPersistenceRoots",
+            ));
         }
         let product_background_jobs = value_string_array(value, "productBackgroundJobs")?;
         let background_job_contracts = value_array(value, "productBackgroundJobContracts")?;
@@ -1346,8 +1370,12 @@ pub mod product_runtime {
         let state_command = optional_string_array(state, "command", "product IR state.command")?;
         let state_status_command =
             optional_string_array(state, "statusCommand", "product IR state.statusCommand")?;
-        let persistence_root_ids =
-            optional_object_id_array(state, "roots", "product IR state.roots")?;
+        let persistence_roots =
+            validate_product_persistence_roots(state, "roots", "product IR state.roots")?;
+        let persistence_root_ids = persistence_roots
+            .iter()
+            .map(|root| root.id.clone())
+            .collect();
         let persistence_truth = validate_product_persistence(value)?;
         let background_jobs =
             validate_product_background_jobs(value, "backgroundJobs", "product IR backgroundJobs")?;
@@ -1372,6 +1400,7 @@ pub mod product_runtime {
             state_command,
             state_status_command,
             persistence_truth,
+            persistence_roots,
             persistence_root_ids,
             background_jobs,
             background_job_ids,
@@ -1618,6 +1647,10 @@ pub mod product_runtime {
         object.insert(
             "productPersistenceRoots".to_string(),
             string_vec_value(&product.persistence_root_ids),
+        );
+        object.insert(
+            "productPersistenceRootContracts".to_string(),
+            persistence_root_contracts_value(&product.persistence_roots),
         );
         object.insert(
             "productPersistenceTruth".to_string(),
@@ -2011,6 +2044,19 @@ pub mod product_runtime {
             "product_persistence_truth={}",
             product.persistence_truth
         ));
+        lines.push(format!(
+            "product_persistence_roots={}",
+            product.persistence_root_ids.join(",")
+        ));
+        for root in &product.persistence_roots {
+            lines.push(format!(
+                "product_persistence_root_{}_kind={}",
+                root.id, root.kind
+            ));
+            if let Some(path) = &root.path {
+                lines.push(format!("product_persistence_root_{}_path={path}", root.id));
+            }
+        }
         lines.push(format!(
             "product_background_jobs={}",
             product.background_job_ids.join(",")
@@ -2954,6 +3000,23 @@ pub mod product_runtime {
                     object.insert("command".to_string(), string_vec_value(&job.command));
                     if let Some(state) = &job.state {
                         object.insert("state".to_string(), Value::String(state.clone()));
+                    }
+                    Value::Object(object)
+                })
+                .collect(),
+        )
+    }
+
+    fn persistence_root_contracts_value(roots: &[PersistenceRoot]) -> Value {
+        Value::Array(
+            roots
+                .iter()
+                .map(|root| {
+                    let mut object = serde_json::Map::new();
+                    object.insert("id".to_string(), Value::String(root.id.clone()));
+                    object.insert("kind".to_string(), Value::String(root.kind.clone()));
+                    if let Some(path) = &root.path {
+                        object.insert("path".to_string(), Value::String(path.clone()));
                     }
                     Value::Object(object)
                 })
@@ -4414,6 +4477,25 @@ struct TheurgyNativeApp: App {
         Ok(id)
     }
 
+    fn validate_generated_persistence_root_contract(contract: &Value) -> ContractResult<String> {
+        let id = value_string(contract, "id")
+            .filter(|id| valid_action_id(id))
+            .ok_or_else(|| {
+                ContractError::new("generated runtime persistence root contract id invalid")
+            })?;
+        value_string(contract, "kind")
+            .filter(|kind| !kind.is_empty())
+            .ok_or_else(|| {
+                ContractError::new("generated runtime persistence root contract kind required")
+            })?;
+        optional_nonempty_string(
+            contract,
+            "path",
+            "generated runtime persistence root contract path",
+        )?;
+        Ok(id)
+    }
+
     fn validate_generated_background_job_contract(contract: &Value) -> ContractResult<String> {
         let id = value_string(contract, "id")
             .filter(|id| valid_action_id(id))
@@ -4653,6 +4735,37 @@ struct TheurgyNativeApp: App {
             ids.push(id.to_string());
         }
         Ok(ids)
+    }
+
+    fn validate_product_persistence_roots(
+        value: &Value,
+        key: &str,
+        label: &str,
+    ) -> ContractResult<Vec<PersistenceRoot>> {
+        let Some(raw) = value.get(key) else {
+            return Ok(Vec::new());
+        };
+        let Some(array) = raw.as_array() else {
+            return Err(ContractError::new(format!("{label} must be an array")));
+        };
+        let mut roots = Vec::new();
+        let mut ids = BTreeSet::new();
+        for item in array {
+            let Some(_object) = item.as_object() else {
+                return Err(ContractError::new(format!("{label} must contain objects")));
+            };
+            let id = required_stable_id(item, &format!("{label} object.id"))?;
+            if !ids.insert(id.clone()) {
+                return Err(ContractError::new(format!(
+                    "{label} object.id duplicated: {id}"
+                )));
+            }
+            let kind =
+                required_nonempty_object_string(item, "kind", &format!("{label} object.kind"))?;
+            let path = optional_nonempty_string(item, "path", &format!("{label} object.path"))?;
+            roots.push(PersistenceRoot { id, kind, path });
+        }
+        Ok(roots)
     }
 
     fn validate_product_background_jobs(
@@ -5554,7 +5667,11 @@ binary = "deployments-core"
                 "snapshotSchema": "deployments-state/v1",
                 "command": ["deployments-core", "runtime-state"],
                 "statusCommand": ["deployments-core", "runtime-status"],
-                "roots": [{"id": "headquarters-workspace", "kind": "xdg-state"}]
+                "roots": [{
+                    "id": "headquarters-workspace",
+                    "kind": "xdg-state",
+                    "path": "${XDG_STATE_HOME:-$HOME/.local/state}/wizardry-apps/headquarters/workspaces/<workspace-key>"
+                }]
             },
             "persistence": {
                 "truth": "headquarters-compatible-file-first"
@@ -5597,6 +5714,15 @@ binary = "deployments-core"
         assert_eq!(
             product.persistence_truth,
             "headquarters-compatible-file-first".to_string()
+        );
+        assert_eq!(
+            product.persistence_root_ids,
+            vec!["headquarters-workspace".to_string()]
+        );
+        assert_eq!(product.persistence_roots[0].kind, "xdg-state".to_string());
+        assert_eq!(
+            product.persistence_roots[0].path,
+            Some("${XDG_STATE_HOME:-$HOME/.local/state}/wizardry-apps/headquarters/workspaces/<workspace-key>".to_string())
         );
         assert_eq!(
             product.background_job_ids,
@@ -5939,6 +6065,11 @@ binary = "deployments-core"
   "productDomainObjects": ["deployment"],
   "productStateSnapshotSchema": "deployments-state/v1",
   "productPersistenceRoots": ["headquarters-workspace"],
+  "productPersistenceRootContracts": [{
+    "id": "headquarters-workspace",
+    "kind": "xdg-state",
+    "path": "${XDG_STATE_HOME:-$HOME/.local/state}/wizardry-apps/headquarters/workspaces/<workspace-key>"
+  }],
   "productPersistenceTruth": "file-first",
   "adapterRuntimeTransport": "local-process-json",
   "productBackgroundJobs": [],
@@ -6252,7 +6383,11 @@ binary = "deployments-core"
             }],
             "state": {
                 "snapshotSchema": "deployments-state/v1",
-                "roots": [{"id": "headquarters-workspace", "kind": "xdg-state"}]
+                "roots": [{
+                    "id": "headquarters-workspace",
+                    "kind": "xdg-state",
+                    "path": "${XDG_STATE_HOME:-$HOME/.local/state}/wizardry-apps/headquarters/workspaces/<workspace-key>"
+                }]
             },
             "backgroundJobs": [{
                 "id": "server-queue",
@@ -6310,6 +6445,18 @@ binary = "deployments-core"
         assert_eq!(summary.surface_actions, 1);
         assert!(metadata.contains("\"legacyNativeDesktopIr\": \"app-blueprint/app.ir.yaml\""));
         let runtime_json: serde_json::Value = serde_json::from_str(&metadata).unwrap();
+        assert_eq!(
+            runtime_json.get("productPersistenceRoots").unwrap(),
+            &serde_json::json!(["headquarters-workspace"])
+        );
+        assert_eq!(
+            runtime_json.get("productPersistenceRootContracts").unwrap(),
+            &serde_json::json!([{
+                "id": "headquarters-workspace",
+                "kind": "xdg-state",
+                "path": "${XDG_STATE_HOME:-$HOME/.local/state}/wizardry-apps/headquarters/workspaces/<workspace-key>"
+            }])
+        );
         assert_eq!(
             runtime_json.get("productBackgroundJobs").unwrap(),
             &serde_json::json!(["server-queue"])
