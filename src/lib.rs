@@ -1424,6 +1424,47 @@ pub mod product_runtime {
         ]
     }
 
+    pub fn android_adapter_files(
+        product: &ProductIr,
+        surface: &SurfaceIr,
+        runtime: &RuntimeBridge,
+    ) -> Vec<GeneratedNativeFile> {
+        vec![
+            GeneratedNativeFile {
+                path: "settings.gradle".to_string(),
+                contents: format!("pluginManagement {{ repositories {{ google(); mavenCentral(); gradlePluginPortal() }} }}\ndependencyResolutionManagement {{ repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories {{ google(); mavenCentral() }} }}\nrootProject.name = '{}-theurgy'\ninclude ':app'\n", product.app_id),
+            },
+            GeneratedNativeFile {
+                path: "build.gradle".to_string(),
+                contents: "plugins {\n    id 'com.android.application' version '8.7.3' apply false\n}\n"
+                    .to_string(),
+            },
+            GeneratedNativeFile {
+                path: "app/build.gradle".to_string(),
+                contents: format!(
+                    "plugins {{\n    id 'com.android.application'\n}}\n\nandroid {{\n    namespace 'app.theurgy.generated'\n    compileSdk 35\n\n    defaultConfig {{\n        applicationId 'app.theurgy.{}'\n        minSdk 26\n        targetSdk 35\n        versionCode 1\n        versionName '0.1.0'\n    }}\n}}\n",
+                    product.app_id.replace('-', "_")
+                ),
+            },
+            GeneratedNativeFile {
+                path: "app/src/main/AndroidManifest.xml".to_string(),
+                contents: format!(
+                    "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">\n    <application android:theme=\"@style/AppTheme\" android:label=\"{}\">\n        <activity android:name=\".MainActivity\" android:exported=\"true\">\n            <intent-filter>\n                <action android:name=\"android.intent.action.MAIN\" />\n                <category android:name=\"android.intent.category.LAUNCHER\" />\n            </intent-filter>\n        </activity>\n    </application>\n</manifest>\n",
+                    xml_escape(&product.app_name)
+                ),
+            },
+            GeneratedNativeFile {
+                path: "app/src/main/res/values/styles.xml".to_string(),
+                contents: "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<resources>\n    <style name=\"AppTheme\" parent=\"android:style/Theme.Material.Light.NoActionBar\" />\n</resources>\n"
+                    .to_string(),
+            },
+            GeneratedNativeFile {
+                path: "app/src/main/java/app/theurgy/generated/MainActivity.java".to_string(),
+                contents: android_adapter_source(product, surface, runtime),
+            },
+        ]
+    }
+
     pub fn validate_action_ir_value(value: &Value) -> ContractResult<ActionIr> {
         expect_value_string(value, "version", ACTION_IR_SCHEMA)?;
         let action_values = value_array(value, "actions")?;
@@ -2211,6 +2252,232 @@ struct TheurgyMobileApp: App {
             )
     }
 
+    fn android_adapter_source(
+        product: &ProductIr,
+        surface: &SurfaceIr,
+        runtime: &RuntimeBridge,
+    ) -> String {
+        let action_contracts = surface_action_contracts(product, surface);
+        let subscribe_status_command = effective_subscribe_status_command(runtime);
+        let template = r#"package app.theurgy.generated;
+
+import android.app.Activity;
+import android.os.Bundle;
+import android.widget.TextView;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+public final class MainActivity extends Activity {
+  private static final String PROTOCOL = "__PROTOCOL__";
+  private static final String[] STATE_COMMAND = __STATE_COMMAND__;
+  private static final String[] STATUS_COMMAND = __STATUS_COMMAND__;
+  private static final String[] SUBSCRIBE_STATUS_COMMAND = __SUBSCRIBE_STATUS_COMMAND__;
+  private static final String[] OPERATION_STATUS_COMMAND = __OPERATION_STATUS_COMMAND__;
+  private static final String[] ACTION_COMMAND = __ACTION_COMMAND__;
+  private static final String[] HISTORY_COMMAND = __HISTORY_COMMAND__;
+  private static final String[] DAEMON_COMMAND = __DAEMON_COMMAND__;
+  private static final ProductActionContract[] ACTION_CONTRACTS = __ACTION_CONTRACTS__;
+
+  private static final class ProductActionContract {
+    final String id;
+    final String label;
+    final String effect;
+    final boolean safe;
+    final boolean mutating;
+    final boolean longRunning;
+    final boolean privileged;
+    final String[] inputKeys;
+    final String[] outputKeys;
+    final String[] failureKeys;
+    final String[][] inputShape;
+    final String[][] outputShape;
+    final String[][] failureShape;
+
+    ProductActionContract(String id, String label, String effect, boolean safe, boolean mutating, boolean longRunning, boolean privileged, String[] inputKeys, String[] outputKeys, String[] failureKeys, String[][] inputShape, String[][] outputShape, String[][] failureShape) {
+      this.id = id;
+      this.label = label;
+      this.effect = effect;
+      this.safe = safe;
+      this.mutating = mutating;
+      this.longRunning = longRunning;
+      this.privileged = privileged;
+      this.inputKeys = inputKeys;
+      this.outputKeys = outputKeys;
+      this.failureKeys = failureKeys;
+      this.inputShape = inputShape;
+      this.outputShape = outputShape;
+      this.failureShape = failureShape;
+    }
+  }
+
+  private static String[] commandFor(ProductActionContract action, String json) {
+    String[] command = new String[ACTION_COMMAND.length + 2];
+    System.arraycopy(ACTION_COMMAND, 0, command, 0, ACTION_COMMAND.length);
+    command[ACTION_COMMAND.length] = action.id;
+    command[ACTION_COMMAND.length + 1] = json;
+    return command;
+  }
+
+  private static String actionEnvelope(String app, ProductActionContract action, JSONObject params) {
+    try {
+      JSONObject envelope = new JSONObject();
+      envelope.put("protocol", PROTOCOL);
+      envelope.put("app", app);
+      envelope.put("action", action.id);
+      envelope.put("params", params);
+      return envelope.toString();
+    } catch (JSONException error) {
+      return "{}";
+    }
+  }
+
+  private String loadBundledContract(String name) {
+    try (InputStream input = getAssets().open(name)) {
+      ByteArrayOutputStream output = new ByteArrayOutputStream();
+      byte[] buffer = new byte[4096];
+      int read;
+      while ((read = input.read(buffer)) != -1) {
+        output.write(buffer, 0, read);
+      }
+      return output.toString(StandardCharsets.UTF_8.name());
+    } catch (IOException error) {
+      return name + " missing";
+    }
+  }
+
+  private static String jsonString(String json, String key) {
+    try {
+      JSONObject object = new JSONObject(json);
+      return object.has(key) ? object.getString(key) : key + " unavailable";
+    } catch (JSONException error) {
+      return key + " unavailable";
+    }
+  }
+
+  private static String jsonStringArray(String json, String key) {
+    try {
+      JSONArray values = new JSONObject(json).optJSONArray(key);
+      if (values == null) {
+        return "";
+      }
+      StringBuilder text = new StringBuilder();
+      for (int i = 0; i < values.length(); i += 1) {
+        if (i > 0) {
+          text.append(", ");
+        }
+        text.append(values.optString(i));
+      }
+      return text.toString();
+    } catch (JSONException error) {
+      return "";
+    }
+  }
+
+  private static String surfaceScreens(String json) {
+    try {
+      JSONArray screens = new JSONObject(json).optJSONArray("screens");
+      if (screens == null) {
+        return "";
+      }
+      StringBuilder text = new StringBuilder();
+      for (int i = 0; i < screens.length(); i += 1) {
+        JSONObject screen = screens.optJSONObject(i);
+        if (screen == null) {
+          continue;
+        }
+        if (text.length() > 0) {
+          text.append(", ");
+        }
+        String id = screen.optString("id");
+        String title = screen.optString("title", id);
+        text.append(id).append(": ").append(title);
+      }
+      return text.toString();
+    } catch (JSONException error) {
+      return "";
+    }
+  }
+
+  @Override public void onCreate(Bundle state) {
+    super.onCreate(state);
+    TextView view = new TextView(this);
+    String runtimeMetadata = loadBundledContract("theurgy-runtime.json");
+    String surfaceMetadata = loadBundledContract("theurgy-surface.json");
+    String runtimeApp = jsonString(runtimeMetadata, "app");
+    StringBuilder text = new StringBuilder();
+    text.append("__APP_NAME__\nRuntime: ").append(PROTOCOL)
+      .append("\nRuntime app: ").append(runtimeApp)
+      .append("\nRuntime target: ").append(jsonString(runtimeMetadata, "target"))
+      .append("\nRuntime transport: ").append(jsonString(runtimeMetadata, "adapterRuntimeTransport"))
+      .append("\nRuntime status schema: ").append(jsonString(runtimeMetadata, "runtimeStatusSchema"))
+      .append("\nRuntime action request schema: ").append(jsonString(runtimeMetadata, "runtimeActionRequestSchema"))
+      .append("\nRuntime action result schema: ").append(jsonString(runtimeMetadata, "runtimeActionResultSchema"))
+      .append("\nOperation status schema: ").append(jsonString(runtimeMetadata, "operationStatusSchema"))
+      .append("\nOperation history schema: ").append(jsonString(runtimeMetadata, "operationHistorySchema"))
+      .append("\nRuntime surface actions: ").append(jsonStringArray(runtimeMetadata, "surfaceActions"))
+      .append("\nSurface schema: ").append(jsonString(surfaceMetadata, "version"))
+      .append("\nSurface target: ").append(jsonString(surfaceMetadata, "target"))
+      .append("\nSurface screens: ").append(surfaceScreens(surfaceMetadata))
+      .append("\nState: ").append(String.join(" ", STATE_COMMAND))
+      .append("\nStatus: ").append(String.join(" ", STATUS_COMMAND))
+      .append("\nSubscribe: ").append(String.join(" ", SUBSCRIBE_STATUS_COMMAND))
+      .append("\nOperation status: ").append(String.join(" ", OPERATION_STATUS_COMMAND))
+      .append("\nAction: ").append(String.join(" ", ACTION_COMMAND))
+      .append("\nHistory: ").append(String.join(" ", HISTORY_COMMAND))
+      .append("\nDaemon: ").append(String.join(" ", DAEMON_COMMAND))
+      .append("\nActions:");
+    for (ProductActionContract action : ACTION_CONTRACTS) {
+      text.append("\n").append(action.label).append(" [").append(action.effect).append("] ")
+        .append(String.join(" ", commandFor(action, "{}")))
+        .append("\n  envelope: ").append(actionEnvelope(runtimeApp, action, new JSONObject()));
+    }
+    view.setText(text.toString());
+    setContentView(view);
+  }
+}
+"#;
+        template
+            .replace("__APP_NAME__", &java_escape(&product.app_name))
+            .replace("__PROTOCOL__", &java_escape(&runtime.protocol))
+            .replace(
+                "__STATE_COMMAND__",
+                &java_string_array_literal(&runtime.state_command),
+            )
+            .replace(
+                "__STATUS_COMMAND__",
+                &java_string_array_literal(&runtime.status_command),
+            )
+            .replace(
+                "__SUBSCRIBE_STATUS_COMMAND__",
+                &java_string_array_literal(&subscribe_status_command),
+            )
+            .replace(
+                "__OPERATION_STATUS_COMMAND__",
+                &java_string_array_literal(&runtime.operation_status_command),
+            )
+            .replace(
+                "__ACTION_COMMAND__",
+                &java_string_array_literal(&runtime.action_command),
+            )
+            .replace(
+                "__HISTORY_COMMAND__",
+                &java_string_array_literal(&runtime.history_command),
+            )
+            .replace(
+                "__DAEMON_COMMAND__",
+                &java_string_array_literal(&runtime.daemon_command),
+            )
+            .replace(
+                "__ACTION_CONTRACTS__",
+                &java_action_contracts_literal(&action_contracts),
+            )
+    }
+
     fn macos_adapter_source(
         product: &ProductIr,
         surface: &SurfaceIr,
@@ -2456,6 +2723,76 @@ struct TheurgyNativeApp: App {
 
     fn swift_escape(value: &str) -> String {
         value.replace('\\', "\\\\").replace('"', "\\\"")
+    }
+
+    fn java_string_array_literal(values: &[String]) -> String {
+        let items = values
+            .iter()
+            .map(|value| format!("\"{}\"", java_escape(value)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("new String[] {{{items}}}")
+    }
+
+    fn java_shape_literal(shape: &BTreeMap<String, String>) -> String {
+        let items = shape
+            .iter()
+            .map(|(key, type_name)| {
+                format!(
+                    "{{\"{}\", \"{}\"}}",
+                    java_escape(key),
+                    java_escape(type_name)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("new String[][] {{{items}}}")
+    }
+
+    fn java_action_contracts_literal(contracts: &[ProductActionContract]) -> String {
+        let items = contracts
+            .iter()
+            .map(|contract| {
+                format!(
+                    "new ProductActionContract(\"{}\", \"{}\", \"{}\", {}, {}, {}, {}, {}, {}, {}, {}, {}, {})",
+                    java_escape(&contract.id),
+                    java_escape(&contract.label),
+                    java_escape(&contract.effect),
+                    java_bool(contract.safe),
+                    java_bool(contract.mutating),
+                    java_bool(contract.long_running),
+                    java_bool(contract.privileged),
+                    java_string_array_literal(&contract.input_keys),
+                    java_string_array_literal(&contract.output_keys),
+                    java_string_array_literal(&contract.failure_keys),
+                    java_shape_literal(&contract.input_shape),
+                    java_shape_literal(&contract.output_shape),
+                    java_shape_literal(&contract.failure_shape)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("new ProductActionContract[] {{{items}}}")
+    }
+
+    fn java_bool(value: bool) -> &'static str {
+        if value {
+            "true"
+        } else {
+            "false"
+        }
+    }
+
+    fn java_escape(value: &str) -> String {
+        c_escape(value)
+    }
+
+    fn xml_escape(value: &str) -> String {
+        value
+            .replace('&', "&amp;")
+            .replace('"', "&quot;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
     }
 
     fn expect_value_string(value: &Value, key: &str, expected: &str) -> ContractResult<()> {
@@ -3792,7 +4129,7 @@ mod tests {
             "app": {
                 "id": "deployments",
                 "name": "Deployments",
-                "targets": ["macos", "linux", "ios"],
+                "targets": ["macos", "linux", "ios", "android"],
                 "capabilities": ["native-desktop", "native-mobile"],
                 "permissions": ["files"]
             },
@@ -3818,7 +4155,8 @@ mod tests {
             "releaseTargets": [
                 {"id": "macos-app", "target": "macos", "surface": "desktop", "artifact": "generated/macos"},
                 {"id": "linux-app", "target": "linux", "surface": "desktop", "artifact": "generated/linux"},
-                {"id": "ios-app", "target": "ios", "surface": "mobile", "artifact": "generated/mobile/ios"}
+                {"id": "ios-app", "target": "ios", "surface": "mobile", "artifact": "generated/mobile/ios"},
+                {"id": "android-app", "target": "android", "surface": "mobile", "artifact": "generated/mobile/android"}
             ],
             "persistence": {"truth": "file-first"},
             "audit": {"cliParity": true}
@@ -3895,5 +4233,24 @@ mod tests {
             && file
                 .contents
                 .contains("func actionEnvelope(for action: ProductActionContract")));
+        let android_surface =
+            product_runtime::project_surface_from_product(&product, "android").unwrap();
+        let android_surface = product_runtime::validate_surface_ir_value(&android_surface).unwrap();
+        let files = product_runtime::android_adapter_files(&product, &android_surface, &runtime);
+        assert_eq!(files.len(), 6);
+        assert!(
+            files
+                .iter()
+                .any(|file| file.path == "settings.gradle"
+                    && file.contents.contains("include ':app'"))
+        );
+        assert!(files.iter().any(|file| file.path
+            == "app/src/main/java/app/theurgy/generated/MainActivity.java"
+            && file
+                .contents
+                .contains("private static final ProductActionContract[] ACTION_CONTRACTS")
+            && file
+                .contents
+                .contains("private static String actionEnvelope")));
     }
 }
