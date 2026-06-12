@@ -25,6 +25,7 @@ Theurgy is a higher-integration layer for wizardry-family apps.
 - Desktop generated runtimes must expose `requestCommand` and `requestCommandManifest` for the local typed request dispatcher; mobile generated runtimes must omit local request commands and stay on external JSON ABI handoff.
 - Mobile JSON ABI handoffs must carry Theurgy-owned request schema IDs for state, status, subscribe-status, action, operation-status, and operation-history requests, so platform hosts are not coupled to undocumented envelope conventions.
 - The runtime CLI must also accept those typed request envelopes through `run-request`, so adapters and test harnesses can exercise one protocol instead of re-encoding command-specific arguments.
+- Runtime manifest command execution resolves bare executable names relative to the manifest directory, then adjacent `bin/` and `libexec/`, before falling back to `PATH`; installed adapters can therefore bundle their compiled runtime beside the manifest without depending on a source checkout.
 - Long-running Product IR actions require a typed operation status bridge in generated runtimes so progress and terminal state are inspectable without platform-specific polling conventions.
 - Existing wizardry-apps shell-first builds remain valid without theurgy; theurgy is the higher-integration path, not a mandatory dependency for ordinary script-first apps.
 

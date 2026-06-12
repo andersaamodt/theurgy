@@ -824,19 +824,19 @@ fn run_request_output(request_text: &str, manifest_path: &Path) -> Result<String
             let summary = validate_runtime_state_request_value(&value)?;
             let runtime = runtime_contract_from_path(manifest_path)?;
             validate_runtime_request_app(&summary.app_id, &runtime.app_id, "state")?;
-            run_state_output_with_runtime(&runtime)
+            run_state_output_with_runtime(&runtime, manifest_path.parent())
         }
         product_runtime::RUNTIME_STATUS_REQUEST_SCHEMA => {
             let summary = validate_runtime_status_request_value(&value)?;
             let runtime = runtime_contract_from_path(manifest_path)?;
             validate_runtime_request_app(&summary.app_id, &runtime.app_id, "status")?;
-            run_status_output_with_runtime(&runtime)
+            run_status_output_with_runtime(&runtime, manifest_path.parent())
         }
         product_runtime::RUNTIME_SUBSCRIBE_STATUS_REQUEST_SCHEMA => {
             let summary = validate_runtime_subscribe_status_request_value(&value)?;
             let runtime = runtime_contract_from_path(manifest_path)?;
             validate_runtime_request_app(&summary.app_id, &runtime.app_id, "subscribe status")?;
-            subscribe_status_output_with_runtime(&runtime)
+            subscribe_status_output_with_runtime(&runtime, manifest_path.parent())
         }
         product_runtime::RUNTIME_ACTION_REQUEST_SCHEMA => {
             let summary = validate_runtime_action_request_value(&value)?;
@@ -846,20 +846,34 @@ fn run_request_output(request_text: &str, manifest_path: &Path) -> Result<String
                 .get("params")
                 .ok_or_else(|| TheurgyError::new("runtime action request params required"))?
                 .to_string();
-            run_manifest_action(&runtime, &summary.action_id, &params)
+            run_manifest_action(
+                &runtime,
+                &summary.action_id,
+                &params,
+                manifest_path.parent(),
+            )
         }
         product_runtime::OPERATION_STATUS_REQUEST_SCHEMA => {
             let summary = validate_operation_status_request_value(&value)?;
             let runtime = runtime_contract_from_path(manifest_path)?;
             validate_runtime_request_app(&summary.app_id, &runtime.app_id, "operation status")?;
-            run_operation_status_output_with_runtime(&runtime, &summary.operation_id)
+            run_operation_status_output_with_runtime(
+                &runtime,
+                &summary.operation_id,
+                manifest_path.parent(),
+            )
         }
         product_runtime::OPERATION_HISTORY_REQUEST_SCHEMA => {
             let summary = validate_operation_history_request_value(&value)?;
             let runtime = runtime_contract_from_path(manifest_path)?;
             validate_runtime_request_app(&summary.app_id, &runtime.app_id, "operation history")?;
             let limit = summary.limit.to_string();
-            run_history_output_with_runtime(&runtime, &summary.subject, Some(limit.as_str()))
+            run_history_output_with_runtime(
+                &runtime,
+                &summary.subject,
+                Some(limit.as_str()),
+                manifest_path.parent(),
+            )
         }
         other => {
             Err(TheurgyError::new(format!("unsupported runtime request schema: {other}")).into())
@@ -879,67 +893,78 @@ fn validate_runtime_request_app(request_app: &str, runtime_app: &str, label: &st
 
 fn run_state_output(manifest_path: &Path) -> Result<String> {
     let runtime = runtime_contract_from_path(manifest_path)?;
-    run_state_output_with_runtime(&runtime)
+    run_state_output_with_runtime(&runtime, manifest_path.parent())
 }
 
-fn run_state_output_with_runtime(runtime: &RuntimeContract) -> Result<String> {
+fn run_state_output_with_runtime(
+    runtime: &RuntimeContract,
+    manifest_dir: Option<&Path>,
+) -> Result<String> {
     let command = product_runtime::runtime_state_command(&runtime)?;
-    let output = run_manifest_command(&command, "state")?;
+    let output = run_manifest_command(&command, "state", manifest_dir)?;
     validate_manifest_state_output(&runtime.app_id, &output)?;
     Ok(output)
 }
 
 fn run_status_output(manifest_path: &Path) -> Result<String> {
     let runtime = runtime_contract_from_path(manifest_path)?;
-    run_status_output_with_runtime(&runtime)
+    run_status_output_with_runtime(&runtime, manifest_path.parent())
 }
 
-fn run_status_output_with_runtime(runtime: &RuntimeContract) -> Result<String> {
+fn run_status_output_with_runtime(
+    runtime: &RuntimeContract,
+    manifest_dir: Option<&Path>,
+) -> Result<String> {
     let command = product_runtime::runtime_status_command(&runtime)?;
-    let output = run_manifest_command(&command, "status")?;
+    let output = run_manifest_command(&command, "status", manifest_dir)?;
     validate_manifest_status_output(&runtime.app_id, &output)?;
     Ok(output)
 }
 
 fn run_operation_status_output(manifest_path: &Path, operation_id: &str) -> Result<String> {
     let runtime = runtime_contract_from_path(manifest_path)?;
-    run_operation_status_output_with_runtime(&runtime, operation_id)
+    run_operation_status_output_with_runtime(&runtime, operation_id, manifest_path.parent())
 }
 
 fn run_operation_status_output_with_runtime(
     runtime: &RuntimeContract,
     operation_id: &str,
+    manifest_dir: Option<&Path>,
 ) -> Result<String> {
     let command = product_runtime::runtime_operation_status_command(&runtime, operation_id)?;
-    let output = run_manifest_command(&command, "operation status")?;
+    let output = run_manifest_command(&command, "operation status", manifest_dir)?;
     validate_manifest_operation_status_output(&runtime.app_id, &output)?;
     Ok(output)
 }
 
 fn subscribe_status_output(manifest_path: &Path) -> Result<String> {
     let runtime = runtime_contract_from_path(manifest_path)?;
-    subscribe_status_output_with_runtime(&runtime)
+    subscribe_status_output_with_runtime(&runtime, manifest_path.parent())
 }
 
-fn subscribe_status_output_with_runtime(runtime: &RuntimeContract) -> Result<String> {
+fn subscribe_status_output_with_runtime(
+    runtime: &RuntimeContract,
+    manifest_dir: Option<&Path>,
+) -> Result<String> {
     let command = product_runtime::runtime_subscribe_status_command(&runtime)?;
-    let output = run_manifest_command(&command, "status")?;
+    let output = run_manifest_command(&command, "status", manifest_dir)?;
     validate_manifest_status_output(&runtime.app_id, &output)?;
     Ok(output)
 }
 
 fn run_history_output(manifest_path: &Path, subject: &str, limit: Option<&str>) -> Result<String> {
     let runtime = runtime_contract_from_path(manifest_path)?;
-    run_history_output_with_runtime(&runtime, subject, limit)
+    run_history_output_with_runtime(&runtime, subject, limit, manifest_path.parent())
 }
 
 fn run_history_output_with_runtime(
     runtime: &RuntimeContract,
     subject: &str,
     limit: Option<&str>,
+    manifest_dir: Option<&Path>,
 ) -> Result<String> {
     let command = product_runtime::runtime_history_command(&runtime, subject, limit)?;
-    let output = run_manifest_command(&command, "history")?;
+    let output = run_manifest_command(&command, "history", manifest_dir)?;
     validate_manifest_history_output(&runtime.app_id, &output)?;
     Ok(output)
 }
@@ -953,7 +978,7 @@ fn run_action_output(
     if let Some(path) = manifest_path {
         let runtime = runtime_contract_from_path_with_product_actions(path)?;
         validate_runtime_action_dispatch_request(&runtime, action_id, params)?;
-        return run_manifest_action(&runtime, action_id, params);
+        return run_manifest_action(&runtime, action_id, params, path.parent());
     }
     Ok(format!(
         "{{\n  \"success\": true,\n  \"protocol\": \"{}\",\n  \"app\": \"theurgy-runtime\",\n  \"action\": \"{}\",\n  \"operation\": {{\n    \"id\": \"op-{}\",\n    \"status\": \"accepted\",\n    \"progress\": 0,\n    \"longRunning\": false\n  }},\n  \"params\": {}\n}}",
@@ -981,12 +1006,18 @@ fn validate_runtime_action_dispatch_request(
     validate_runtime_action_request_against_runtime(&summary, &request, runtime)
 }
 
-fn run_manifest_action(runtime: &RuntimeContract, action_id: &str, params: &str) -> Result<String> {
+fn run_manifest_action(
+    runtime: &RuntimeContract,
+    action_id: &str,
+    params: &str,
+    manifest_dir: Option<&Path>,
+) -> Result<String> {
     let command = product_runtime::runtime_action_command(runtime, action_id, params)?;
     let output = run_manifest_action_command(
         &command,
         action_id,
         runtime.product_action_contracts.as_deref(),
+        manifest_dir,
     )?;
     validate_manifest_action_output(
         &runtime.app_id,
@@ -1001,11 +1032,13 @@ fn run_manifest_action_command(
     command: &[String],
     action_id: &str,
     contracts: Option<&[ActionContract]>,
+    manifest_dir: Option<&Path>,
 ) -> Result<String> {
     let Some(executable) = command.first() else {
         return Err(TheurgyError::new("runtime manifest action command required").into());
     };
-    let output = Command::new(executable)
+    let executable_path = resolve_manifest_executable(executable, manifest_dir);
+    let output = Command::new(&executable_path)
         .args(&command[1..])
         .output()
         .map_err(|error| TheurgyError::new(format!("could not run action command: {error}")))?;
@@ -1086,11 +1119,16 @@ fn runtime_contract_from_path_with_product_actions(path: &Path) -> Result<Runtim
     product_runtime::load_runtime_bridge_with_product_actions(path).map_err(Into::into)
 }
 
-fn run_manifest_command(command: &[String], label: &str) -> Result<String> {
+fn run_manifest_command(
+    command: &[String],
+    label: &str,
+    manifest_dir: Option<&Path>,
+) -> Result<String> {
     let Some(executable) = command.first() else {
         return Err(TheurgyError::new(format!("runtime manifest {label} command required")).into());
     };
-    let output = Command::new(executable)
+    let executable_path = resolve_manifest_executable(executable, manifest_dir);
+    let output = Command::new(&executable_path)
         .args(&command[1..])
         .output()
         .map_err(|error| TheurgyError::new(format!("could not run {label} command: {error}")))?;
@@ -1106,6 +1144,38 @@ fn run_manifest_command(command: &[String], label: &str) -> Result<String> {
     String::from_utf8(output.stdout).map_err(|error| {
         TheurgyError::new(format!("{label} command output was not UTF-8: {error}")).into()
     })
+}
+
+fn resolve_manifest_executable(executable: &str, manifest_dir: Option<&Path>) -> PathBuf {
+    let executable_path = Path::new(executable);
+    if executable_path.is_absolute() || executable.contains(std::path::MAIN_SEPARATOR) {
+        return executable_path.to_path_buf();
+    }
+    if let Some(manifest_dir) = manifest_dir {
+        for candidate in [
+            manifest_dir.join(executable),
+            manifest_dir.join("bin").join(executable),
+            manifest_dir.join("libexec").join(executable),
+        ] {
+            if is_executable_file(&candidate) {
+                return candidate;
+            }
+        }
+    }
+    executable_path.to_path_buf()
+}
+
+#[cfg(unix)]
+fn is_executable_file(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    path.metadata()
+        .map(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_executable_file(path: &Path) -> bool {
+    path.is_file()
 }
 
 type ProductSummary = product_runtime::ProductIr;
@@ -3518,6 +3588,30 @@ mod tests {
         assert_eq!(
             error,
             "runtime state request app mismatch: expected deployments, got other-app"
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn run_request_resolves_commands_relative_to_manifest() {
+        let root = runtime_fixture_root("run-request-manifest-relative");
+        let manifest = root.join("runtime.manifest.json");
+        write_or_replace(
+            &manifest,
+            "{\n  \"version\": \"theurgy-runtime-manifest/v1\",\n  \"app\": \"deployments\",\n  \"productIr\": \"app-blueprint/product.ir.json\",\n  \"runtime\": {\n    \"stateCommand\": [\"runtime-fixture\", \"state\"],\n    \"statusCommand\": [\"runtime-fixture\", \"status\"],\n    \"operationStatusCommand\": [\"runtime-fixture\", \"operation-status\"],\n    \"actionCommand\": [\"runtime-fixture\", \"action\"],\n    \"historyCommand\": [\"runtime-fixture\", \"history\"],\n    \"protocol\": \"deployments-runtime/v1\"\n  }\n}\n",
+        )
+        .unwrap();
+
+        let output = run_request_output(
+            "{\"schema\":\"theurgy-runtime-state-request/v1\",\"protocol\":\"theurgy-runtime-action/v1\",\"app\":\"deployments\",\"kind\":\"state\"}",
+            &manifest,
+        )
+        .unwrap();
+        let value: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(
+            value.get("schema").and_then(Value::as_str),
+            Some("theurgy-state-snapshot/v1")
         );
 
         fs::remove_dir_all(root).unwrap();
