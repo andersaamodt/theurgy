@@ -4142,8 +4142,30 @@ struct RuntimeContractView: View {
   let contract = RuntimeContract()
 
   var body: some View {
+    TabView {
+      ForEach(contract.screenContracts, id: \.id) { screen in
+        MobileSurfaceScreenView(contract: contract, screen: screen)
+          .tabItem {
+            Text(screen.title)
+          }
+      }
+    }
+  }
+}
+
+struct MobileSurfaceScreenView: View {
+  let contract: RuntimeContract
+  let screen: MobileScreenContract
+
+  var body: some View {
     NavigationStack {
       List {
+        Section("Screen") {
+          Text("\(screen.title) [\(screen.nodeType)]")
+          Text("Node: \(screen.nodeId)")
+          Text("Role: \(screen.role ?? "none")")
+          Text("Roles: \(screen.roles.joined(separator: ", "))")
+        }
         Section("Runtime") {
           Text(contract.protocolName)
           Text("Runtime app: \(contract.runtimeApp)")
@@ -4198,7 +4220,7 @@ __MOBILE_WORKFLOW_SECTION__
           }
         }
       }
-      .navigationTitle("__APP_NAME__")
+      .navigationTitle(screen.title)
     }
   }
 }
@@ -4297,6 +4319,10 @@ struct TheurgyMobileApp: App {
 
 import android.app.Activity;
 import android.os.Bundle;
+import android.view.View;
+import android.widget.Button;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -4564,14 +4590,38 @@ public final class MainActivity extends Activity {
 
   @Override public void onCreate(Bundle state) {
     super.onCreate(state);
+    LinearLayout root = new LinearLayout(this);
+    root.setOrientation(LinearLayout.VERTICAL);
+    LinearLayout tabs = new LinearLayout(this);
+    tabs.setOrientation(LinearLayout.HORIZONTAL);
     TextView view = new TextView(this);
     String runtimeMetadata = loadBundledContract("theurgy-runtime.json");
     String surfaceMetadata = loadBundledContract("theurgy-surface.json");
     String runtimeApp = jsonString(runtimeMetadata, "app");
     String operationStatusRequestSchema = jsonString(runtimeMetadata, "operationStatusRequestSchema");
     String operationHistoryRequestSchema = jsonString(runtimeMetadata, "operationHistoryRequestSchema");
+    for (MobileScreenContract screen : SCREEN_CONTRACTS) {
+      Button button = new Button(this);
+      button.setText(screen.title);
+      button.setOnClickListener((View clicked) -> view.setText(renderScreenText(screen, runtimeMetadata, surfaceMetadata, runtimeApp, operationStatusRequestSchema, operationHistoryRequestSchema)));
+      tabs.addView(button);
+    }
+    root.addView(tabs);
+    ScrollView scroll = new ScrollView(this);
+    scroll.addView(view);
+    root.addView(scroll);
+    MobileScreenContract initialScreen = SCREEN_CONTRACTS.length > 0 ? SCREEN_CONTRACTS[0] : new MobileScreenContract("runtime", "__APP_NAME__", "runtime", "Screen", null, new String[] {});
+    view.setText(renderScreenText(initialScreen, runtimeMetadata, surfaceMetadata, runtimeApp, operationStatusRequestSchema, operationHistoryRequestSchema));
+    setContentView(root);
+  }
+
+  private static String renderScreenText(MobileScreenContract activeScreen, String runtimeMetadata, String surfaceMetadata, String runtimeApp, String operationStatusRequestSchema, String operationHistoryRequestSchema) {
     StringBuilder text = new StringBuilder();
-    text.append("__APP_NAME__\nRuntime: ").append(PROTOCOL)
+    text.append(activeScreen.title).append("\nScreen: ").append(activeScreen.id)
+      .append("\nScreen node: ").append(activeScreen.nodeId)
+      .append("\nScreen role: ").append(activeScreen.role == null ? "none" : activeScreen.role)
+      .append("\nScreen roles: ").append(String.join(", ", activeScreen.roles))
+      .append("\nRuntime: ").append(PROTOCOL)
       .append("\nRuntime app: ").append(runtimeApp)
       .append("\nRuntime target: ").append(jsonString(runtimeMetadata, "target"))
       .append("\nRuntime transport: ").append(jsonString(runtimeMetadata, "adapterRuntimeTransport"))
@@ -4615,8 +4665,7 @@ __MOBILE_WORKFLOW_TEXT__
         .append(String.join(" ", commandFor(action, params.toString())))
         .append("\n  envelope: ").append(actionEnvelope(runtimeApp, runtimeActionRequestSchema, action, params));
     }
-    view.setText(text.toString());
-    setContentView(view);
+    return text.toString();
   }
 }
 "#;
@@ -7573,6 +7622,12 @@ binary = "deployments-core"
             && file
                 .contents
                 .contains("Text(contract.operationHistoryEnvelope(for: \"default\", limit: 20))")
+            && file.contents.contains("TabView")
+            && file
+                .contents
+                .contains("ForEach(contract.screenContracts, id: \\.id)")
+            && file.contents.contains("struct MobileSurfaceScreenView")
+            && file.contents.contains(".navigationTitle(screen.title)")
             && file.contents.contains("Section(\"Mobile Workflow\")")
             && file.contents.contains("Text(\"status-overview\")")
             && file.contents.contains("Text(\"focused-action-detail\")")));
@@ -7629,6 +7684,11 @@ binary = "deployments-core"
             && file
                 .contents
                 .contains("operationHistoryEnvelope(runtimeApp, operationHistoryRequestSchema, \"default\", 20)")
+            && file.contents.contains("import android.widget.Button;")
+            && file.contents.contains("LinearLayout tabs = new LinearLayout(this);")
+            && file.contents.contains("for (MobileScreenContract screen : SCREEN_CONTRACTS)")
+            && file.contents.contains("button.setOnClickListener")
+            && file.contents.contains("private static String renderScreenText")
             && file
                 .contents
                 .contains("Mobile workflow: status-overview, focused-action-detail")));
