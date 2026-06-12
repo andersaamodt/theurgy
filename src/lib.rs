@@ -191,6 +191,8 @@ pub mod product_runtime {
         pub state_snapshot_schema: String,
         pub persistence_truth: String,
         pub adapter_runtime_transport: String,
+        pub request_command: Option<Vec<String>>,
+        pub request_command_manifest: Option<String>,
         pub runtime_state_request_schema: String,
         pub runtime_status_request_schema: String,
         pub runtime_subscribe_status_request_schema: String,
@@ -1284,6 +1286,29 @@ pub mod product_runtime {
                 ))
             }
         }
+        let request_command =
+            optional_string_array(value, "requestCommand", "generated runtime requestCommand")?;
+        let request_command_manifest = optional_nonempty_string(
+            value,
+            "requestCommandManifest",
+            "generated runtime requestCommandManifest",
+        )?;
+        if matches!(target.as_str(), "macos" | "linux") {
+            if request_command.is_empty() {
+                return Err(ContractError::new(
+                    "generated runtime requestCommand required for local-process-json targets",
+                ));
+            }
+            if request_command_manifest.is_none() {
+                return Err(ContractError::new(
+                    "generated runtime requestCommandManifest required for local-process-json targets",
+                ));
+            }
+        } else if !request_command.is_empty() || request_command_manifest.is_some() {
+            return Err(ContractError::new(
+                "generated runtime mobile targets must use external-json-abi instead of requestCommand",
+            ));
+        }
         let target_release_target = value_string(value, "targetReleaseTarget")
             .filter(|release_target| valid_action_id(release_target))
             .ok_or_else(|| ContractError::new("generated runtime targetReleaseTarget required"))?;
@@ -1546,6 +1571,12 @@ pub mod product_runtime {
             state_snapshot_schema,
             persistence_truth,
             adapter_runtime_transport,
+            request_command: if request_command.is_empty() {
+                None
+            } else {
+                Some(request_command)
+            },
+            request_command_manifest,
             runtime_state_request_schema,
             runtime_status_request_schema,
             runtime_subscribe_status_request_schema,
@@ -2000,6 +2031,16 @@ pub mod product_runtime {
             "stateCommand".to_string(),
             string_vec_value(&runtime.state_command),
         );
+        if adapter_runtime_transport(target) == DESKTOP_ADAPTER_TRANSPORT {
+            object.insert(
+                "requestCommand".to_string(),
+                string_vec_value(&["theurgy-runtime".to_string(), "run-request".to_string()]),
+            );
+            object.insert(
+                "requestCommandManifest".to_string(),
+                Value::String(runtime.runtime_manifest.clone()),
+            );
+        }
         if !runtime.status_command.is_empty() {
             object.insert(
                 "statusCommand".to_string(),
@@ -7220,6 +7261,8 @@ binary = "deployments-core"
   "operationHistoryRequestSchema": "theurgy-operation-history-request/v1",
   "operationStatusSchema": "theurgy-operation-status/v1",
   "operationHistorySchema": "theurgy-operation-history/v1",
+  "requestCommand": ["theurgy-runtime", "run-request"],
+  "requestCommandManifest": "app-blueprint/runtime.manifest.json",
   "stateCommand": ["deployments-core", "runtime-state"],
   "statusCommand": ["deployments-core", "runtime-status"],
   "subscribeStatusCommand": ["deployments-core", "runtime-status"],
@@ -7255,6 +7298,14 @@ binary = "deployments-core"
         assert_eq!(
             summary.adapter_runtime_transport,
             product_runtime::DESKTOP_ADAPTER_TRANSPORT
+        );
+        assert_eq!(
+            summary.request_command.as_deref(),
+            Some(&["theurgy-runtime".to_string(), "run-request".to_string()][..])
+        );
+        assert_eq!(
+            summary.request_command_manifest.as_deref(),
+            Some("app-blueprint/runtime.manifest.json")
         );
         assert_eq!(
             summary.runtime_state_request_schema,
@@ -7594,6 +7645,14 @@ binary = "deployments-core"
         assert_eq!(
             summary.adapter_runtime_transport,
             product_runtime::DESKTOP_ADAPTER_TRANSPORT
+        );
+        assert_eq!(
+            summary.request_command.as_deref(),
+            Some(&["theurgy-runtime".to_string(), "run-request".to_string()][..])
+        );
+        assert_eq!(
+            summary.request_command_manifest.as_deref(),
+            Some("app-blueprint/runtime.manifest.json")
         );
         assert_eq!(
             summary.runtime_state_request_schema,

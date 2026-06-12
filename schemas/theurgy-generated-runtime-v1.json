@@ -91,6 +91,8 @@
     },
     "targetReleaseTarget": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
     "targetReleaseArtifact": { "type": "string", "minLength": 1 },
+    "requestCommand": { "$ref": "#/$defs/command" },
+    "requestCommandManifest": { "type": "string", "minLength": 1 },
     "stateCommand": { "$ref": "#/$defs/command" },
     "statusCommand": { "$ref": "#/$defs/command" },
     "subscribeStatusCommand": { "$ref": "#/$defs/command" },
@@ -165,7 +167,8 @@
           "surfaceTarget": { "enum": ["desktop", "macos", "linux"] },
           "surfaceScreens": { "maxItems": 0 },
           "surfaceScreenContracts": { "maxItems": 0 }
-        }
+        },
+        "required": ["requestCommand", "requestCommandManifest"]
       }
     },
     {
@@ -176,6 +179,8 @@
       "then": {
         "properties": {
           "adapterRuntimeTransport": { "const": "external-json-abi" },
+          "requestCommand": false,
+          "requestCommandManifest": false,
           "surfaceSchema": { "const": "theurgy-mobile-surface-ir/v1" },
           "surfaceTarget": { "enum": ["mobile", "ios", "android"] },
           "surfaceScreens": { "minItems": 1 },

@@ -472,6 +472,12 @@ fn command_validate_generated_runtime(args: &[String]) -> Result<()> {
         "adapter_runtime_transport={}",
         summary.adapter_runtime_transport
     );
+    if let Some(command) = &summary.request_command {
+        println!("request_command={}", command.join(" "));
+    }
+    if let Some(manifest) = &summary.request_command_manifest {
+        println!("request_command_manifest={manifest}");
+    }
     println!(
         "runtime_state_request_schema={}",
         summary.runtime_state_request_schema
@@ -2571,6 +2577,23 @@ mod tests {
                 .and_then(Value::as_str),
             Some("#/$defs/command")
         );
+        assert_eq!(
+            schema
+                .pointer("/properties/requestCommand/$ref")
+                .and_then(Value::as_str),
+            Some("#/$defs/command")
+        );
+        assert_eq!(
+            schema
+                .pointer("/allOf/0/then/required")
+                .and_then(Value::as_array)
+                .map(|values| values.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
+            Some(vec!["requestCommand", "requestCommandManifest"])
+        );
+        assert_eq!(
+            schema.pointer("/allOf/1/then/properties/requestCommand"),
+            Some(&Value::Bool(false))
+        );
         let top_level_required = schema
             .pointer("/required")
             .and_then(Value::as_array)
@@ -3633,6 +3656,24 @@ mod tests {
             &serde_json::json!(["deployments-core", "runtime-state"])
         );
         assert_eq!(
+            generated.request_command.as_deref(),
+            Some(&["theurgy-runtime".to_string(), "run-request".to_string()][..])
+        );
+        assert_eq!(
+            generated.request_command_manifest.as_deref(),
+            Some("generated-runtime-manifest")
+        );
+        assert_eq!(
+            runtime_json.get("requestCommand").unwrap(),
+            &serde_json::json!(["theurgy-runtime", "run-request"])
+        );
+        assert_eq!(
+            runtime_json
+                .get("requestCommandManifest")
+                .and_then(Value::as_str),
+            Some("generated-runtime-manifest")
+        );
+        assert_eq!(
             runtime_json.get("subscribeStatusCommand").unwrap(),
             &serde_json::json!(["deployments-core", "runtime-status"])
         );
@@ -4284,6 +4325,24 @@ mod tests {
         assert_eq!(
             runtime_json.get("stateCommand").unwrap(),
             &serde_json::json!(["custom-core", "state"])
+        );
+        assert_eq!(
+            generated.request_command.as_deref(),
+            Some(&["theurgy-runtime".to_string(), "run-request".to_string()][..])
+        );
+        assert_eq!(
+            generated.request_command_manifest.as_deref(),
+            Some("app-blueprint/runtime.manifest.json")
+        );
+        assert_eq!(
+            runtime_json.get("requestCommand").unwrap(),
+            &serde_json::json!(["theurgy-runtime", "run-request"])
+        );
+        assert_eq!(
+            runtime_json
+                .get("requestCommandManifest")
+                .and_then(Value::as_str),
+            Some("app-blueprint/runtime.manifest.json")
         );
         assert_eq!(
             runtime_json
@@ -5103,6 +5162,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(ios_generated.adapter_runtime_transport, "external-json-abi");
+        assert_eq!(ios_generated.request_command, None);
+        assert_eq!(ios_generated.request_command_manifest, None);
         assert_eq!(
             ios_generated.runtime_state_request_schema,
             "theurgy-runtime-state-request/v1"
@@ -5340,6 +5401,8 @@ mod tests {
             android_generated.adapter_runtime_transport,
             "external-json-abi"
         );
+        assert_eq!(android_generated.request_command, None);
+        assert_eq!(android_generated.request_command_manifest, None);
         assert_eq!(
             android_generated.runtime_state_request_schema,
             "theurgy-runtime-state-request/v1"
