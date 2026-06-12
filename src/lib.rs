@@ -2564,6 +2564,11 @@ pub mod product_runtime {
                     screen.id,
                     screen.roles.join(",")
                 ));
+                lines.push(format!(
+                    "mobile_surface_screen_{}_actions={}",
+                    screen.id,
+                    screen.action_ids.join(",")
+                ));
             }
             if runtime_manifest.mobile_surface_ir.as_deref() != Some(mobile_surface_ir) {
                 return Err(ContractError::new(

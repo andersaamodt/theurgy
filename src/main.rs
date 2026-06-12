@@ -1763,6 +1763,7 @@ mod tests {
             &"mobile_surface_screen_deployment-detail_roles=focused-action-detail,safe-mobile-actions"
                 .to_string()
         ));
+        assert!(lines.contains(&"mobile_surface_screen_deployment-detail_actions=".to_string()));
         assert!(lines.contains(&"compatibility_wizardry_apps_shell_first=true".to_string()));
         assert!(lines.contains(
             &"compatibility_theurgy_required_for_legacy_wizardry_apps=false".to_string()
