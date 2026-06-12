@@ -40,7 +40,7 @@ If `PATH` is omitted, the spell uses `NAME`. The generated desktop project is in
 `theurgy-runtime validate-operation-status PATH` validates the typed status record for a runtime operation.
 `theurgy-runtime run-request REQUEST_JSON --manifest PATH` dispatches typed state, status, subscribe-status, action, operation-status, and operation-history envelopes through a runtime manifest.
 `theurgy-runtime project-surface PATH --target macos|linux|ios|android` emits a target surface projection.
-`theurgy-runtime compile-native PATH --target macos|linux|ios|android --out OUT_DIR` emits a deterministic native adapter root.
+`theurgy-runtime compile-native PATH --target macos|linux|ios|android --out OUT_DIR` emits a deterministic native adapter root from Product IR and bundles generated `app-blueprint/product.ir.json`, `app-blueprint/surface.ir.json`, and `app-blueprint/runtime.manifest.json` resources for the adapter runtime contract.
 `theurgy-runtime compile-app APP_DIR --target macos|linux|ios|android --out OUT_DIR` reads `theurgy.project.toml` and compiles from the app's declared Product IR.
 `theurgy-runtime stage-app-runtime APP_DIR --target macos|linux --out OUT_DIR` builds manifest-declared Cargo binaries and stages them with `theurgy-runtime` in desktop artifact `libexec/` locations.
 `theurgy-runtime inspect-app APP_DIR` validates and summarizes the declared Product IR, target surfaces, runtime bridge commands, compatibility posture, and long-running action coverage.

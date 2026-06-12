@@ -1442,7 +1442,96 @@ fn compile_native(product: &str, target: &str, out_dir: &Path) -> Result<()> {
     let summary = validate_product_ir(product)?;
     let surface = project_surface(product, target)?;
     let runtime = product_runtime::default_runtime_bridge_for_product(&summary);
-    compile_native_with_contract(&summary, &surface, &runtime, target, out_dir, false, &[])
+    let runtime_manifest = generated_runtime_manifest_text(&runtime, target)?;
+    let contract_resources = [
+        (runtime.product_ir.as_str(), product),
+        (runtime.runtime_manifest.as_str(), runtime_manifest.as_str()),
+        (runtime.source_surface_ir.as_str(), surface.as_str()),
+    ];
+    compile_native_with_contract(
+        &summary,
+        &surface,
+        &runtime,
+        target,
+        out_dir,
+        false,
+        &contract_resources,
+    )
+}
+
+fn generated_runtime_manifest_text(runtime: &RuntimeContract, target: &str) -> Result<String> {
+    let mut runtime_object = serde_json::Map::new();
+    runtime_object.insert(
+        "stateCommand".to_string(),
+        json!(runtime.state_command.clone()),
+    );
+    if !runtime.status_command.is_empty() {
+        runtime_object.insert(
+            "statusCommand".to_string(),
+            json!(runtime.status_command.clone()),
+        );
+    }
+    if !runtime.subscribe_status_command.is_empty() {
+        runtime_object.insert(
+            "subscribeStatusCommand".to_string(),
+            json!(runtime.subscribe_status_command.clone()),
+        );
+    }
+    if !runtime.operation_status_command.is_empty() {
+        runtime_object.insert(
+            "operationStatusCommand".to_string(),
+            json!(runtime.operation_status_command.clone()),
+        );
+    }
+    runtime_object.insert(
+        "actionCommand".to_string(),
+        json!(runtime.action_command.clone()),
+    );
+    if !runtime.history_command.is_empty() {
+        runtime_object.insert(
+            "historyCommand".to_string(),
+            json!(runtime.history_command.clone()),
+        );
+    }
+    if !runtime.daemon_command.is_empty() {
+        runtime_object.insert(
+            "daemonCommand".to_string(),
+            json!(runtime.daemon_command.clone()),
+        );
+    }
+    runtime_object.insert("protocol".to_string(), json!(runtime.protocol.clone()));
+
+    let mut surfaces = serde_json::Map::new();
+    let surface_key = if product_runtime::is_mobile_target(target) {
+        "mobile"
+    } else {
+        "desktop"
+    };
+    surfaces.insert(
+        surface_key.to_string(),
+        json!(runtime.source_surface_ir.clone()),
+    );
+    if let Some(legacy) = &runtime.legacy_native_desktop_ir {
+        surfaces.insert("legacyNativeDesktop".to_string(), json!(legacy.clone()));
+    }
+
+    let manifest = json!({
+        "version": "theurgy-runtime-manifest/v1",
+        "app": runtime.app_id,
+        "productIr": runtime.product_ir,
+        "runtime": Value::Object(runtime_object),
+        "surfaces": Value::Object(surfaces),
+        "compatibility": {
+            "wizardryAppsShellFirstStillSupported": runtime.compatibility.wizardry_apps_shell_first_still_supported,
+            "theurgyRequiredForLegacyWizardryApps": runtime.compatibility.theurgy_required_for_legacy_wizardry_apps
+        }
+    });
+    product_runtime::validate_runtime_manifest_value(&manifest)?;
+    serde_json::to_string_pretty(&manifest)
+        .map(|json| format!("{json}\n"))
+        .map_err(|error| {
+            TheurgyError::new(format!("could not serialize runtime manifest: {error}")).into()
+        })
 }
 
 fn compile_native_with_contract(
@@ -3954,6 +4043,19 @@ mod tests {
         compile_native(&sample_product(), "linux", &root).unwrap();
         assert!(root.join("theurgy-surface.json").exists());
         assert!(root.join("theurgy-runtime.json").exists());
+        assert!(root.join("runtime.manifest.json").exists());
+        assert!(root.join("app-blueprint/product.ir.json").exists());
+        assert!(root.join("app-blueprint/runtime.manifest.json").exists());
+        assert!(root.join("app-blueprint/surface.ir.json").exists());
+        let staged_manifest =
+            fs::read_to_string(root.join("app-blueprint/runtime.manifest.json")).unwrap();
+        assert!(staged_manifest.contains("\"version\": \"theurgy-runtime-manifest/v1\""));
+        let staged_product =
+            fs::read_to_string(root.join("app-blueprint/product.ir.json")).unwrap();
+        assert!(staged_product.contains("\"version\": \"theurgy-product-ir/v1\""));
+        let staged_surface =
+            fs::read_to_string(root.join("app-blueprint/surface.ir.json")).unwrap();
+        assert!(staged_surface.contains("\"version\": \"theurgy-desktop-surface-ir/v1\""));
         let runtime = fs::read_to_string(root.join("theurgy-runtime.json")).unwrap();
         let runtime_json: Value = serde_json::from_str(&runtime).unwrap();
         let generated = validate_generated_runtime(&runtime).unwrap();
@@ -3962,15 +4064,15 @@ mod tests {
         assert_eq!(generated.state_snapshot_schema, "deployments-state/v1");
         assert_eq!(
             runtime_json.get("productIr").and_then(Value::as_str),
-            Some("direct-product-ir")
+            Some("app-blueprint/product.ir.json")
         );
         assert_eq!(
             runtime_json.get("runtimeManifest").and_then(Value::as_str),
-            Some("generated-runtime-manifest")
+            Some("app-blueprint/runtime.manifest.json")
         );
         assert_eq!(
             runtime_json.get("sourceSurfaceIr").and_then(Value::as_str),
-            Some("projected-surface-ir")
+            Some("app-blueprint/surface.ir.json")
         );
         assert_eq!(
             runtime_json
@@ -4051,7 +4153,7 @@ mod tests {
         );
         assert_eq!(
             generated.request_command_manifest.as_deref(),
-            Some("generated-runtime-manifest")
+            Some("app-blueprint/runtime.manifest.json")
         );
         assert_eq!(
             runtime_json.get("requestCommand").unwrap(),
@@ -4061,7 +4163,7 @@ mod tests {
             runtime_json
                 .get("requestCommandManifest")
                 .and_then(Value::as_str),
-            Some("generated-runtime-manifest")
+            Some("app-blueprint/runtime.manifest.json")
         );
         assert_eq!(
             runtime_json.get("subscribeStatusCommand").unwrap(),

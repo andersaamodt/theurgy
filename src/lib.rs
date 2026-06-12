@@ -2151,9 +2151,9 @@ pub mod product_runtime {
         RuntimeBridge {
             app_id: product.app_id.clone(),
             protocol: RUNTIME_ACTION_PROTOCOL.to_string(),
-            product_ir: "direct-product-ir".to_string(),
-            runtime_manifest: "generated-runtime-manifest".to_string(),
-            source_surface_ir: "projected-surface-ir".to_string(),
+            product_ir: "app-blueprint/product.ir.json".to_string(),
+            runtime_manifest: "app-blueprint/runtime.manifest.json".to_string(),
+            source_surface_ir: "app-blueprint/surface.ir.json".to_string(),
             legacy_native_desktop_ir: None,
             compatibility: RuntimeCompatibility::shell_first_default(),
             state_command: vec![
@@ -7723,9 +7723,12 @@ binary = "deployments-core"
         let runtime = product_runtime::default_runtime_bridge_for_product(&product);
         assert_eq!(runtime.app_id, "deployments");
         assert_eq!(runtime.protocol, product_runtime::RUNTIME_ACTION_PROTOCOL);
-        assert_eq!(runtime.product_ir, "direct-product-ir");
-        assert_eq!(runtime.runtime_manifest, "generated-runtime-manifest");
-        assert_eq!(runtime.source_surface_ir, "projected-surface-ir");
+        assert_eq!(runtime.product_ir, "app-blueprint/product.ir.json");
+        assert_eq!(
+            runtime.runtime_manifest,
+            "app-blueprint/runtime.manifest.json"
+        );
+        assert_eq!(runtime.source_surface_ir, "app-blueprint/surface.ir.json");
         assert_eq!(
             runtime.state_command,
             vec!["deployments-core".to_string(), "runtime-state".to_string()]
