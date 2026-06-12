@@ -79,6 +79,19 @@ pub mod product_runtime {
     }
 
     #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct OperationStatusRequest {
+        pub app_id: String,
+        pub operation_id: String,
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct OperationHistoryRequest {
+        pub app_id: String,
+        pub subject: String,
+        pub limit: u64,
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
     pub struct RuntimeActionResult {
         pub app_id: String,
         pub action_id: String,
@@ -368,7 +381,7 @@ pub mod product_runtime {
         expect_value_string(value, "schema", RUNTIME_ACTION_REQUEST_SCHEMA)?;
         expect_value_string(value, "protocol", RUNTIME_ACTION_PROTOCOL)?;
         let app_id = value_string(value, "app")
-            .filter(|id| valid_slug(id))
+            .filter(|id| valid_runtime_request_app_id(id))
             .ok_or_else(|| {
                 ContractError::new("runtime action request app must be a lowercase slug")
             })?;
@@ -379,6 +392,54 @@ pub mod product_runtime {
             })?;
         value_object(value, "params")?;
         Ok(RuntimeActionRequest { app_id, action_id })
+    }
+
+    pub fn validate_operation_status_request_value(
+        value: &Value,
+    ) -> ContractResult<OperationStatusRequest> {
+        expect_value_string(value, "schema", OPERATION_STATUS_REQUEST_SCHEMA)?;
+        expect_value_string(value, "protocol", RUNTIME_ACTION_PROTOCOL)?;
+        let app_id = value_string(value, "app")
+            .filter(|id| valid_runtime_request_app_id(id))
+            .ok_or_else(|| {
+                ContractError::new("operation status request app must be a lowercase slug")
+            })?;
+        expect_value_string(value, "kind", "operation-status")?;
+        let operation_id = value_string(value, "operation")
+            .filter(|operation| !operation.is_empty())
+            .ok_or_else(|| ContractError::new("operation status request operation required"))?;
+        Ok(OperationStatusRequest {
+            app_id,
+            operation_id,
+        })
+    }
+
+    pub fn validate_operation_history_request_value(
+        value: &Value,
+    ) -> ContractResult<OperationHistoryRequest> {
+        expect_value_string(value, "schema", OPERATION_HISTORY_REQUEST_SCHEMA)?;
+        expect_value_string(value, "protocol", RUNTIME_ACTION_PROTOCOL)?;
+        let app_id = value_string(value, "app")
+            .filter(|id| valid_runtime_request_app_id(id))
+            .ok_or_else(|| {
+                ContractError::new("operation history request app must be a lowercase slug")
+            })?;
+        expect_value_string(value, "kind", "operation-history")?;
+        let subject = value_string(value, "subject")
+            .filter(|subject| !subject.is_empty())
+            .ok_or_else(|| ContractError::new("operation history request subject required"))?;
+        let limit = value
+            .get("limit")
+            .and_then(Value::as_u64)
+            .filter(|limit| *limit >= 1)
+            .ok_or_else(|| {
+                ContractError::new("operation history request limit must be a positive integer")
+            })?;
+        Ok(OperationHistoryRequest {
+            app_id,
+            subject,
+            limit,
+        })
     }
 
     pub fn validate_runtime_action_request_against_bridge_value(
@@ -5514,6 +5575,15 @@ struct TheurgyNativeApp: App {
             && value.bytes().all(|byte| {
                 byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_')
             })
+    }
+
+    fn valid_runtime_request_app_id(value: &str) -> bool {
+        let mut bytes = value.bytes();
+        let Some(first) = bytes.next() else {
+            return false;
+        };
+        first.is_ascii_lowercase()
+            && bytes.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
     }
 
     fn valid_action_id(value: &str) -> bool {

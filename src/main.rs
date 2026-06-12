@@ -80,6 +80,12 @@ fn run(args: Vec<String>) -> Result<()> {
         Some("validate-runtime-action-result") => {
             command_validate_runtime_action_result(&args[2..])
         }
+        Some("validate-operation-status-request") => {
+            command_validate_operation_status_request(&args[2..])
+        }
+        Some("validate-operation-history-request") => {
+            command_validate_operation_history_request(&args[2..])
+        }
         Some("validate-operation-status") => command_validate_operation_status(&args[2..]),
         Some("validate-operation-history") => command_validate_operation_history(&args[2..]),
         Some("validate-runtime-manifest") => command_validate_runtime_manifest(&args[2..]),
@@ -311,6 +317,23 @@ fn command_validate_operation_status(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+fn command_validate_operation_status_request(args: &[String]) -> Result<()> {
+    if args.len() != 1 {
+        return Err(TheurgyError::new("usage: validate-operation-status-request PATH").into());
+    }
+    let value = read_json(Path::new(&args[0]))?;
+    let summary = validate_operation_status_request(&value)?;
+    println!("status=ok");
+    println!(
+        "schema={}",
+        product_runtime::OPERATION_STATUS_REQUEST_SCHEMA
+    );
+    println!("protocol={}", product_runtime::RUNTIME_ACTION_PROTOCOL);
+    println!("app={}", summary.app_id);
+    println!("operation={}", summary.operation_id);
+    Ok(())
+}
+
 fn command_validate_operation_history(args: &[String]) -> Result<()> {
     if args.len() != 1 {
         return Err(TheurgyError::new("usage: validate-operation-history PATH").into());
@@ -321,6 +344,24 @@ fn command_validate_operation_history(args: &[String]) -> Result<()> {
     println!("schema=theurgy-operation-history/v1");
     println!("app={}", summary.app_id);
     println!("entries={}", summary.entries);
+    Ok(())
+}
+
+fn command_validate_operation_history_request(args: &[String]) -> Result<()> {
+    if args.len() != 1 {
+        return Err(TheurgyError::new("usage: validate-operation-history-request PATH").into());
+    }
+    let value = read_json(Path::new(&args[0]))?;
+    let summary = validate_operation_history_request(&value)?;
+    println!("status=ok");
+    println!(
+        "schema={}",
+        product_runtime::OPERATION_HISTORY_REQUEST_SCHEMA
+    );
+    println!("protocol={}", product_runtime::RUNTIME_ACTION_PROTOCOL);
+    println!("app={}", summary.app_id);
+    println!("subject={}", summary.subject);
+    println!("limit={}", summary.limit);
     Ok(())
 }
 
@@ -870,6 +911,8 @@ type StateSnapshotSummary = product_runtime::StateSnapshot;
 type RuntimeStatusSummary = product_runtime::RuntimeStatus;
 type RuntimeActionRequestSummary = product_runtime::RuntimeActionRequest;
 type RuntimeActionResultSummary = product_runtime::RuntimeActionResult;
+type OperationStatusRequestSummary = product_runtime::OperationStatusRequest;
+type OperationHistoryRequestSummary = product_runtime::OperationHistoryRequest;
 type OperationStatusSummary = product_runtime::OperationStatus;
 type OperationHistorySummary = product_runtime::OperationHistory;
 #[cfg(test)]
@@ -972,6 +1015,15 @@ fn validate_operation_status_value(value: &Value) -> Result<OperationStatusSumma
     product_runtime::validate_operation_status_value(value).map_err(Into::into)
 }
 
+fn validate_operation_status_request(text: &str) -> Result<OperationStatusRequestSummary> {
+    let value = parse_json(text)?;
+    validate_operation_status_request_value(&value)
+}
+
+fn validate_operation_status_request_value(value: &Value) -> Result<OperationStatusRequestSummary> {
+    product_runtime::validate_operation_status_request_value(value).map_err(Into::into)
+}
+
 fn validate_operation_history(text: &str) -> Result<OperationHistorySummary> {
     let value = parse_json(text)?;
     validate_operation_history_value(&value)
@@ -979,6 +1031,17 @@ fn validate_operation_history(text: &str) -> Result<OperationHistorySummary> {
 
 fn validate_operation_history_value(value: &Value) -> Result<OperationHistorySummary> {
     product_runtime::validate_operation_history_value(value).map_err(Into::into)
+}
+
+fn validate_operation_history_request(text: &str) -> Result<OperationHistoryRequestSummary> {
+    let value = parse_json(text)?;
+    validate_operation_history_request_value(&value)
+}
+
+fn validate_operation_history_request_value(
+    value: &Value,
+) -> Result<OperationHistoryRequestSummary> {
+    product_runtime::validate_operation_history_request_value(value).map_err(Into::into)
 }
 
 fn validate_product_ir_value(value: &Value) -> Result<ProductSummary> {
@@ -2421,6 +2484,76 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(error.contains("missing JSON object key: params"));
+    }
+
+    #[test]
+    fn validates_operation_request_contracts() {
+        let status_request = "{\n  \"schema\": \"theurgy-operation-status-request/v1\",\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments\",\n  \"kind\": \"operation-status\",\n  \"operation\": \"op-publish\"\n}";
+        let summary = validate_operation_status_request(status_request).unwrap();
+        assert_eq!(summary.app_id, "deployments");
+        assert_eq!(summary.operation_id, "op-publish");
+
+        let history_request = "{\n  \"schema\": \"theurgy-operation-history-request/v1\",\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments\",\n  \"kind\": \"operation-history\",\n  \"subject\": \"deployment:site-one\",\n  \"limit\": 20\n}";
+        let summary = validate_operation_history_request(history_request).unwrap();
+        assert_eq!(summary.app_id, "deployments");
+        assert_eq!(summary.subject, "deployment:site-one");
+        assert_eq!(summary.limit, 20);
+
+        let error = validate_operation_status_request(
+            "{\n  \"schema\": \"theurgy-operation-status-request/v1\",\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments_app\",\n  \"kind\": \"operation-status\",\n  \"operation\": \"op-publish\"\n}",
+        )
+        .unwrap_err()
+        .to_string();
+        assert_eq!(
+            error,
+            "operation status request app must be a lowercase slug"
+        );
+
+        let error = validate_operation_history_request(
+            "{\n  \"schema\": \"theurgy-operation-history-request/v1\",\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments\",\n  \"kind\": \"operation-history\",\n  \"subject\": \"deployment:site-one\",\n  \"limit\": 0\n}",
+        )
+        .unwrap_err()
+        .to_string();
+        assert_eq!(
+            error,
+            "operation history request limit must be a positive integer"
+        );
+    }
+
+    #[test]
+    fn command_validates_operation_request_files() {
+        let root = runtime_fixture_root("validate-operation-requests");
+        let status_request = root.join("status-request.json");
+        write_or_replace(
+            &status_request,
+            "{\n  \"schema\": \"theurgy-operation-status-request/v1\",\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments\",\n  \"kind\": \"operation-status\",\n  \"operation\": \"op-publish\"\n}",
+        )
+        .unwrap();
+        command_validate_operation_status_request(&[status_request.display().to_string()]).unwrap();
+
+        let history_request = root.join("history-request.json");
+        write_or_replace(
+            &history_request,
+            "{\n  \"schema\": \"theurgy-operation-history-request/v1\",\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments\",\n  \"kind\": \"operation-history\",\n  \"subject\": \"deployment:site-one\",\n  \"limit\": 10\n}",
+        )
+        .unwrap();
+        command_validate_operation_history_request(&[history_request.display().to_string()])
+            .unwrap();
+
+        let invalid_history_request = root.join("invalid-history-request.json");
+        write_or_replace(
+            &invalid_history_request,
+            "{\n  \"schema\": \"theurgy-operation-history-request/v1\",\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments\",\n  \"kind\": \"operation-status\",\n  \"subject\": \"deployment:site-one\",\n  \"limit\": 10\n}",
+        )
+        .unwrap();
+        let error = command_validate_operation_history_request(&[invalid_history_request
+            .display()
+            .to_string()])
+        .unwrap_err()
+        .to_string();
+        assert_eq!(error, "expected kind = operation-history");
+
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
