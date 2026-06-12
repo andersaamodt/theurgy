@@ -128,6 +128,20 @@ pub mod product_runtime {
         pub product_action_contracts: Option<Vec<ProductActionContract>>,
     }
 
+    impl RuntimeBridge {
+        pub fn with_sources(
+            mut self,
+            product_ir: String,
+            runtime_manifest: String,
+            source_surface_ir: String,
+        ) -> Self {
+            self.product_ir = product_ir;
+            self.runtime_manifest = runtime_manifest;
+            self.source_surface_ir = source_surface_ir;
+            self
+        }
+    }
+
     #[derive(Clone, Debug, Eq, PartialEq)]
     pub struct GeneratedNativeFile {
         pub path: String,
@@ -1366,6 +1380,77 @@ pub mod product_runtime {
             }
         }
         Ok(release_target.clone())
+    }
+
+    pub fn validate_app_compile_contract(
+        product: &ProductIr,
+        product_ir_path: &str,
+        runtime_manifest_path: &str,
+        surface_ir_path: &str,
+        runtime_manifest: &RuntimeManifest,
+        runtime: &RuntimeBridge,
+        surface: &SurfaceIr,
+        target: &str,
+    ) -> ContractResult<()> {
+        let surface_kind = surface_family_for_target(target)
+            .ok_or_else(|| ContractError::new("unsupported target"))?;
+        validate_product_surface_path(product, surface_kind, surface_ir_path)?;
+        if !product
+            .targets
+            .iter()
+            .any(|candidate| candidate.as_str() == target)
+        {
+            return Err(ContractError::new(format!(
+                "product IR does not declare target: {target}"
+            )));
+        }
+        if runtime_manifest.app_id != product.app_id || runtime.app_id != product.app_id {
+            return Err(ContractError::new(
+                "runtime manifest app does not match product IR app",
+            ));
+        }
+        if runtime_manifest.product_ir != product_ir_path {
+            return Err(ContractError::new(format!(
+                "runtime manifest productIr does not match theurgy.project.toml product_ir: {}",
+                runtime_manifest.product_ir
+            )));
+        }
+        if runtime.runtime_manifest != runtime_manifest_path {
+            return Err(ContractError::new(format!(
+                "runtime bridge runtimeManifest does not match theurgy.project.toml runtime_manifest: {}",
+                runtime.runtime_manifest
+            )));
+        }
+        let manifest_surface_ir = if surface_kind == "desktop" {
+            runtime_manifest.desktop_surface_ir.as_deref()
+        } else {
+            runtime_manifest.mobile_surface_ir.as_deref()
+        }
+        .ok_or_else(|| {
+            ContractError::new(format!(
+                "runtime manifest surfaces entry required for target {target}"
+            ))
+        })?;
+        if manifest_surface_ir != surface_ir_path {
+            let surface_key = if surface_kind == "desktop" {
+                "desktop_surface_ir"
+            } else {
+                "mobile_surface_ir"
+            };
+            return Err(ContractError::new(format!(
+                "runtime manifest surface path does not match theurgy.project.toml {surface_key}: {manifest_surface_ir}"
+            )));
+        }
+        if runtime.source_surface_ir != surface_ir_path {
+            return Err(ContractError::new(format!(
+                "runtime bridge sourceSurfaceIr does not match selected surface IR: {}",
+                runtime.source_surface_ir
+            )));
+        }
+        validate_product_action_commands(product, runtime)?;
+        validate_surface_contract(product, surface)?;
+        validate_native_compile_contract(product, surface, target)?;
+        Ok(())
     }
 
     pub fn native_compile_files(

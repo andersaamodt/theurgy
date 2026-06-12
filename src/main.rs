@@ -470,71 +470,26 @@ fn command_compile_app(args: &[String]) -> Result<()> {
     let surface_path = app_dir.join(&surface_ir);
     let product = read_json(&product_path)?;
     let product_summary = validate_product_ir(&product)?;
-    let surface_kind = if matches!(target, "macos" | "linux") {
-        "desktop"
-    } else {
-        "mobile"
-    };
-    let product_contract = product_summary.clone();
-    product_runtime::validate_product_surface_path(&product_contract, surface_kind, &surface_ir)?;
-    if !product_summary
-        .targets
-        .iter()
-        .any(|candidate| candidate == target)
-    {
-        return Err(
-            TheurgyError::new(format!("product IR does not declare target: {target}")).into(),
-        );
-    }
     let runtime_text = read_json(&runtime_path)?;
     let runtime_summary = validate_runtime_manifest(&runtime_text)?;
-    if runtime_summary.app_id != product_summary.app_id {
-        return Err(TheurgyError::new("runtime manifest app does not match product IR app").into());
-    }
-    if runtime_summary.product_ir != product_ir {
-        return Err(TheurgyError::new(format!(
-            "runtime manifest productIr does not match theurgy.project.toml product_ir: {}",
-            runtime_summary.product_ir
-        ))
-        .into());
-    }
-    let manifest_surface_ir = if matches!(target, "macos" | "linux") {
-        runtime_summary.desktop_surface_ir.as_deref()
-    } else {
-        runtime_summary.mobile_surface_ir.as_deref()
-    }
-    .ok_or_else(|| {
-        TheurgyError::new(format!(
-            "runtime manifest surfaces entry required for target {target}"
-        ))
-    })?;
-    if manifest_surface_ir != surface_ir {
-        return Err(TheurgyError::new(format!(
-            "runtime manifest surface path does not match theurgy.project.toml {surface_key}: {manifest_surface_ir}"
-        ))
-        .into());
-    }
     let runtime_contract = runtime_contract_from_manifest(&runtime_text)?;
     let runtime_contract = runtime_contract.with_sources(
         product_ir.clone(),
         runtime_manifest.clone(),
         surface_ir.clone(),
     );
-    product_runtime::validate_product_action_commands(&product_contract, &runtime_contract)?;
     let surface = read_json(&surface_path)?;
     let surface_summary = validate_surface_ir(&surface)?;
-    product_runtime::validate_surface_contract(&product_contract, &surface_summary)?;
-    let expected_surface_target = if surface_kind == "desktop" {
-        "desktop"
-    } else {
-        "mobile"
-    };
-    if surface_summary.target != target && surface_summary.target != expected_surface_target {
-        return Err(TheurgyError::new(format!(
-            "surface IR target must be {target} or {expected_surface_target}"
-        ))
-        .into());
-    }
+    product_runtime::validate_app_compile_contract(
+        &product_summary,
+        &product_ir,
+        &runtime_manifest,
+        &surface_ir,
+        &runtime_summary,
+        &runtime_contract,
+        &surface_summary,
+        target,
+    )?;
     compile_native_with_contract(
         &product_summary,
         &surface,
@@ -1179,29 +1134,6 @@ type RuntimeManifestSummary = product_runtime::RuntimeManifest;
 type GeneratedRuntimeSummary = product_runtime::GeneratedRuntime;
 type SurfaceSummary = product_runtime::SurfaceIr;
 type RuntimeContract = product_runtime::RuntimeBridge;
-
-trait RuntimeContractSources {
-    fn with_sources(
-        self,
-        product_ir: String,
-        runtime_manifest: String,
-        source_surface_ir: String,
-    ) -> Self;
-}
-
-impl RuntimeContractSources for RuntimeContract {
-    fn with_sources(
-        mut self,
-        product_ir: String,
-        runtime_manifest: String,
-        source_surface_ir: String,
-    ) -> Self {
-        self.product_ir = product_ir;
-        self.runtime_manifest = runtime_manifest;
-        self.source_surface_ir = source_surface_ir;
-        self
-    }
-}
 
 fn read_json(path: &Path) -> Result<String> {
     let text = fs::read_to_string(path).map_err(|error| {
