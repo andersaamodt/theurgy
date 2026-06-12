@@ -328,8 +328,7 @@ fn command_validate_runtime_manifest(args: &[String]) -> Result<()> {
     if args.len() != 1 {
         return Err(TheurgyError::new("usage: validate-runtime-manifest PATH").into());
     }
-    let summary =
-        runtime_manifest_summary_from_library(product_runtime::load_runtime_manifest(&args[0])?);
+    let summary = product_runtime::load_runtime_manifest(&args[0])?;
     println!("status=ok");
     println!("schema=theurgy-runtime-manifest/v1");
     println!("app={}", summary.app_id);
@@ -521,8 +520,7 @@ fn command_compile_app(args: &[String]) -> Result<()> {
         runtime_manifest.clone(),
         surface_ir.clone(),
     );
-    let runtime_bridge = runtime_bridge_from_contract(&runtime_contract);
-    product_runtime::validate_product_action_commands(&product_contract, &runtime_bridge)?;
+    product_runtime::validate_product_action_commands(&product_contract, &runtime_contract)?;
     let surface = read_json(&surface_path)?;
     let surface_summary = validate_surface_ir(&surface)?;
     product_runtime::validate_surface_contract(&product_contract, &surface_summary)?;
@@ -612,16 +610,8 @@ fn inspect_app_lines(path: &Path) -> Result<Vec<String>> {
         mobile_surface_ir: runtime_summary.mobile_surface_ir,
         legacy_native_desktop_ir: runtime_summary.legacy_native_desktop_ir,
         protocol: runtime_summary.protocol,
-        compatibility: product_runtime::RuntimeCompatibility {
-            wizardry_apps_shell_first_still_supported: runtime_summary
-                .compatibility
-                .wizardry_apps_shell_first_still_supported,
-            theurgy_required_for_legacy_wizardry_apps: runtime_summary
-                .compatibility
-                .theurgy_required_for_legacy_wizardry_apps,
-        },
+        compatibility: runtime_summary.compatibility,
     };
-    let runtime_bridge = runtime_bridge_from_contract(&runtime);
     let desktop_surface_ir = manifest_value(&manifest, "desktop_surface_ir").ok();
     let desktop_surface = match desktop_surface_ir.as_deref() {
         Some(surface_path) => Some((
@@ -642,7 +632,7 @@ fn inspect_app_lines(path: &Path) -> Result<Vec<String>> {
         &product_ir_contract,
         &product_ir,
         &runtime_manifest_contract,
-        &runtime_bridge,
+        &runtime,
         &runtime_text,
         desktop_surface
             .as_ref()
@@ -1222,56 +1212,21 @@ struct OperationHistorySummary {
     entries: usize,
 }
 
-#[derive(Debug, Eq, PartialEq)]
-struct RuntimeManifestSummary {
-    app_id: String,
-    product_ir: String,
-    desktop_surface_ir: Option<String>,
-    mobile_surface_ir: Option<String>,
-    legacy_native_desktop_ir: Option<String>,
-    protocol: String,
-    compatibility: RuntimeCompatibility,
-}
-
+type RuntimeManifestSummary = product_runtime::RuntimeManifest;
 type GeneratedRuntimeSummary = product_runtime::GeneratedRuntime;
 type SurfaceSummary = product_runtime::SurfaceIr;
+type RuntimeContract = product_runtime::RuntimeBridge;
 
-#[derive(Debug, Eq, PartialEq)]
-struct RuntimeContract {
-    app_id: String,
-    protocol: String,
-    product_ir: String,
-    runtime_manifest: String,
-    source_surface_ir: String,
-    legacy_native_desktop_ir: Option<String>,
-    compatibility: RuntimeCompatibility,
-    state_command: Vec<String>,
-    status_command: Vec<String>,
-    subscribe_status_command: Vec<String>,
-    operation_status_command: Vec<String>,
-    action_command: Vec<String>,
-    history_command: Vec<String>,
-    daemon_command: Vec<String>,
-    product_action_ids: Option<Vec<String>>,
-    product_action_contracts: Option<Vec<ActionContract>>,
+trait RuntimeContractSources {
+    fn with_sources(
+        self,
+        product_ir: String,
+        runtime_manifest: String,
+        source_surface_ir: String,
+    ) -> Self;
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct RuntimeCompatibility {
-    wizardry_apps_shell_first_still_supported: bool,
-    theurgy_required_for_legacy_wizardry_apps: bool,
-}
-
-impl RuntimeCompatibility {
-    fn shell_first_default() -> Self {
-        Self {
-            wizardry_apps_shell_first_still_supported: true,
-            theurgy_required_for_legacy_wizardry_apps: false,
-        }
-    }
-}
-
-impl RuntimeContract {
+impl RuntimeContractSources for RuntimeContract {
     fn with_sources(
         mut self,
         product_ir: String,
@@ -1303,32 +1258,7 @@ fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
 }
 
 fn runtime_contract_from_manifest(text: &str) -> Result<RuntimeContract> {
-    let bridge = product_runtime::runtime_bridge_from_manifest_text(text)?;
-    Ok(RuntimeContract {
-        app_id: bridge.app_id,
-        protocol: bridge.protocol,
-        product_ir: bridge.product_ir,
-        runtime_manifest: bridge.runtime_manifest,
-        source_surface_ir: bridge.source_surface_ir,
-        legacy_native_desktop_ir: bridge.legacy_native_desktop_ir,
-        compatibility: RuntimeCompatibility {
-            wizardry_apps_shell_first_still_supported: bridge
-                .compatibility
-                .wizardry_apps_shell_first_still_supported,
-            theurgy_required_for_legacy_wizardry_apps: bridge
-                .compatibility
-                .theurgy_required_for_legacy_wizardry_apps,
-        },
-        state_command: bridge.state_command,
-        status_command: bridge.status_command,
-        subscribe_status_command: bridge.subscribe_status_command,
-        operation_status_command: bridge.operation_status_command,
-        action_command: bridge.action_command,
-        history_command: bridge.history_command,
-        daemon_command: bridge.daemon_command,
-        product_action_ids: None,
-        product_action_contracts: None,
-    })
+    product_runtime::runtime_bridge_from_manifest_text(text).map_err(Into::into)
 }
 
 fn validate_surface_ir(text: &str) -> Result<SurfaceSummary> {
@@ -1459,56 +1389,8 @@ fn validate_product_ir_value(value: &Value) -> Result<ProductSummary> {
     product_runtime::validate_product_ir_value(value).map_err(Into::into)
 }
 
-fn runtime_bridge_from_contract(runtime: &RuntimeContract) -> product_runtime::RuntimeBridge {
-    product_runtime::RuntimeBridge {
-        app_id: runtime.app_id.clone(),
-        protocol: runtime.protocol.clone(),
-        product_ir: runtime.product_ir.clone(),
-        runtime_manifest: runtime.runtime_manifest.clone(),
-        source_surface_ir: runtime.source_surface_ir.clone(),
-        legacy_native_desktop_ir: runtime.legacy_native_desktop_ir.clone(),
-        compatibility: product_runtime::RuntimeCompatibility {
-            wizardry_apps_shell_first_still_supported: runtime
-                .compatibility
-                .wizardry_apps_shell_first_still_supported,
-            theurgy_required_for_legacy_wizardry_apps: runtime
-                .compatibility
-                .theurgy_required_for_legacy_wizardry_apps,
-        },
-        state_command: runtime.state_command.clone(),
-        status_command: runtime.status_command.clone(),
-        subscribe_status_command: runtime.subscribe_status_command.clone(),
-        operation_status_command: runtime.operation_status_command.clone(),
-        action_command: runtime.action_command.clone(),
-        history_command: runtime.history_command.clone(),
-        daemon_command: runtime.daemon_command.clone(),
-    }
-}
-
 fn validate_runtime_manifest_value(value: &Value) -> Result<RuntimeManifestSummary> {
-    let manifest = product_runtime::validate_runtime_manifest_value(value)?;
-    Ok(runtime_manifest_summary_from_library(manifest))
-}
-
-fn runtime_manifest_summary_from_library(
-    manifest: product_runtime::RuntimeManifest,
-) -> RuntimeManifestSummary {
-    RuntimeManifestSummary {
-        app_id: manifest.app_id,
-        product_ir: manifest.product_ir,
-        desktop_surface_ir: manifest.desktop_surface_ir,
-        mobile_surface_ir: manifest.mobile_surface_ir,
-        legacy_native_desktop_ir: manifest.legacy_native_desktop_ir,
-        protocol: manifest.protocol,
-        compatibility: RuntimeCompatibility {
-            wizardry_apps_shell_first_still_supported: manifest
-                .compatibility
-                .wizardry_apps_shell_first_still_supported,
-            theurgy_required_for_legacy_wizardry_apps: manifest
-                .compatibility
-                .theurgy_required_for_legacy_wizardry_apps,
-        },
-    }
+    product_runtime::validate_runtime_manifest_value(value).map_err(Into::into)
 }
 
 fn parse_json(text: &str) -> Result<Value> {
@@ -1578,7 +1460,7 @@ fn compile_native(product: &str, target: &str, out_dir: &Path) -> Result<()> {
         runtime_manifest: "generated-runtime-manifest".to_string(),
         source_surface_ir: "projected-surface-ir".to_string(),
         legacy_native_desktop_ir: None,
-        compatibility: RuntimeCompatibility::shell_first_default(),
+        compatibility: product_runtime::RuntimeCompatibility::shell_first_default(),
         state_command: vec![
             format!("{}-core", summary.app_id),
             "runtime-state".to_string(),
@@ -1616,14 +1498,8 @@ fn compile_native_with_contract(
     fs::create_dir_all(out_dir)?;
     let product = summary.clone();
     let surface_ir = surface_summary.clone();
-    let runtime_bridge = runtime_bridge_from_contract(runtime);
-    let files = product_runtime::native_compile_files(
-        &product,
-        &surface_ir,
-        surface,
-        &runtime_bridge,
-        target,
-    )?;
+    let files =
+        product_runtime::native_compile_files(&product, &surface_ir, surface, runtime, target)?;
     if preserve_existing_legacy_desktop_adapter
         && product_runtime::is_desktop_target(target)
         && desktop_adapter_source_exists(target, out_dir)
@@ -4878,7 +4754,7 @@ mod tests {
             runtime_manifest: "app-blueprint/runtime.manifest.json".to_string(),
             source_surface_ir: "app-blueprint/desktop.surface.ir.json".to_string(),
             legacy_native_desktop_ir: Some("app-blueprint/app.ir.yaml".to_string()),
-            compatibility: RuntimeCompatibility::shell_first_default(),
+            compatibility: product_runtime::RuntimeCompatibility::shell_first_default(),
             state_command: vec!["deployments-core".to_string(), "runtime-state".to_string()],
             status_command: vec!["deployments-core".to_string(), "runtime-status".to_string()],
             subscribe_status_command: vec![

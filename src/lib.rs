@@ -124,6 +124,8 @@ pub mod product_runtime {
         pub action_command: Vec<String>,
         pub history_command: Vec<String>,
         pub daemon_command: Vec<String>,
+        pub product_action_ids: Option<Vec<String>>,
+        pub product_action_contracts: Option<Vec<ProductActionContract>>,
     }
 
     #[derive(Clone, Debug, Eq, PartialEq)]
@@ -606,6 +608,8 @@ pub mod product_runtime {
                 "daemonCommand",
                 "runtime manifest daemonCommand",
             )?,
+            product_action_ids: None,
+            product_action_contracts: None,
         })
     }
 
@@ -4573,6 +4577,8 @@ mod tests {
                 "runtime-history".to_string(),
             ],
             daemon_command: Vec::new(),
+            product_action_ids: None,
+            product_action_contracts: None,
         };
 
         let metadata =
