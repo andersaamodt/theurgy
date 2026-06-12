@@ -2958,6 +2958,12 @@ mod tests {
                 .and_then(Value::as_str),
             Some("^[a-z][a-z0-9_.-]*$")
         );
+        assert!(desktop_schema
+            .pointer("/$defs/node/properties/type/enum")
+            .and_then(Value::as_array)
+            .is_some_and(|types| types
+                .iter()
+                .any(|value| value.as_str() == Some("StatusPill"))));
         let mobile_schema: Value =
             serde_json::from_str(include_str!("../schemas/theurgy-mobile-surface-ir-v1.json"))
                 .unwrap();
