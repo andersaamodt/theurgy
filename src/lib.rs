@@ -4436,6 +4436,10 @@ struct MobileSurfaceScreenView: View {
             let handoff = broker.submit(kind: "subscribe-status", requestJson: contract.subscribeStatusEnvelope())
             lastHandoff = "\(handoff.kind): \(handoff.requestJson)"
           }
+          Button("Operation Status") {
+            let handoff = broker.submit(kind: "operation-status", requestJson: contract.operationStatusEnvelope(for: "default"))
+            lastHandoff = "\(handoff.kind): \(handoff.requestJson)"
+          }
           Button("Operation History") {
             let handoff = broker.submit(kind: "operation-history", requestJson: contract.operationHistoryEnvelope(for: "default", limit: 20))
             lastHandoff = "\(handoff.kind): \(handoff.requestJson)"

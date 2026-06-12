@@ -5532,9 +5532,13 @@ mod tests {
         assert!(ios.contains("struct MobileRuntimeHandoff"));
         assert!(ios.contains("Section(\"Request Handoff\")"));
         assert!(ios.contains("Button(\"Hydrate State\")"));
+        assert!(ios.contains("Button(\"Operation Status\")"));
         assert!(
             ios.contains("broker.submit(kind: \"state\", requestJson: contract.stateEnvelope())")
         );
+        assert!(ios.contains(
+            "broker.submit(kind: \"operation-status\", requestJson: contract.operationStatusEnvelope"
+        ));
         assert!(
             ios.contains("broker.submit(kind: \"action\", requestJson: contract.actionEnvelope")
         );
@@ -5774,6 +5778,10 @@ mod tests {
         assert!(android.contains("State handoff: "));
         assert!(android.contains("Status handoff: "));
         assert!(android.contains("Subscribe handoff: "));
+        assert!(android.contains("Operation status handoff: "));
+        assert!(android.contains("broker.submit(\"operation-status\", operationStatusEnvelope"));
+        assert!(android.contains("History handoff: "));
+        assert!(android.contains("broker.submit(\"operation-history\", operationHistoryEnvelope"));
         assert!(android.contains(
             "private static String actionEnvelope(String app, String requestSchema, ProductActionContract action, JSONObject params)"
         ));
