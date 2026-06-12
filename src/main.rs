@@ -5402,7 +5402,7 @@ mod tests {
         assert!(ios.contains(
             "runtimeObjectSummaries(runtimeMetadata, key: \"productReleaseTargetContracts\", fields: [\"target\", \"surface\", \"artifact\"])"
         ));
-        assert!(ios.contains("func surfaceScreens(_ json: String) -> [String]"));
+        assert!(ios.contains("func surfaceScreenSummaries(_ json: String) -> [String]"));
         assert!(ios.contains("func runtimeObjectSummaries(_ json: String, key: String, fields: [String]) -> [String]"));
         assert!(ios.contains("contractObject(json)?[\"screens\"] as? [[String: Any]]"));
         assert!(ios.contains(
@@ -5411,7 +5411,8 @@ mod tests {
         assert!(ios.contains(
             "var surfaceTarget: String { runtimeString(surfaceMetadata, key: \"target\") }"
         ));
-        assert!(ios.contains("var surfaceScreens: [String] { surfaceScreens(surfaceMetadata) }"));
+        assert!(ios
+            .contains("var surfaceScreens: [String] { surfaceScreenSummaries(surfaceMetadata) }"));
         assert!(ios.contains("Runtime app: \\(contract.runtimeApp)"));
         assert!(ios.contains("Runtime target: \\(contract.runtimeTarget)"));
         assert!(ios.contains("Runtime transport: \\(contract.runtimeTransport)"));
@@ -5447,21 +5448,21 @@ mod tests {
         assert!(ios.contains("Section(\"Mobile Workflow\")"));
         assert!(ios.contains("Text(\"status-overview\")"));
         assert!(ios.contains("Text(\"focused-action-detail\")"));
-        assert!(ios.contains("\"deployments-core\", \"runtime-state\""));
-        assert!(ios.contains("\"deployments-core\", \"runtime-status\""));
-        assert!(
-            ios.contains("let subscribeStatusCommand = [\"deployments-core\", \"runtime-status\"]")
-        );
-        assert!(ios.contains(
-            "let operationStatusCommand = [\"deployments-core\", \"runtime-operation-status\"]"
-        ));
-        assert!(ios.contains("\"deployments-core\", \"runtime-history\""));
-        assert!(ios.contains("\"deployments-daemon\""));
         assert!(ios.contains("struct ProductActionContract"));
         assert!(ios.contains("let actionContracts = [ProductActionContract"));
-        assert!(ios
-            .contains("func command(for action: ProductActionContract, json: String) -> [String]"));
-        assert!(ios.contains("actionCommand + [action.id, json]"));
+        assert!(ios.contains("protocol MobileRuntimeRequestBroker"));
+        assert!(ios.contains("struct ExternalJsonAbiPreviewBroker: MobileRuntimeRequestBroker"));
+        assert!(ios.contains("struct MobileRuntimeHandoff"));
+        assert!(ios.contains("Section(\"Request Handoff\")"));
+        assert!(ios.contains("Button(\"Hydrate State\")"));
+        assert!(
+            ios.contains("broker.submit(kind: \"state\", requestJson: contract.stateEnvelope())")
+        );
+        assert!(
+            ios.contains("broker.submit(kind: \"action\", requestJson: contract.actionEnvelope")
+        );
+        assert!(!ios.contains("func command(for action: ProductActionContract"));
+        assert!(!ios.contains("actionCommand + [action.id, json]"));
         assert!(ios.contains("func stateEnvelope() -> String"));
         assert!(ios.contains("\"schema\": runtimeStateRequestSchema"));
         assert!(ios.contains("\"kind\": \"state\""));
@@ -5487,7 +5488,6 @@ mod tests {
         assert!(
             ios.contains("func defaultParams(for action: ProductActionContract) -> [String: Any]")
         );
-        assert!(ios.contains("contract.defaultParamsJson(for: action)"));
         assert!(ios.contains(
             "contract.actionEnvelope(for: action, params: contract.defaultParams(for: action))"
         ));
@@ -5499,7 +5499,7 @@ mod tests {
         assert!(ios.contains("outputShape: [\"params\": \"object\"]"));
         assert!(!ios.contains("id: \"refresh_state\""));
         let ios_package = fs::read_to_string(ios_root.join("Package.swift")).unwrap();
-        assert!(ios_package.contains("platforms: [.iOS(.v16)]"));
+        assert!(ios_package.contains("platforms: [.iOS(.v16), .macOS(.v13)]"));
         assert!(ios_package.contains(
             "executableTarget(name: \"Host\", path: \"Host\", resources: [.copy(\"Resources\")])"
         ));
@@ -5669,21 +5669,19 @@ mod tests {
         assert!(android.contains("Surface target: "));
         assert!(android.contains("Surface screens: "));
         assert!(android.contains("Mobile workflow: status-overview, focused-action-detail"));
-        assert!(android.contains("new String[] {\"deployments-core\", \"runtime-action\"}"));
-        assert!(android.contains("new String[] {\"deployments-core\", \"runtime-status\"}"));
-        assert!(android.contains(
-            "private static final String[] SUBSCRIBE_STATUS_COMMAND = new String[] {\"deployments-core\", \"runtime-status\"};"
-        ));
-        assert!(android.contains(
-            "private static final String[] OPERATION_STATUS_COMMAND = new String[] {\"deployments-core\", \"runtime-operation-status\"};"
-        ));
-        assert!(android.contains("new String[] {\"deployments-core\", \"runtime-history\"}"));
-        assert!(android.contains("new String[] {\"deployments-daemon\"}"));
         assert!(android.contains("private static final ProductActionContract[] ACTION_CONTRACTS"));
+        assert!(android.contains("private interface MobileRuntimeRequestBroker"));
         assert!(android.contains(
-            "private static String[] commandFor(ProductActionContract action, String json)"
+            "private static final class ExternalJsonAbiPreviewBroker implements MobileRuntimeRequestBroker"
         ));
-        assert!(android.contains("command[ACTION_COMMAND.length] = action.id;"));
+        assert!(android
+            .contains("MobileRuntimeRequestBroker broker = new ExternalJsonAbiPreviewBroker();"));
+        assert!(android.contains("Request handoff transport: "));
+        assert!(android.contains("State handoff: "));
+        assert!(android.contains("broker.submit(\"state\", stateEnvelope"));
+        assert!(android.contains("broker.submit(\"action\", actionEnvelope"));
+        assert!(!android.contains("private static String[] commandFor"));
+        assert!(!android.contains("command[ACTION_COMMAND.length] = action.id;"));
         assert!(android
             .contains("private static String stateEnvelope(String app, String requestSchema)"));
         assert!(android.contains("envelope.put(\"kind\", \"state\");"));
@@ -5694,9 +5692,9 @@ mod tests {
             "private static String subscribeStatusEnvelope(String app, String requestSchema)"
         ));
         assert!(android.contains("envelope.put(\"kind\", \"subscribe-status\");"));
-        assert!(android.contains("State envelope: "));
-        assert!(android.contains("Status envelope: "));
-        assert!(android.contains("Subscribe envelope: "));
+        assert!(android.contains("State handoff: "));
+        assert!(android.contains("Status handoff: "));
+        assert!(android.contains("Subscribe handoff: "));
         assert!(android.contains(
             "private static String actionEnvelope(String app, String requestSchema, ProductActionContract action, JSONObject params)"
         ));
