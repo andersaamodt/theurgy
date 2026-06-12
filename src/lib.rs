@@ -365,6 +365,7 @@ pub mod product_runtime {
     pub fn validate_runtime_action_request_value(
         value: &Value,
     ) -> ContractResult<RuntimeActionRequest> {
+        expect_value_string(value, "schema", RUNTIME_ACTION_REQUEST_SCHEMA)?;
         expect_value_string(value, "protocol", RUNTIME_ACTION_PROTOCOL)?;
         let app_id = value_string(value, "app")
             .filter(|id| valid_slug(id))
@@ -3911,6 +3912,7 @@ struct RuntimeContract {
 
   func actionEnvelope(for action: ProductActionContract, params: [String: Any]) -> String {
     let envelope: [String: Any] = [
+      "schema": runtimeActionRequestSchema,
       "protocol": protocolName,
       "app": runtimeApp,
       "action": action.id,
@@ -4195,9 +4197,10 @@ public final class MainActivity extends Activity {
     }
   }
 
-  private static String actionEnvelope(String app, ProductActionContract action, JSONObject params) {
+  private static String actionEnvelope(String app, String requestSchema, ProductActionContract action, JSONObject params) {
     try {
       JSONObject envelope = new JSONObject();
+      envelope.put("schema", requestSchema);
       envelope.put("protocol", PROTOCOL);
       envelope.put("app", app);
       envelope.put("action", action.id);
@@ -4387,7 +4390,7 @@ __MOBILE_WORKFLOW_TEXT__
       JSONObject params = defaultParams(action);
       text.append("\n").append(action.label).append(" [").append(action.effect).append("] ")
         .append(String.join(" ", commandFor(action, params.toString())))
-        .append("\n  envelope: ").append(actionEnvelope(runtimeApp, action, params));
+        .append("\n  envelope: ").append(actionEnvelope(runtimeApp, runtimeActionRequestSchema, action, params));
     }
     view.setText(text.toString());
     setContentView(view);
@@ -5655,6 +5658,7 @@ binary = "deployments-core"
     #[test]
     fn product_runtime_validates_action_request_abi() {
         let value = serde_json::json!({
+            "schema": product_runtime::RUNTIME_ACTION_REQUEST_SCHEMA,
             "protocol": product_runtime::RUNTIME_ACTION_PROTOCOL,
             "app": "deployments",
             "action": "publish_changes",
@@ -5665,6 +5669,7 @@ binary = "deployments-core"
         assert_eq!(request.action_id, "publish_changes");
 
         let invalid = serde_json::json!({
+            "schema": product_runtime::RUNTIME_ACTION_REQUEST_SCHEMA,
             "protocol": product_runtime::RUNTIME_ACTION_PROTOCOL,
             "app": "Deployments",
             "action": "publish_changes",
@@ -7204,6 +7209,9 @@ binary = "deployments-core"
                 .contains("func actionEnvelope(for action: ProductActionContract")
             && file
                 .contents
+                .contains("\"schema\": runtimeActionRequestSchema")
+            && file
+                .contents
                 .contains("func operationStatusEnvelope(for operationId: String) -> String")
             && file.contents.contains(
                 "func operationHistoryEnvelope(for subject: String, limit: Int) -> String"
@@ -7251,7 +7259,13 @@ binary = "deployments-core"
                 .contains("private static final ProductActionContract[] ACTION_CONTRACTS")
             && file
                 .contents
-                .contains("private static String actionEnvelope")
+                .contains("private static String actionEnvelope(String app, String requestSchema")
+            && file
+                .contents
+                .contains("envelope.put(\"schema\", requestSchema);")
+            && file
+                .contents
+                .contains("actionEnvelope(runtimeApp, runtimeActionRequestSchema, action, params)")
             && file
                 .contents
                 .contains("private static String operationStatusEnvelope")

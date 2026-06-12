@@ -1986,6 +1986,16 @@ mod tests {
         .unwrap();
         assert_eq!(
             schema
+                .pointer("/properties/schema/const")
+                .and_then(Value::as_str),
+            Some("theurgy-runtime-action-request/v1")
+        );
+        assert!(schema
+            .pointer("/required")
+            .and_then(Value::as_array)
+            .is_some_and(|required| required.iter().any(|item| item == "schema")));
+        assert_eq!(
+            schema
                 .pointer("/properties/protocol/const")
                 .and_then(Value::as_str),
             Some("theurgy-runtime-action/v1")
@@ -2368,20 +2378,27 @@ mod tests {
 
     #[test]
     fn validates_runtime_action_request_contract() {
-        let request = "{\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments\",\n  \"action\": \"publish_changes\",\n  \"params\": {\"deployment\": \"site-one\"}\n}";
+        let request = "{\n  \"schema\": \"theurgy-runtime-action-request/v1\",\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments\",\n  \"action\": \"publish_changes\",\n  \"params\": {\"deployment\": \"site-one\"}\n}";
         let summary = validate_runtime_action_request(request).unwrap();
         assert_eq!(summary.app_id, "deployments");
         assert_eq!(summary.action_id, "publish_changes");
 
         let error = validate_runtime_action_request(
-            "{\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"Deployments\",\n  \"action\": \"publish_changes\",\n  \"params\": {}\n}",
+            "{\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments\",\n  \"action\": \"publish_changes\",\n  \"params\": {}\n}",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("expected schema = theurgy-runtime-action-request/v1"));
+
+        let error = validate_runtime_action_request(
+            "{\n  \"schema\": \"theurgy-runtime-action-request/v1\",\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"Deployments\",\n  \"action\": \"publish_changes\",\n  \"params\": {}\n}",
         )
         .unwrap_err()
         .to_string();
         assert!(error.contains("runtime action request app must be a lowercase slug"));
 
         let error = validate_runtime_action_request(
-            "{\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments\",\n  \"action\": \"publish_changes\",\n  \"params\": []\n}",
+            "{\n  \"schema\": \"theurgy-runtime-action-request/v1\",\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments\",\n  \"action\": \"publish_changes\",\n  \"params\": []\n}",
         )
         .unwrap_err()
         .to_string();
@@ -2395,7 +2412,7 @@ mod tests {
         let valid_request = root.join("valid-action-request.json");
         write_or_replace(
             &valid_request,
-            "{\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments\",\n  \"action\": \"refresh_state\",\n  \"params\": {}\n}",
+            "{\n  \"schema\": \"theurgy-runtime-action-request/v1\",\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments\",\n  \"action\": \"refresh_state\",\n  \"params\": {}\n}",
         )
         .unwrap();
         command_validate_runtime_action_request(&[
@@ -2408,7 +2425,7 @@ mod tests {
         let app_mismatch = root.join("app-mismatch-action-request.json");
         write_or_replace(
             &app_mismatch,
-            "{\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"other-app\",\n  \"action\": \"refresh_state\",\n  \"params\": {}\n}",
+            "{\n  \"schema\": \"theurgy-runtime-action-request/v1\",\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"other-app\",\n  \"action\": \"refresh_state\",\n  \"params\": {}\n}",
         )
         .unwrap();
         let error = command_validate_runtime_action_request(&[
@@ -2426,7 +2443,7 @@ mod tests {
         let undeclared_action = root.join("undeclared-action-request.json");
         write_or_replace(
             &undeclared_action,
-            "{\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments\",\n  \"action\": \"not_declared\",\n  \"params\": {}\n}",
+            "{\n  \"schema\": \"theurgy-runtime-action-request/v1\",\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments\",\n  \"action\": \"not_declared\",\n  \"params\": {}\n}",
         )
         .unwrap();
         let error = command_validate_runtime_action_request(&[
@@ -2444,7 +2461,7 @@ mod tests {
         let undeclared_param = root.join("undeclared-param-action-request.json");
         write_or_replace(
             &undeclared_param,
-            "{\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments\",\n  \"action\": \"refresh_state\",\n  \"params\": {\"force\": true}\n}",
+            "{\n  \"schema\": \"theurgy-runtime-action-request/v1\",\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments\",\n  \"action\": \"refresh_state\",\n  \"params\": {\"force\": true}\n}",
         )
         .unwrap();
         let error = command_validate_runtime_action_request(&[
@@ -4307,6 +4324,7 @@ mod tests {
         assert!(ios.contains(
             "func actionEnvelope(for action: ProductActionContract, params: [String: Any]) -> String"
         ));
+        assert!(ios.contains("\"schema\": runtimeActionRequestSchema"));
         assert!(ios.contains("\"protocol\": protocolName"));
         assert!(ios.contains("\"app\": runtimeApp"));
         assert!(ios.contains("\"action\": action.id"));
@@ -4475,8 +4493,9 @@ mod tests {
         ));
         assert!(android.contains("command[ACTION_COMMAND.length] = action.id;"));
         assert!(android.contains(
-            "private static String actionEnvelope(String app, ProductActionContract action, JSONObject params)"
+            "private static String actionEnvelope(String app, String requestSchema, ProductActionContract action, JSONObject params)"
         ));
+        assert!(android.contains("envelope.put(\"schema\", requestSchema);"));
         assert!(android.contains("envelope.put(\"protocol\", PROTOCOL);"));
         assert!(android.contains("envelope.put(\"app\", app);"));
         assert!(android.contains("envelope.put(\"action\", action.id);"));
@@ -4486,7 +4505,8 @@ mod tests {
             .contains("private static JSONObject defaultParams(ProductActionContract action)"));
         assert!(android.contains("params.put(shape[0], defaultParamValue(shape[1]));"));
         assert!(android.contains("JSONObject params = defaultParams(action);"));
-        assert!(android.contains("actionEnvelope(runtimeApp, action, params)"));
+        assert!(android
+            .contains("actionEnvelope(runtimeApp, runtimeActionRequestSchema, action, params)"));
         assert!(android.contains(
             "new ProductActionContract(\"publish_changes\", \"Push to Production\", \"release\""
         ));
