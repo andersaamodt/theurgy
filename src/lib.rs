@@ -5069,13 +5069,11 @@ let runtimeOperationStatusCommand = __OPERATION_STATUS_COMMAND__
 let runtimeActionCommand = __ACTION_COMMAND__
 let runtimeHistoryCommand = __HISTORY_COMMAND__
 let runtimeDaemonCommand = __DAEMON_COMMAND__
+let runtimeRequestCommand = ["theurgy-runtime", "run-request"]
+let runtimeRequestManifest = "__RUNTIME_MANIFEST__"
 let surfaceCapabilities = __SURFACE_CAPABILITIES__
 let actionContracts = __ACTION_CONTRACTS__
 let defaultActionId = "__DEFAULT_ACTION_ID__"
-
-func command(for action: ProductActionContract, json: String) -> [String] {
-  runtimeActionCommand + [action.id, json]
-}
 
 func defaultParamsJson(for action: ProductActionContract) -> String {
   let params = defaultParams(for: action)
@@ -5115,7 +5113,12 @@ struct RuntimeStateView: View {
   var body: some View {
 __SURFACE_BODY__
     .onAppear {
-      status = runRuntimeCommand(runtimeStateCommand)
+      status = runRuntimeRequest([
+        "schema": "theurgy-runtime-state-request/v1",
+        "protocol": "theurgy-runtime-action/v1",
+        "app": "__APP_ID__",
+        "kind": "state"
+      ])
     }
   }
 
@@ -5137,40 +5140,68 @@ __SURFACE_BODY__
       .font(.system(.caption, design: .monospaced))
       HStack {
         Button("State") {
-          status = runRuntimeCommand(runtimeStateCommand)
+          status = runRuntimeRequest([
+            "schema": "theurgy-runtime-state-request/v1",
+            "protocol": "theurgy-runtime-action/v1",
+            "app": "__APP_ID__",
+            "kind": "state"
+          ])
         }
         if !runtimeStatusCommand.isEmpty {
           Button("Status") {
-            status = runRuntimeCommand(runtimeStatusCommand)
+            status = runRuntimeRequest([
+              "schema": "theurgy-runtime-status-request/v1",
+              "protocol": "theurgy-runtime-action/v1",
+              "app": "__APP_ID__",
+              "kind": "status"
+            ])
           }
         }
         Button("Subscribe") {
-          status = runRuntimeCommand(runtimeSubscribeStatusCommand)
+          status = runRuntimeRequest([
+            "schema": "theurgy-runtime-subscribe-status-request/v1",
+            "protocol": "theurgy-runtime-action/v1",
+            "app": "__APP_ID__",
+            "kind": "subscribe-status"
+          ])
         }
         if !runtimeOperationStatusCommand.isEmpty {
           Button("Operation Status") {
-            status = runRuntimeCommand(runtimeOperationStatusCommand + ["default"])
+            status = runRuntimeRequest([
+              "schema": "theurgy-operation-status-request/v1",
+              "protocol": "theurgy-runtime-action/v1",
+              "app": "__APP_ID__",
+              "kind": "operation-status",
+              "operation": "default"
+            ])
           }
         }
         if !runtimeActionCommand.isEmpty && !defaultActionId.isEmpty {
           Button("Action") {
             if let action = actionContracts.first(where: { $0.id == defaultActionId }) {
-              status = runRuntimeCommand(command(for: action, json: defaultParamsJson(for: action)))
+              status = runRuntimeAction(action)
             }
           }
         }
         if !runtimeHistoryCommand.isEmpty {
           Button("History") {
-            status = runRuntimeCommand(runtimeHistoryCommand + ["default", "20"])
+            status = runRuntimeRequest([
+              "schema": "theurgy-operation-history-request/v1",
+              "protocol": "theurgy-runtime-action/v1",
+              "app": "__APP_ID__",
+              "kind": "operation-history",
+              "subject": "default",
+              "limit": 20
+            ])
           }
         }
       }
       VStack(alignment: .leading, spacing: 6) {
         ForEach(actionContracts, id: \.id) { action in
           Button(action.label) {
-            status = runRuntimeCommand(command(for: action, json: defaultParamsJson(for: action)))
+            status = runRuntimeAction(action)
           }
-          Text(command(for: action, json: defaultParamsJson(for: action)).joined(separator: " "))
+          Text("runtime action request: \(action.id) \(defaultParamsJson(for: action))")
             .font(.system(.caption2, design: .monospaced))
         }
       }
@@ -5202,6 +5233,30 @@ __SURFACE_BODY__
   }
 }
 
+func runRuntimeAction(_ action: ProductActionContract) -> String {
+  runRuntimeRequest([
+    "schema": "theurgy-runtime-action-request/v1",
+    "protocol": "theurgy-runtime-action/v1",
+    "app": "__APP_ID__",
+    "action": action.id,
+    "params": defaultParams(for: action)
+  ])
+}
+
+func runRuntimeRequest(_ request: [String: Any]) -> String {
+  do {
+    let requestData = try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys])
+    let requestURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("__APP_ID__-runtime-request-\(UUID().uuidString).json")
+    try requestData.write(to: requestURL, options: [.atomic])
+    defer { try? FileManager.default.removeItem(at: requestURL) }
+    let manifestURL = resolveContractURL(runtimeRequestManifest)
+    return runRuntimeCommand(runtimeRequestCommand + [requestURL.path, "--manifest", manifestURL.path])
+  } catch {
+    return String(describing: error)
+  }
+}
+
 func runRuntimeCommand(_ command: [String]) -> String {
   guard let executable = command.first else {
     return "runtime command missing"
@@ -5226,6 +5281,16 @@ func runRuntimeCommand(_ command: [String]) -> String {
   } catch {
     return String(describing: error)
   }
+}
+
+func resolveContractURL(_ name: String) -> URL {
+  let fileManager = FileManager.default
+  let candidates = [
+    Bundle.main.resourceURL?.appendingPathComponent(name),
+    Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent(name),
+    URL(fileURLWithPath: name)
+  ].compactMap { $0 }
+  return candidates.first(where: { fileManager.isReadableFile(atPath: $0.path) }) ?? candidates.last!
 }
 
 func resolveExecutable(_ name: String) -> URL {
@@ -5276,6 +5341,11 @@ struct TheurgyNativeApp: App {
             .replace(
                 "__DAEMON_COMMAND__",
                 &swift_string_array_literal(&runtime.daemon_command),
+            )
+            .replace("__APP_ID__", &swift_escape(&product.app_id))
+            .replace(
+                "__RUNTIME_MANIFEST__",
+                &swift_escape(&runtime.runtime_manifest),
             )
             .replace(
                 "__ACTION_CONTRACTS__",
@@ -7994,7 +8064,22 @@ binary = "deployments-core"
             && file.contents.contains("let runtimeStateCommand")
             && file
                 .contents
-                .contains("runtimeActionCommand + [action.id, json]")));
+                .contains("let runtimeRequestCommand = [\"theurgy-runtime\", \"run-request\"]")
+            && file
+                .contents
+                .contains("func runRuntimeRequest(_ request: [String: Any]) -> String")
+            && file
+                .contents
+                .contains("\"schema\": \"theurgy-runtime-action-request/v1\"")
+            && file.contents.contains(
+                "runtimeRequestCommand + [requestURL.path, \"--manifest\", manifestURL.path]"
+            )
+            && !file
+                .contents
+                .contains("runtimeActionCommand + [action.id, json]")
+            && !file
+                .contents
+                .contains("func command(for action: ProductActionContract")));
         let macos_source = files
             .iter()
             .find(|file| file.path == "Sources/App/App.swift")
