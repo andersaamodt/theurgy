@@ -43,6 +43,7 @@
     "productBackgroundJobContracts",
     "productReleaseTargetContracts",
     "surfaceActions",
+    "surfaceCapabilities",
     "surfaceActionContracts",
     "surfaceRoles",
     "surfaceScreens",
@@ -143,6 +144,7 @@
     },
     "surfaceTarget": { "type": "string", "minLength": 1 },
     "surfaceActions": { "$ref": "#/$defs/actionIdList" },
+    "surfaceCapabilities": { "$ref": "#/$defs/stringList" },
     "surfaceActionContracts": {
       "type": "array",
       "items": { "$ref": "#/$defs/actionContract" }

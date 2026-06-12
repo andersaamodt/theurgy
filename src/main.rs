@@ -2888,6 +2888,18 @@ mod tests {
         );
         assert_eq!(
             schema
+                .pointer("/properties/surfaceCapabilities/$ref")
+                .and_then(Value::as_str),
+            Some("#/$defs/stringList")
+        );
+        assert!(schema
+            .pointer("/required")
+            .and_then(Value::as_array)
+            .is_some_and(|required| required
+                .iter()
+                .any(|value| value.as_str() == Some("surfaceCapabilities"))));
+        assert_eq!(
+            schema
                 .pointer("/properties/productBackgroundJobContracts/items/$ref")
                 .and_then(Value::as_str),
             Some("#/$defs/backgroundJobContract")
