@@ -3383,6 +3383,38 @@ struct RuntimeContract {
     actionCommand + [action.id, json]
   }
 
+  func defaultParamsJson(for action: ProductActionContract) -> String {
+    let params = defaultParams(for: action)
+    guard let data = try? JSONSerialization.data(withJSONObject: params, options: [.sortedKeys]) else {
+      return "{}"
+    }
+    return String(data: data, encoding: .utf8) ?? "{}"
+  }
+
+  func defaultParams(for action: ProductActionContract) -> [String: Any] {
+    var params: [String: Any] = [:]
+    for (key, descriptor) in action.inputShape {
+      params[key] = defaultParamValue(for: descriptor)
+    }
+    return params
+  }
+
+  func defaultParamValue(for descriptor: String) -> Any {
+    let required = descriptor.hasSuffix("?") ? String(descriptor.dropLast()) : descriptor
+    if required.contains("|"), let first = required.split(separator: "|").first {
+      return String(first)
+    }
+    switch required {
+    case "boolean": return false
+    case "number": return 0.0
+    case "integer": return 0
+    case "array": return [Any]()
+    case "object": return [String: Any]()
+    case "json": return NSNull()
+    default: return ""
+    }
+  }
+
   func actionEnvelope(for action: ProductActionContract, params: [String: Any]) -> String {
     let envelope: [String: Any] = [
       "protocol": protocolName,
@@ -3433,8 +3465,8 @@ __MOBILE_WORKFLOW_SECTION__
             VStack(alignment: .leading) {
               Text(action.label)
               Text(action.effect)
-              Text(contract.command(for: action, json: "{}").joined(separator: " "))
-              Text(contract.actionEnvelope(for: action, params: [:]))
+              Text(contract.command(for: action, json: contract.defaultParamsJson(for: action)).joined(separator: " "))
+              Text(contract.actionEnvelope(for: action, params: contract.defaultParams(for: action)))
             }
           }
         }
@@ -3594,6 +3626,42 @@ public final class MainActivity extends Activity {
     return command;
   }
 
+  private static JSONObject defaultParams(ProductActionContract action) {
+    JSONObject params = new JSONObject();
+    try {
+      for (String[] shape : action.inputShape) {
+        params.put(shape[0], defaultParamValue(shape[1]));
+      }
+    } catch (JSONException error) {
+      return new JSONObject();
+    }
+    return params;
+  }
+
+  private static Object defaultParamValue(String descriptor) throws JSONException {
+    String required = descriptor.endsWith("?") ? descriptor.substring(0, descriptor.length() - 1) : descriptor;
+    int enumIndex = required.indexOf('|');
+    if (enumIndex >= 0) {
+      return required.substring(0, enumIndex);
+    }
+    switch (required) {
+      case "boolean":
+        return Boolean.FALSE;
+      case "number":
+        return Double.valueOf(0);
+      case "integer":
+        return Integer.valueOf(0);
+      case "array":
+        return new JSONArray();
+      case "object":
+        return new JSONObject();
+      case "json":
+        return JSONObject.NULL;
+      default:
+        return "";
+    }
+  }
+
   private static String actionEnvelope(String app, ProductActionContract action, JSONObject params) {
     try {
       JSONObject envelope = new JSONObject();
@@ -3704,9 +3772,10 @@ __MOBILE_WORKFLOW_TEXT__
       .append("\nDaemon: ").append(String.join(" ", DAEMON_COMMAND))
       .append("\nActions:");
     for (ProductActionContract action : ACTION_CONTRACTS) {
+      JSONObject params = defaultParams(action);
       text.append("\n").append(action.label).append(" [").append(action.effect).append("] ")
-        .append(String.join(" ", commandFor(action, "{}")))
-        .append("\n  envelope: ").append(actionEnvelope(runtimeApp, action, new JSONObject()));
+        .append(String.join(" ", commandFor(action, params.toString())))
+        .append("\n  envelope: ").append(actionEnvelope(runtimeApp, action, params));
     }
     view.setText(text.toString());
     setContentView(view);
@@ -3811,6 +3880,38 @@ func command(for action: ProductActionContract, json: String) -> [String] {
   runtimeActionCommand + [action.id, json]
 }
 
+func defaultParamsJson(for action: ProductActionContract) -> String {
+  let params = defaultParams(for: action)
+  guard let data = try? JSONSerialization.data(withJSONObject: params, options: [.sortedKeys]) else {
+    return "{}"
+  }
+  return String(data: data, encoding: .utf8) ?? "{}"
+}
+
+func defaultParams(for action: ProductActionContract) -> [String: Any] {
+  var params: [String: Any] = [:]
+  for (key, descriptor) in action.inputShape {
+    params[key] = defaultParamValue(for: descriptor)
+  }
+  return params
+}
+
+func defaultParamValue(for descriptor: String) -> Any {
+  let required = descriptor.hasSuffix("?") ? String(descriptor.dropLast()) : descriptor
+  if required.contains("|"), let first = required.split(separator: "|").first {
+    return String(first)
+  }
+  switch required {
+  case "boolean": return false
+  case "number": return 0.0
+  case "integer": return 0
+  case "array": return [Any]()
+  case "object": return [String: Any]()
+  case "json": return NSNull()
+  default: return ""
+  }
+}
+
 struct RuntimeStateView: View {
   @State private var status = "Runtime state not loaded."
 
@@ -3855,7 +3956,9 @@ __SURFACE_BODY__
         }
         if !runtimeActionCommand.isEmpty && !defaultActionId.isEmpty {
           Button("Action") {
-            status = runRuntimeCommand(runtimeActionCommand + [defaultActionId, "{}"])
+            if let action = actionContracts.first(where: { $0.id == defaultActionId }) {
+              status = runRuntimeCommand(command(for: action, json: defaultParamsJson(for: action)))
+            }
           }
         }
         if !runtimeHistoryCommand.isEmpty {
@@ -3867,9 +3970,9 @@ __SURFACE_BODY__
       VStack(alignment: .leading, spacing: 6) {
         ForEach(actionContracts, id: \.id) { action in
           Button(action.label) {
-            status = runRuntimeCommand(command(for: action, json: "{}"))
+            status = runRuntimeCommand(command(for: action, json: defaultParamsJson(for: action)))
           }
-          Text(command(for: action, json: "{}").joined(separator: " "))
+          Text(command(for: action, json: defaultParamsJson(for: action)).joined(separator: " "))
             .font(.system(.caption2, design: .monospaced))
         }
       }

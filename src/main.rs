@@ -3843,7 +3843,12 @@ mod tests {
         assert!(swift
             .contains("let runtimeHistoryCommand = [\"deployments-core\", \"runtime-history\"]"));
         assert!(swift.contains("let runtimeDaemonCommand = [\"deployments-daemon\"]"));
-        assert!(swift.contains("runtimeActionCommand + [defaultActionId, \"{}\"]"));
+        assert!(
+            swift.contains("func defaultParamsJson(for action: ProductActionContract) -> String")
+        );
+        assert!(swift
+            .contains("func defaultParams(for action: ProductActionContract) -> [String: Any]"));
+        assert!(swift.contains("params[key] = defaultParamValue(for: descriptor)"));
         assert!(swift.contains("struct ProductActionContract"));
         assert!(swift.contains("let actionContracts = [ProductActionContract"));
         assert!(swift
@@ -3852,6 +3857,7 @@ mod tests {
         assert!(swift.contains("ForEach(actionContracts, id: \\.id)"));
         assert!(swift.contains("runRuntimeCommand(runtimeSubscribeStatusCommand)"));
         assert!(swift.contains("runRuntimeCommand(runtimeOperationStatusCommand + [\"default\"])"));
+        assert!(swift.contains("command(for: action, json: defaultParamsJson(for: action))"));
         assert!(swift.contains("inputShape: [\"deployment\": \"string\"]"));
         assert!(swift.contains("outputShape: [\"params\": \"object\"]"));
         assert!(swift.contains("Surface actions:"));
@@ -3953,7 +3959,14 @@ mod tests {
         assert!(ios.contains("\"action\": action.id"));
         assert!(ios.contains("\"params\": params"));
         assert!(ios.contains("JSONSerialization.data(withJSONObject: envelope"));
-        assert!(ios.contains("contract.actionEnvelope(for: action, params: [:])"));
+        assert!(ios.contains("func defaultParamsJson(for action: ProductActionContract) -> String"));
+        assert!(
+            ios.contains("func defaultParams(for action: ProductActionContract) -> [String: Any]")
+        );
+        assert!(ios.contains("contract.defaultParamsJson(for: action)"));
+        assert!(ios.contains(
+            "contract.actionEnvelope(for: action, params: contract.defaultParams(for: action))"
+        ));
         assert!(ios.contains("id: \"publish_changes\""));
         assert!(ios.contains("inputKeys: [\"deployment\"]"));
         assert!(ios.contains("outputKeys: [\"params\"]"));
@@ -4099,7 +4112,11 @@ mod tests {
         assert!(android.contains("envelope.put(\"action\", action.id);"));
         assert!(android.contains("envelope.put(\"params\", params);"));
         assert!(android.contains("String runtimeApp = jsonString(runtimeMetadata, \"app\");"));
-        assert!(android.contains("actionEnvelope(runtimeApp, action, new JSONObject())"));
+        assert!(android
+            .contains("private static JSONObject defaultParams(ProductActionContract action)"));
+        assert!(android.contains("params.put(shape[0], defaultParamValue(shape[1]));"));
+        assert!(android.contains("JSONObject params = defaultParams(action);"));
+        assert!(android.contains("actionEnvelope(runtimeApp, action, params)"));
         assert!(android.contains(
             "new ProductActionContract(\"publish_changes\", \"Push to Production\", \"release\""
         ));
