@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::env;
 use std::error::Error;
 use std::fmt;
@@ -477,7 +476,7 @@ fn command_compile_app(args: &[String]) -> Result<()> {
     } else {
         "mobile"
     };
-    let product_contract = product_ir_from_summary(&product_summary);
+    let product_contract = product_summary.clone();
     product_runtime::validate_product_surface_path(&product_contract, surface_kind, &surface_ir)?;
     if !product_summary
         .targets
@@ -608,7 +607,7 @@ fn inspect_app_lines(path: &Path) -> Result<Vec<String>> {
     let runtime_text = read_json(&runtime_path)?;
     let runtime_summary = validate_runtime_manifest(&runtime_text)?;
     let runtime = runtime_contract_from_manifest(&runtime_text)?;
-    let product_ir_contract = product_ir_from_summary(&product);
+    let product_ir_contract = product.clone();
     let runtime_manifest_contract = product_runtime::RuntimeManifest {
         app_id: runtime_summary.app_id,
         product_ir: runtime_summary.product_ir,
@@ -1054,8 +1053,7 @@ fn validate_runtime_action_params(
     params: &str,
     contracts: &[ActionContract],
 ) -> Result<()> {
-    let contracts = product_action_contracts_from_cli(contracts);
-    product_runtime::validate_runtime_action_params_text(action_id, params, &contracts)
+    product_runtime::validate_runtime_action_params_text(action_id, params, contracts)
         .map_err(Into::into)
 }
 
@@ -1064,8 +1062,7 @@ fn validate_runtime_action_result_keys(
     result: &Value,
     contracts: &[ActionContract],
 ) -> Result<()> {
-    let contracts = product_action_contracts_from_cli(contracts);
-    product_runtime::validate_runtime_action_result_contract_value(action_id, result, &contracts)
+    product_runtime::validate_runtime_action_result_contract_value(action_id, result, contracts)
         .map_err(Into::into)
 }
 
@@ -1074,11 +1071,10 @@ fn validate_runtime_action_operation_contract(
     actual_long_running: bool,
     contracts: &[ActionContract],
 ) -> Result<()> {
-    let contracts = product_action_contracts_from_cli(contracts);
     product_runtime::validate_runtime_action_operation_contract(
         action_id,
         actual_long_running,
-        &contracts,
+        contracts,
     )
     .map_err(Into::into)
 }
@@ -1088,8 +1084,7 @@ fn validate_runtime_action_failure_keys(
     output: &str,
     contracts: &[ActionContract],
 ) -> Result<()> {
-    let contracts = product_action_contracts_from_cli(contracts);
-    product_runtime::validate_runtime_action_failure_contract_text(action_id, output, &contracts)
+    product_runtime::validate_runtime_action_failure_contract_text(action_id, output, contracts)
         .map_err(Into::into)
 }
 
@@ -1184,58 +1179,13 @@ fn run_manifest_command_with_args(
     })
 }
 
-#[derive(Debug, Eq, PartialEq)]
-struct ProductSummary {
-    app_id: String,
-    app_name: String,
-    targets: Vec<String>,
-    desktop_surface_ir: Option<String>,
-    mobile_surface_ir: Option<String>,
-    capabilities: Vec<String>,
-    permissions: Vec<String>,
-    domain_object_ids: Vec<String>,
-    state_snapshot_schema: String,
-    state_command: Vec<String>,
-    state_status_command: Vec<String>,
-    persistence_truth: String,
-    persistence_root_ids: Vec<String>,
-    background_jobs: Vec<BackgroundJob>,
-    background_job_ids: Vec<String>,
-    release_targets: Vec<ReleaseTarget>,
-    audit_keys: Vec<String>,
-    action_contracts: Vec<ActionContract>,
-    action_ids: Vec<String>,
-    actions: usize,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct ActionContract {
-    id: String,
-    label: String,
-    effect: String,
-    safe: bool,
-    mutating: bool,
-    long_running: bool,
-    privileged: bool,
-    command: Vec<String>,
-    input_keys: Vec<String>,
-    output_keys: Vec<String>,
-    failure_keys: Vec<String>,
-    input_shape: BTreeMap<String, String>,
-    output_shape: BTreeMap<String, String>,
-    failure_shape: BTreeMap<String, String>,
-}
+type ProductSummary = product_runtime::ProductIr;
+type ActionContract = product_runtime::ProductActionContract;
 
 #[derive(Debug, Eq, PartialEq)]
 struct ActionSummary {
     action_ids: Vec<String>,
     actions: usize,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct BackgroundJob {
-    id: String,
-    command: Vec<String>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -1344,14 +1294,6 @@ impl RuntimeContract {
         self.source_surface_ir = source_surface_ir;
         self
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct ReleaseTarget {
-    id: String,
-    target: String,
-    surface: String,
-    artifact: String,
 }
 
 fn read_json(path: &Path) -> Result<String> {
@@ -1536,139 +1478,7 @@ fn validate_operation_history_value(value: &Value) -> Result<OperationHistorySum
 }
 
 fn validate_product_ir_value(value: &Value) -> Result<ProductSummary> {
-    let product = product_runtime::validate_product_ir_value(value)?;
-    Ok(product_summary_from_library(product))
-}
-
-fn product_summary_from_library(product: product_runtime::ProductIr) -> ProductSummary {
-    ProductSummary {
-        app_id: product.app_id,
-        app_name: product.app_name,
-        targets: product.targets,
-        desktop_surface_ir: product.desktop_surface_ir,
-        mobile_surface_ir: product.mobile_surface_ir,
-        capabilities: product.capabilities,
-        permissions: product.permissions,
-        domain_object_ids: product.domain_object_ids,
-        state_snapshot_schema: product.state_snapshot_schema,
-        state_command: product.state_command,
-        state_status_command: product.state_status_command,
-        persistence_truth: product.persistence_truth,
-        persistence_root_ids: product.persistence_root_ids,
-        background_jobs: product
-            .background_jobs
-            .into_iter()
-            .map(|job| BackgroundJob {
-                id: job.id,
-                command: job.command,
-            })
-            .collect(),
-        background_job_ids: product.background_job_ids,
-        release_targets: product
-            .release_targets
-            .into_iter()
-            .map(|target| ReleaseTarget {
-                id: target.id,
-                target: target.target,
-                surface: target.surface,
-                artifact: target.artifact,
-            })
-            .collect(),
-        audit_keys: product.audit_keys,
-        action_contracts: product
-            .action_contracts
-            .into_iter()
-            .map(action_contract_from_library)
-            .collect(),
-        action_ids: product.action_ids,
-        actions: product.actions,
-    }
-}
-
-fn action_contract_from_library(
-    contract: product_runtime::ProductActionContract,
-) -> ActionContract {
-    ActionContract {
-        id: contract.id,
-        label: contract.label,
-        effect: contract.effect,
-        safe: contract.safe,
-        mutating: contract.mutating,
-        long_running: contract.long_running,
-        privileged: contract.privileged,
-        command: contract.command,
-        input_keys: contract.input_keys,
-        output_keys: contract.output_keys,
-        failure_keys: contract.failure_keys,
-        input_shape: contract.input_shape,
-        output_shape: contract.output_shape,
-        failure_shape: contract.failure_shape,
-    }
-}
-
-fn product_action_contracts_from_cli(
-    contracts: &[ActionContract],
-) -> Vec<product_runtime::ProductActionContract> {
-    contracts
-        .iter()
-        .map(|contract| product_runtime::ProductActionContract {
-            id: contract.id.clone(),
-            label: contract.label.clone(),
-            effect: contract.effect.clone(),
-            safe: contract.safe,
-            mutating: contract.mutating,
-            long_running: contract.long_running,
-            privileged: contract.privileged,
-            command: contract.command.clone(),
-            input_keys: contract.input_keys.clone(),
-            output_keys: contract.output_keys.clone(),
-            failure_keys: contract.failure_keys.clone(),
-            input_shape: contract.input_shape.clone(),
-            output_shape: contract.output_shape.clone(),
-            failure_shape: contract.failure_shape.clone(),
-        })
-        .collect()
-}
-
-fn product_ir_from_summary(summary: &ProductSummary) -> product_runtime::ProductIr {
-    product_runtime::ProductIr {
-        app_id: summary.app_id.clone(),
-        app_name: summary.app_name.clone(),
-        targets: summary.targets.clone(),
-        desktop_surface_ir: summary.desktop_surface_ir.clone(),
-        mobile_surface_ir: summary.mobile_surface_ir.clone(),
-        capabilities: summary.capabilities.clone(),
-        permissions: summary.permissions.clone(),
-        domain_object_ids: summary.domain_object_ids.clone(),
-        state_snapshot_schema: summary.state_snapshot_schema.clone(),
-        state_command: summary.state_command.clone(),
-        state_status_command: summary.state_status_command.clone(),
-        persistence_truth: summary.persistence_truth.clone(),
-        persistence_root_ids: summary.persistence_root_ids.clone(),
-        background_jobs: summary
-            .background_jobs
-            .iter()
-            .map(|job| product_runtime::BackgroundJob {
-                id: job.id.clone(),
-                command: job.command.clone(),
-            })
-            .collect(),
-        background_job_ids: summary.background_job_ids.clone(),
-        release_targets: summary
-            .release_targets
-            .iter()
-            .map(|target| product_runtime::ReleaseTarget {
-                id: target.id.clone(),
-                target: target.target.clone(),
-                surface: target.surface.clone(),
-                artifact: target.artifact.clone(),
-            })
-            .collect(),
-        audit_keys: summary.audit_keys.clone(),
-        action_contracts: product_action_contracts_from_cli(&summary.action_contracts),
-        action_ids: summary.action_ids.clone(),
-        actions: summary.actions,
-    }
+    product_runtime::validate_product_ir_value(value).map_err(Into::into)
 }
 
 fn surface_ir_from_summary(surface: &SurfaceSummary) -> product_runtime::SurfaceIr {
@@ -1836,7 +1646,7 @@ fn compile_native_with_contract(
 ) -> Result<()> {
     let surface_summary = validate_surface_ir(surface)?;
     fs::create_dir_all(out_dir)?;
-    let product = product_ir_from_summary(summary);
+    let product = summary.clone();
     let surface_ir = surface_ir_from_summary(&surface_summary);
     let runtime_bridge = runtime_bridge_from_contract(runtime);
     let files = product_runtime::native_compile_files(
