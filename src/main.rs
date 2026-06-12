@@ -1387,6 +1387,9 @@ mod tests {
         assert!(lines.contains(&"product_actions=2".to_string()));
         assert!(lines.contains(&"product_long_running_actions=1".to_string()));
         assert!(lines.contains(&"product_persistence_truth=file-first".to_string()));
+        assert!(lines.contains(&"product_domain_objects=server,deployment".to_string()));
+        assert!(lines.contains(&"product_domain_object_server_label=Server".to_string()));
+        assert!(lines.contains(&"product_domain_object_deployment_label=Deployment".to_string()));
         assert!(lines.contains(&"product_persistence_roots=headquarters-workspace".to_string()));
         assert!(lines.contains(
             &"product_persistence_root_headquarters-workspace_kind=xdg-state".to_string()
@@ -2090,6 +2093,12 @@ mod tests {
         );
         assert_eq!(
             schema
+                .pointer("/properties/productDomainObjectContracts/items/$ref")
+                .and_then(Value::as_str),
+            Some("#/$defs/domainObjectContract")
+        );
+        assert_eq!(
+            schema
                 .pointer("/properties/subscribeStatusCommand/$ref")
                 .and_then(Value::as_str),
             Some("#/$defs/command")
@@ -2110,6 +2119,9 @@ mod tests {
         assert!(top_level_required
             .iter()
             .any(|value| value.as_str() == Some("productReleaseTargetContracts")));
+        assert!(top_level_required
+            .iter()
+            .any(|value| value.as_str() == Some("productDomainObjectContracts")));
         assert!(top_level_required
             .iter()
             .any(|value| value.as_str() == Some("productIr")));
@@ -2960,6 +2972,13 @@ mod tests {
             &serde_json::json!(["server", "deployment"])
         );
         assert_eq!(
+            runtime_json.get("productDomainObjectContracts").unwrap(),
+            &serde_json::json!([
+                {"id": "server", "label": "Server"},
+                {"id": "deployment", "label": "Deployment"}
+            ])
+        );
+        assert_eq!(
             runtime_json.get("productPersistenceRoots").unwrap(),
             &serde_json::json!(["headquarters-workspace"])
         );
@@ -3091,6 +3110,26 @@ mod tests {
             .to_string();
         assert!(
             error.contains("productBackgroundJobContracts order must match productBackgroundJobs")
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn generated_runtime_validation_rejects_domain_object_contract_drift() {
+        let root = test_root("generated-runtime-domain-object-drift");
+        compile_native(&sample_product(), "linux", &root).unwrap();
+        let mut runtime_json: Value =
+            serde_json::from_str(&fs::read_to_string(root.join("theurgy-runtime.json")).unwrap())
+                .unwrap();
+        *runtime_json
+            .pointer_mut("/productDomainObjectContracts/0/id")
+            .unwrap() = Value::String("not_declared".to_string());
+        let runtime = serde_json::to_string(&runtime_json).unwrap();
+        let error = validate_generated_runtime(&runtime)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("productDomainObjectContracts order must match productDomainObjects")
         );
         fs::remove_dir_all(root).unwrap();
     }

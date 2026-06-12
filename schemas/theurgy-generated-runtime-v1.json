@@ -32,6 +32,7 @@
     "surface",
     "surfaceSchema",
     "surfaceTarget",
+    "productDomainObjectContracts",
     "productPersistenceRootContracts",
     "productBackgroundJobContracts",
     "productReleaseTargetContracts",
@@ -84,6 +85,10 @@
     "productCapabilities": { "$ref": "#/$defs/stringList" },
     "productPermissions": { "$ref": "#/$defs/stringList" },
     "productDomainObjects": { "$ref": "#/$defs/stringList" },
+    "productDomainObjectContracts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/domainObjectContract" }
+    },
     "productStateSnapshotSchema": { "type": "string", "minLength": 1 },
     "productPersistenceTruth": { "type": "string", "minLength": 1 },
     "adapterRuntimeTransport": {
@@ -223,6 +228,16 @@
         "target": { "enum": ["macos", "linux", "ios", "android"] },
         "surface": { "enum": ["desktop", "mobile"] },
         "artifact": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "domainObjectContract": {
+      "type": "object",
+      "required": ["id", "label"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
+        "label": { "type": "string", "minLength": 1 },
+        "source": { "type": "string", "minLength": 1 }
       },
       "additionalProperties": false
     },

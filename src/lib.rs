@@ -218,6 +218,7 @@ pub mod product_runtime {
         pub mobile_surface_ir: Option<String>,
         pub capabilities: Vec<String>,
         pub permissions: Vec<String>,
+        pub domain_objects: Vec<DomainObject>,
         pub domain_object_ids: Vec<String>,
         pub state_snapshot_schema: String,
         pub state_command: Vec<String>,
@@ -265,6 +266,13 @@ pub mod product_runtime {
         pub id: String,
         pub kind: String,
         pub path: Option<String>,
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct DomainObject {
+        pub id: String,
+        pub label: String,
+        pub source: Option<String>,
     }
 
     #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1135,13 +1143,28 @@ pub mod product_runtime {
             "productActions",
             "productCapabilities",
             "productPermissions",
-            "productDomainObjects",
             "productBackgroundJobs",
             "productAuditKeys",
             "surfaceActions",
             "surfaceRoles",
         ] {
             optional_string_array(value, key, &format!("generated runtime {key}"))?;
+        }
+        let product_domain_objects = value_string_array(value, "productDomainObjects")?;
+        let domain_object_contracts = value_array(value, "productDomainObjectContracts")?;
+        if domain_object_contracts.len() != product_domain_objects.len() {
+            return Err(ContractError::new(
+                "generated runtime productDomainObjectContracts must match productDomainObjects length",
+            ));
+        }
+        let mut domain_object_contract_ids = Vec::new();
+        for contract in domain_object_contracts {
+            domain_object_contract_ids.push(validate_generated_domain_object_contract(contract)?);
+        }
+        if domain_object_contract_ids != product_domain_objects {
+            return Err(ContractError::new(
+                "generated runtime productDomainObjectContracts order must match productDomainObjects",
+            ));
         }
         let product_persistence_roots = value_string_array(value, "productPersistenceRoots")?;
         let persistence_root_contracts = value_array(value, "productPersistenceRootContracts")?;
@@ -1361,11 +1384,15 @@ pub mod product_runtime {
             optional_string_array(app, "capabilities", "product IR app.capabilities")?;
         let permissions = optional_string_array(app, "permissions", "product IR app.permissions")?;
         let (desktop_surface_ir, mobile_surface_ir) = product_surface_paths(value)?;
-        let domain_object_ids = optional_object_id_array(
+        let domain_objects = validate_product_domain_objects(
             value.get("domain").unwrap_or(&Value::Null),
             "objects",
             "product IR domain.objects",
         )?;
+        let domain_object_ids = domain_objects
+            .iter()
+            .map(|object| object.id.clone())
+            .collect();
         let action_values = value_array(value, "actions")?;
         if action_values.is_empty() {
             return Err(ContractError::new("product IR actions required"));
@@ -1409,6 +1436,7 @@ pub mod product_runtime {
             mobile_surface_ir,
             capabilities,
             permissions,
+            domain_objects,
             domain_object_ids,
             state_snapshot_schema,
             state_command,
@@ -1653,6 +1681,10 @@ pub mod product_runtime {
         object.insert(
             "productDomainObjects".to_string(),
             string_vec_value(&product.domain_object_ids),
+        );
+        object.insert(
+            "productDomainObjectContracts".to_string(),
+            domain_object_contracts_value(&product.domain_objects),
         );
         object.insert(
             "productStateSnapshotSchema".to_string(),
@@ -2062,6 +2094,22 @@ pub mod product_runtime {
             "product_persistence_truth={}",
             product.persistence_truth
         ));
+        lines.push(format!(
+            "product_domain_objects={}",
+            product.domain_object_ids.join(",")
+        ));
+        for object in &product.domain_objects {
+            lines.push(format!(
+                "product_domain_object_{}_label={}",
+                object.id, object.label
+            ));
+            if let Some(source) = &object.source {
+                lines.push(format!(
+                    "product_domain_object_{}_source={source}",
+                    object.id
+                ));
+            }
+        }
         lines.push(format!(
             "product_persistence_roots={}",
             product.persistence_root_ids.join(",")
@@ -3075,6 +3123,26 @@ pub mod product_runtime {
                         "artifact".to_string(),
                         Value::String(release_target.artifact.clone()),
                     );
+                    Value::Object(object)
+                })
+                .collect(),
+        )
+    }
+
+    fn domain_object_contracts_value(objects: &[DomainObject]) -> Value {
+        Value::Array(
+            objects
+                .iter()
+                .map(|domain_object| {
+                    let mut object = serde_json::Map::new();
+                    object.insert("id".to_string(), Value::String(domain_object.id.clone()));
+                    object.insert(
+                        "label".to_string(),
+                        Value::String(domain_object.label.clone()),
+                    );
+                    if let Some(source) = &domain_object.source {
+                        object.insert("source".to_string(), Value::String(source.clone()));
+                    }
                     Value::Object(object)
                 })
                 .collect(),
@@ -4534,6 +4602,25 @@ struct TheurgyNativeApp: App {
         Ok(id)
     }
 
+    fn validate_generated_domain_object_contract(contract: &Value) -> ContractResult<String> {
+        let id = value_string(contract, "id")
+            .filter(|id| valid_action_id(id))
+            .ok_or_else(|| {
+                ContractError::new("generated runtime domain object contract id invalid")
+            })?;
+        value_string(contract, "label")
+            .filter(|label| !label.is_empty())
+            .ok_or_else(|| {
+                ContractError::new("generated runtime domain object contract label required")
+            })?;
+        optional_nonempty_string(
+            contract,
+            "source",
+            "generated runtime domain object contract source",
+        )?;
+        Ok(id)
+    }
+
     fn validate_generated_release_target_contract(contract: &Value) -> ContractResult<String> {
         let id = value_string(contract, "id")
             .filter(|id| valid_action_id(id))
@@ -4798,34 +4885,40 @@ struct TheurgyNativeApp: App {
             .transpose()
     }
 
-    fn optional_object_id_array(
+    fn validate_product_domain_objects(
         value: &Value,
         key: &str,
         label: &str,
-    ) -> ContractResult<Vec<String>> {
+    ) -> ContractResult<Vec<DomainObject>> {
         let Some(raw) = value.get(key) else {
             return Ok(Vec::new());
         };
         let Some(array) = raw.as_array() else {
             return Err(ContractError::new(format!("{label} must be an array")));
         };
-        let mut ids = Vec::new();
+        let mut objects = Vec::new();
+        let mut ids = BTreeSet::new();
         for item in array {
-            let Some(object) = item.as_object() else {
+            let Some(_object) = item.as_object() else {
                 return Err(ContractError::new(format!("{label} must contain objects")));
             };
-            let Some(id) = object
-                .get("id")
-                .and_then(Value::as_str)
-                .filter(|id| valid_action_id(id))
-            else {
+            let id = required_stable_id(item, &format!("{label} object.id"))?;
+            if !ids.insert(id.clone()) {
                 return Err(ContractError::new(format!(
-                    "{label} object.id must be stable"
+                    "{label} object.id duplicated: {id}"
                 )));
-            };
-            ids.push(id.to_string());
+            }
+            let object_label =
+                required_nonempty_object_string(item, "label", &format!("{label} object.label"))?;
+            let source =
+                optional_nonempty_string(item, "source", &format!("{label} object.source"))?;
+            objects.push(DomainObject {
+                id,
+                label: object_label,
+                source,
+            });
         }
-        Ok(ids)
+        Ok(objects)
     }
 
     fn validate_product_persistence_roots(
@@ -5798,6 +5891,8 @@ binary = "deployments-core"
             Some("app-blueprint/mobile.surface.ir.json")
         );
         assert_eq!(product.domain_object_ids, vec!["server", "deployment"]);
+        assert_eq!(product.domain_objects[0].label, "Server".to_string());
+        assert_eq!(product.domain_objects[1].label, "Deployment".to_string());
         assert_eq!(
             product.state_snapshot_schema,
             "deployments-state/v1".to_string()
@@ -6154,6 +6249,11 @@ binary = "deployments-core"
   "productCapabilities": ["native-desktop"],
   "productPermissions": ["files"],
   "productDomainObjects": ["deployment"],
+  "productDomainObjectContracts": [{
+    "id": "deployment",
+    "label": "Deployment",
+    "source": "fixture"
+  }],
   "productStateSnapshotSchema": "deployments-state/v1",
   "productPersistenceRoots": ["headquarters-workspace"],
   "productPersistenceRootContracts": [{
@@ -6542,6 +6642,13 @@ binary = "deployments-core"
         assert_eq!(summary.surface_actions, 1);
         assert!(metadata.contains("\"legacyNativeDesktopIr\": \"app-blueprint/app.ir.yaml\""));
         let runtime_json: serde_json::Value = serde_json::from_str(&metadata).unwrap();
+        assert_eq!(
+            runtime_json.get("productDomainObjectContracts").unwrap(),
+            &serde_json::json!([{
+                "id": "deployment",
+                "label": "Deployment"
+            }])
+        );
         assert_eq!(
             runtime_json.get("productPersistenceRoots").unwrap(),
             &serde_json::json!(["headquarters-workspace"])
