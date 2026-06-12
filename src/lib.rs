@@ -1137,7 +1137,6 @@ pub mod product_runtime {
             "productPermissions",
             "productDomainObjects",
             "productBackgroundJobs",
-            "productReleaseTargets",
             "productAuditKeys",
             "surfaceActions",
             "surfaceRoles",
@@ -1178,6 +1177,21 @@ pub mod product_runtime {
             ));
         }
         let product_release_targets = value_string_array(value, "productReleaseTargets")?;
+        let release_target_contracts = value_array(value, "productReleaseTargetContracts")?;
+        if release_target_contracts.len() != product_release_targets.len() {
+            return Err(ContractError::new(
+                "generated runtime productReleaseTargetContracts must match productReleaseTargets length",
+            ));
+        }
+        let mut release_target_contract_ids = Vec::new();
+        for contract in release_target_contracts {
+            release_target_contract_ids.push(validate_generated_release_target_contract(contract)?);
+        }
+        if release_target_contract_ids != product_release_targets {
+            return Err(ContractError::new(
+                "generated runtime productReleaseTargetContracts order must match productReleaseTargets",
+            ));
+        }
         if !product_release_targets
             .iter()
             .any(|release_target| release_target == &target_release_target)
@@ -1673,6 +1687,10 @@ pub mod product_runtime {
             string_vec_value(&release_target_ids(product)),
         );
         object.insert(
+            "productReleaseTargetContracts".to_string(),
+            release_target_contracts_value(&product.release_targets),
+        );
+        object.insert(
             "targetReleaseTarget".to_string(),
             Value::String(release_target.id.clone()),
         );
@@ -2081,6 +2099,20 @@ pub mod product_runtime {
             "product_release_targets={}",
             release_target_ids(product).join(",")
         ));
+        for release_target in &product.release_targets {
+            lines.push(format!(
+                "product_release_target_{}_target={}",
+                release_target.id, release_target.target
+            ));
+            lines.push(format!(
+                "product_release_target_{}_surface={}",
+                release_target.id, release_target.surface
+            ));
+            lines.push(format!(
+                "product_release_target_{}_artifact={}",
+                release_target.id, release_target.artifact
+            ));
+        }
         lines.push(format!(
             "product_audit_keys={}",
             product.audit_keys.join(",")
@@ -3018,6 +3050,31 @@ pub mod product_runtime {
                     if let Some(path) = &root.path {
                         object.insert("path".to_string(), Value::String(path.clone()));
                     }
+                    Value::Object(object)
+                })
+                .collect(),
+        )
+    }
+
+    fn release_target_contracts_value(release_targets: &[ReleaseTarget]) -> Value {
+        Value::Array(
+            release_targets
+                .iter()
+                .map(|release_target| {
+                    let mut object = serde_json::Map::new();
+                    object.insert("id".to_string(), Value::String(release_target.id.clone()));
+                    object.insert(
+                        "target".to_string(),
+                        Value::String(release_target.target.clone()),
+                    );
+                    object.insert(
+                        "surface".to_string(),
+                        Value::String(release_target.surface.clone()),
+                    );
+                    object.insert(
+                        "artifact".to_string(),
+                        Value::String(release_target.artifact.clone()),
+                    );
                     Value::Object(object)
                 })
                 .collect(),
@@ -4474,6 +4531,40 @@ struct TheurgyNativeApp: App {
                 )));
             }
         }
+        Ok(id)
+    }
+
+    fn validate_generated_release_target_contract(contract: &Value) -> ContractResult<String> {
+        let id = value_string(contract, "id")
+            .filter(|id| valid_action_id(id))
+            .ok_or_else(|| {
+                ContractError::new("generated runtime release target contract id invalid")
+            })?;
+        let target = value_string(contract, "target")
+            .filter(|target| matches!(target.as_str(), "macos" | "linux" | "ios" | "android"))
+            .ok_or_else(|| {
+                ContractError::new("generated runtime release target contract target invalid")
+            })?;
+        let surface = value_string(contract, "surface")
+            .filter(|surface| matches!(surface.as_str(), "desktop" | "mobile"))
+            .ok_or_else(|| {
+                ContractError::new("generated runtime release target contract surface invalid")
+            })?;
+        let expected_surface = if is_desktop_target(&target) {
+            "desktop"
+        } else {
+            "mobile"
+        };
+        if surface != expected_surface {
+            return Err(ContractError::new(
+                "generated runtime release target contract surface must match target family",
+            ));
+        }
+        value_string(contract, "artifact")
+            .filter(|artifact| !artifact.is_empty())
+            .ok_or_else(|| {
+                ContractError::new("generated runtime release target contract artifact required")
+            })?;
         Ok(id)
     }
 
@@ -6075,6 +6166,12 @@ binary = "deployments-core"
   "productBackgroundJobs": [],
   "productBackgroundJobContracts": [],
   "productReleaseTargets": ["macos-app"],
+  "productReleaseTargetContracts": [{
+    "id": "macos-app",
+    "target": "macos",
+    "surface": "desktop",
+    "artifact": "generated/macos"
+  }],
   "targetReleaseTarget": "macos-app",
   "targetReleaseArtifact": "generated/macos",
   "productAuditKeys": ["cliParity"],
@@ -6469,6 +6566,15 @@ binary = "deployments-core"
                 "command": ["deployments-daemon"],
                 "state": "server.queue_mode"
             }])
+        );
+        assert_eq!(
+            runtime_json.get("productReleaseTargetContracts").unwrap(),
+            &serde_json::json!([
+                {"id": "macos-app", "target": "macos", "surface": "desktop", "artifact": "generated/macos"},
+                {"id": "linux-app", "target": "linux", "surface": "desktop", "artifact": "generated/linux"},
+                {"id": "ios-app", "target": "ios", "surface": "mobile", "artifact": "generated/mobile/ios"},
+                {"id": "android-app", "target": "android", "surface": "mobile", "artifact": "generated/mobile/android"}
+            ])
         );
         let runtime_manifest = product_runtime::RuntimeManifest {
             app_id: "deployments".to_string(),

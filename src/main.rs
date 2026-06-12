@@ -1402,6 +1402,11 @@ mod tests {
         assert!(lines.contains(
             &"product_background_job_server-queue_command=deployments-daemon".to_string()
         ));
+        assert!(lines.contains(&"product_release_targets=macos-app,linux-app".to_string()));
+        assert!(lines.contains(&"product_release_target_macos-app_target=macos".to_string()));
+        assert!(lines.contains(&"product_release_target_macos-app_surface=desktop".to_string()));
+        assert!(lines
+            .contains(&"product_release_target_macos-app_artifact=generated/macos".to_string()));
         assert!(lines.contains(&"runtime_protocol=deployments-runtime/v1".to_string()));
         assert!(lines
             .contains(&"runtime_legacy_native_desktop_ir=app-blueprint/app.ir.yaml".to_string()));
@@ -2079,6 +2084,12 @@ mod tests {
         );
         assert_eq!(
             schema
+                .pointer("/properties/productReleaseTargetContracts/items/$ref")
+                .and_then(Value::as_str),
+            Some("#/$defs/releaseTargetContract")
+        );
+        assert_eq!(
+            schema
                 .pointer("/properties/subscribeStatusCommand/$ref")
                 .and_then(Value::as_str),
             Some("#/$defs/command")
@@ -2096,6 +2107,9 @@ mod tests {
         assert!(top_level_required
             .iter()
             .any(|value| value.as_str() == Some("productPersistenceRootContracts")));
+        assert!(top_level_required
+            .iter()
+            .any(|value| value.as_str() == Some("productReleaseTargetContracts")));
         assert!(top_level_required
             .iter()
             .any(|value| value.as_str() == Some("productIr")));
@@ -2989,6 +3003,13 @@ mod tests {
             runtime_json.get("productReleaseTargets").unwrap(),
             &serde_json::json!(["macos-app", "linux-app"])
         );
+        assert_eq!(
+            runtime_json.get("productReleaseTargetContracts").unwrap(),
+            &serde_json::json!([
+                {"id": "macos-app", "target": "macos", "surface": "desktop", "artifact": "generated/macos"},
+                {"id": "linux-app", "target": "linux", "surface": "desktop", "artifact": "generated/linux"}
+            ])
+        );
         assert_eq!(generated.release_target, "linux-app".to_string());
         assert_eq!(generated.release_artifact, "generated/linux".to_string());
         assert_eq!(
@@ -3090,6 +3111,26 @@ mod tests {
             .to_string();
         assert!(error
             .contains("productPersistenceRootContracts order must match productPersistenceRoots"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn generated_runtime_validation_rejects_release_target_contract_drift() {
+        let root = test_root("generated-runtime-release-target-drift");
+        compile_native(&sample_product(), "linux", &root).unwrap();
+        let mut runtime_json: Value =
+            serde_json::from_str(&fs::read_to_string(root.join("theurgy-runtime.json")).unwrap())
+                .unwrap();
+        *runtime_json
+            .pointer_mut("/productReleaseTargetContracts/0/id")
+            .unwrap() = Value::String("not_declared".to_string());
+        let runtime = serde_json::to_string(&runtime_json).unwrap();
+        let error = validate_generated_runtime(&runtime)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("productReleaseTargetContracts order must match productReleaseTargets")
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
