@@ -690,6 +690,12 @@ pub mod product_runtime {
         })
     }
 
+    pub fn validate_runtime_manifest_text(text: &str) -> ContractResult<RuntimeManifest> {
+        let value: Value = serde_json::from_str(text)
+            .map_err(|error| ContractError::new(format!("invalid JSON: {error}")))?;
+        validate_runtime_manifest_value(&value)
+    }
+
     pub fn load_runtime_manifest(path: impl AsRef<Path>) -> ContractResult<RuntimeManifest> {
         let path = path.as_ref();
         let text = fs::read_to_string(path)
@@ -697,6 +703,40 @@ pub mod product_runtime {
         let value: Value = serde_json::from_str(&text)
             .map_err(|error| ContractError::new(format!("invalid JSON: {error}")))?;
         validate_runtime_manifest_value(&value)
+    }
+
+    pub fn load_runtime_bridge(path: impl AsRef<Path>) -> ContractResult<RuntimeBridge> {
+        let path = path.as_ref();
+        let text = fs::read_to_string(path)
+            .map_err(|error| ContractError::new(format!("could not read JSON: {error}")))?;
+        runtime_bridge_from_manifest_text(&text)
+    }
+
+    pub fn load_runtime_bridge_with_product_actions(
+        path: impl AsRef<Path>,
+    ) -> ContractResult<RuntimeBridge> {
+        let path = path.as_ref();
+        let text = fs::read_to_string(path)
+            .map_err(|error| ContractError::new(format!("could not read JSON: {error}")))?;
+        let manifest = validate_runtime_manifest_text(&text)?;
+        let mut runtime = runtime_bridge_from_manifest_text(&text)?;
+        let product_path = manifest_relative_path(path, &manifest.product_ir);
+        let product_text = fs::read_to_string(&product_path).map_err(|error| {
+            ContractError::new(format!(
+                "could not read {}: {error}",
+                product_path.display()
+            ))
+        })?;
+        let product = validate_product_ir_text(&product_text)?;
+        if product.app_id != runtime.app_id {
+            return Err(ContractError::new(format!(
+                "runtime manifest app {} does not match Product IR app {}",
+                runtime.app_id, product.app_id
+            )));
+        }
+        runtime.product_action_ids = Some(product.action_ids);
+        runtime.product_action_contracts = Some(product.action_contracts);
+        Ok(runtime)
     }
 
     pub fn runtime_bridge_from_manifest_text(text: &str) -> ContractResult<RuntimeBridge> {
@@ -1122,6 +1162,12 @@ pub mod product_runtime {
             actions: action_values.len(),
             action_ids,
         })
+    }
+
+    pub fn validate_product_ir_text(text: &str) -> ContractResult<ProductIr> {
+        let value: Value = serde_json::from_str(text)
+            .map_err(|error| ContractError::new(format!("invalid JSON: {error}")))?;
+        validate_product_ir_value(&value)
     }
 
     pub fn validate_surface_ir_value(value: &Value) -> ContractResult<SurfaceIr> {
@@ -3777,6 +3823,24 @@ struct TheurgyNativeApp: App {
         value
     }
 
+    fn manifest_relative_path(
+        manifest_path: &Path,
+        relative_or_absolute: &str,
+    ) -> std::path::PathBuf {
+        let path = std::path::PathBuf::from(relative_or_absolute);
+        if path.is_absolute() {
+            return path;
+        }
+        let manifest_relative = manifest_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(&path);
+        if manifest_relative.exists() {
+            return manifest_relative;
+        }
+        path
+    }
+
     fn validate_runtime_output_app(
         label: &str,
         expected_app: &str,
@@ -4593,6 +4657,88 @@ binary = "deployments-core"
         assert_eq!(manifest.app_id, "deployments");
         assert_eq!(manifest.product_ir, "app-blueprint/product.ir.json");
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn product_runtime_loads_runtime_bridge_with_product_actions_from_disk() {
+        let mut root = std::env::temp_dir();
+        root.push(format!(
+            "theurgy-runtime-bridge-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let manifest_path = root.join("runtime.manifest.json");
+        let product_path = root.join("product.ir.json");
+        std::fs::write(
+            &manifest_path,
+            serde_json::json!({
+                "version": product_runtime::RUNTIME_MANIFEST_SCHEMA,
+                "app": "deployments",
+                "productIr": "product.ir.json",
+                "runtime": {
+                    "protocol": product_runtime::RUNTIME_ACTION_PROTOCOL,
+                    "stateCommand": ["deployments-core", "runtime-state"],
+                    "actionCommand": ["deployments-core", "runtime-action"]
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            &product_path,
+            serde_json::json!({
+                "version": product_runtime::PRODUCT_IR_SCHEMA,
+                "format": "json",
+                "app": {"id": "deployments", "name": "Deployments", "targets": ["macos"]},
+                "state": {"snapshotSchema": "deployments-state/v1"},
+                "actions": [{
+                    "id": "refresh_state",
+                    "label": "Refresh",
+                    "input": {},
+                    "output": {"schema": "string"},
+                    "effect": "read",
+                    "failure": {"error": "string"},
+                    "safe": true,
+                    "mutating": false,
+                    "longRunning": false,
+                    "privileged": false,
+                    "command": ["deployments-core", "runtime-action", "refresh_state", "{}"]
+                }],
+                "releaseTargets": [{
+                    "id": "macos-native",
+                    "target": "macos",
+                    "surface": "desktop",
+                    "artifact": "generated/macos"
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let bridge =
+            product_runtime::load_runtime_bridge_with_product_actions(&manifest_path).unwrap();
+        assert_eq!(bridge.app_id, "deployments");
+        assert_eq!(
+            bridge.product_action_ids,
+            Some(vec!["refresh_state".to_string()])
+        );
+        let contracts = bridge.product_action_contracts.unwrap();
+        assert_eq!(contracts.len(), 1);
+        assert_eq!(contracts[0].id, "refresh_state");
+        assert_eq!(
+            contracts[0].command,
+            vec![
+                "deployments-core".to_string(),
+                "runtime-action".to_string(),
+                "refresh_state".to_string(),
+                "{}".to_string()
+            ]
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

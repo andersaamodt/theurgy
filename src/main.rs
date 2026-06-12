@@ -969,51 +969,11 @@ fn structured_failure_message(output: &str) -> Option<String> {
 }
 
 fn runtime_contract_from_path(path: &Path) -> Result<RuntimeContract> {
-    let manifest = fs::read_to_string(path).map_err(|error| {
-        TheurgyError::new(format!("could not read {}: {error}", path.display()))
-    })?;
-    runtime_contract_from_manifest(&manifest)
+    product_runtime::load_runtime_bridge(path).map_err(Into::into)
 }
 
 fn runtime_contract_from_path_with_product_actions(path: &Path) -> Result<RuntimeContract> {
-    let manifest = fs::read_to_string(path).map_err(|error| {
-        TheurgyError::new(format!("could not read {}: {error}", path.display()))
-    })?;
-    let summary = validate_runtime_manifest(&manifest)?;
-    let mut runtime = runtime_contract_from_manifest(&manifest)?;
-    let product_path = manifest_relative_path(path, &summary.product_ir);
-    let product_text = fs::read_to_string(&product_path).map_err(|error| {
-        TheurgyError::new(format!(
-            "could not read {}: {error}",
-            product_path.display()
-        ))
-    })?;
-    let product = validate_product_ir(&product_text)?;
-    if product.app_id != runtime.app_id {
-        return Err(TheurgyError::new(format!(
-            "runtime manifest app {} does not match Product IR app {}",
-            runtime.app_id, product.app_id
-        ))
-        .into());
-    }
-    runtime.product_action_ids = Some(product.action_ids);
-    runtime.product_action_contracts = Some(product.action_contracts);
-    Ok(runtime)
-}
-
-fn manifest_relative_path(manifest_path: &Path, relative_or_absolute: &str) -> PathBuf {
-    let path = PathBuf::from(relative_or_absolute);
-    if path.is_absolute() {
-        return path;
-    }
-    let manifest_relative = manifest_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join(&path);
-    if manifest_relative.exists() {
-        return manifest_relative;
-    }
-    path
+    product_runtime::load_runtime_bridge_with_product_actions(path).map_err(Into::into)
 }
 
 fn run_manifest_command(command: &[String], label: &str) -> Result<String> {
