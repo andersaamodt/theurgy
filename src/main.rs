@@ -3865,7 +3865,7 @@ mod tests {
 
     #[test]
     fn projects_mobile_surface_from_product_ir() {
-        let product = "{\n  \"version\": \"theurgy-product-ir/v1\",\n  \"format\": \"json\",\n  \"app\": {\"id\": \"deployments\", \"name\": \"Deployments\", \"targets\": [\"ios\"]},\n  \"actions\": [{\"id\": \"refresh_state\", \"label\": \"Refresh\", \"input\": {}, \"output\": {}, \"effect\": \"read\", \"failure\": {}, \"safe\": true, \"mutating\": false, \"longRunning\": false, \"privileged\": false}],\n  \"state\": {\"snapshotSchema\": \"deployments-state/v1\"},\n  \"releaseTargets\": [{\"id\": \"ios-app\", \"target\": \"ios\", \"surface\": \"mobile\", \"artifact\": \"generated/mobile/ios\"}]\n}".to_string();
+        let product = "{\n  \"version\": \"theurgy-product-ir/v1\",\n  \"format\": \"json\",\n  \"app\": {\"id\": \"deployments\", \"name\": \"Deployments\", \"targets\": [\"ios\"], \"capabilities\": [\"native-mobile\"]},\n  \"actions\": [{\"id\": \"refresh_state\", \"label\": \"Refresh\", \"input\": {}, \"output\": {}, \"effect\": \"read\", \"failure\": {}, \"safe\": true, \"mutating\": false, \"longRunning\": false, \"privileged\": false}],\n  \"state\": {\"snapshotSchema\": \"deployments-state/v1\"},\n  \"releaseTargets\": [{\"id\": \"ios-app\", \"target\": \"ios\", \"surface\": \"mobile\", \"artifact\": \"generated/mobile/ios\"}]\n}".to_string();
         let surface = project_surface(&product, "ios").unwrap();
         assert!(surface.contains("\"version\": \"theurgy-mobile-surface-ir/v1\""));
         assert!(surface.contains("\"role\": \"status-overview\""));
@@ -5873,6 +5873,10 @@ mod tests {
             .replace(
                 "\"targets\": [\"macos\", \"linux\"]",
                 "\"targets\": [\"ios\", \"android\"]",
+            )
+            .replace(
+                "\"capabilities\": [\"native-desktop\", \"runtime-actions\"]",
+                "\"capabilities\": [\"native-mobile\", \"runtime-actions\"]",
             )
             .replace(
                 "{\"id\": \"macos-app\", \"target\": \"macos\", \"surface\": \"desktop\", \"artifact\": \"generated/macos\"},\n    {\"id\": \"linux-app\", \"target\": \"linux\", \"surface\": \"desktop\", \"artifact\": \"generated/linux\"}",

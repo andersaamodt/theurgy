@@ -1622,6 +1622,7 @@ pub mod product_runtime {
         }
         let capabilities =
             optional_string_array(app, "capabilities", "product IR app.capabilities")?;
+        validate_product_target_capabilities(&targets, &capabilities)?;
         let permissions = optional_string_array(app, "permissions", "product IR app.permissions")?;
         let (desktop_surface_ir, mobile_surface_ir) = product_surface_paths(value)?;
         let domain_objects = validate_product_domain_objects(
@@ -6055,6 +6056,33 @@ struct TheurgyNativeApp: App {
         Ok(release_targets)
     }
 
+    fn validate_product_target_capabilities(
+        targets: &[String],
+        capabilities: &[String],
+    ) -> ContractResult<()> {
+        if targets.iter().any(|target| is_desktop_target(target))
+            && !capabilities
+                .iter()
+                .any(|capability| capability == "native-desktop")
+        {
+            return Err(ContractError::new(
+                "product IR app.capabilities must include native-desktop for macos/linux targets",
+            ));
+        }
+        if targets
+            .iter()
+            .any(|target| matches!(target.as_str(), "ios" | "android"))
+            && !capabilities
+                .iter()
+                .any(|capability| capability == "native-mobile")
+        {
+            return Err(ContractError::new(
+                "product IR app.capabilities must include native-mobile for ios/android targets",
+            ));
+        }
+        Ok(())
+    }
+
     fn validate_product_persistence(value: &Value) -> ContractResult<String> {
         let Some(raw) = value.get("persistence") else {
             return Ok("file-first".to_string());
@@ -6698,7 +6726,7 @@ binary = "deployments-core"
             serde_json::json!({
                 "version": product_runtime::PRODUCT_IR_SCHEMA,
                 "format": "json",
-                "app": {"id": "deployments", "name": "Deployments", "targets": ["macos"]},
+                "app": {"id": "deployments", "name": "Deployments", "targets": ["macos"], "capabilities": ["native-desktop"]},
                 "state": {"snapshotSchema": "deployments-state/v1"},
                 "actions": [{
                     "id": "refresh_state",
@@ -6826,7 +6854,7 @@ binary = "deployments-core"
                 "id": "deployments",
                 "name": "Deployments",
                 "targets": ["macos", "linux", "ios", "android"],
-                "capabilities": ["native-desktop", "typed-runtime-actions"],
+                "capabilities": ["native-desktop", "native-mobile", "typed-runtime-actions"],
                 "permissions": ["files", "network"]
             },
             "surfaces": {
@@ -6940,13 +6968,48 @@ binary = "deployments-core"
         );
         assert_eq!(product.audit_keys, vec!["cliParity", "operationHistory"]);
 
+        let missing_mobile_capability = serde_json::json!({
+            "version": product_runtime::PRODUCT_IR_SCHEMA,
+            "format": "json",
+            "app": {
+                "id": "deployments",
+                "name": "Deployments",
+                "targets": ["ios"],
+                "capabilities": ["native-desktop"]
+            },
+            "actions": [{
+                "id": "refresh_state",
+                "label": "Refresh",
+                "input": {},
+                "output": {},
+                "effect": "read",
+                "failure": {},
+                "safe": true,
+                "mutating": false,
+                "longRunning": false,
+                "privileged": false
+            }],
+            "state": {"snapshotSchema": "deployments-state/v1"},
+            "releaseTargets": [
+                {"id": "ios-native", "target": "ios", "surface": "mobile", "artifact": "generated/mobile/ios"}
+            ]
+        });
+        let error = product_runtime::validate_product_ir_value(&missing_mobile_capability)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            "product IR app.capabilities must include native-mobile for ios/android targets"
+        );
+
         let invalid = serde_json::json!({
             "version": product_runtime::PRODUCT_IR_SCHEMA,
             "format": "json",
             "app": {
                 "id": "deployments",
                 "name": "Deployments",
-                "targets": ["macos", "linux"]
+                "targets": ["macos", "linux"],
+                "capabilities": ["native-desktop"]
             },
             "actions": [{
                 "id": "refresh_state",
@@ -7051,7 +7114,8 @@ binary = "deployments-core"
             "app": {
                 "id": "deployments",
                 "name": "Deployments",
-                "targets": ["ios"]
+                "targets": ["ios"],
+                "capabilities": ["native-mobile"]
             },
             "actions": [{
                 "id": "refresh_state",
@@ -7090,7 +7154,8 @@ binary = "deployments-core"
             "app": {
                 "id": "deployments",
                 "name": "Deployments",
-                "targets": ["macos", "ios"]
+                "targets": ["macos", "ios"],
+                "capabilities": ["native-desktop", "native-mobile"]
             },
             "actions": [{
                 "id": "refresh_state",
@@ -7137,7 +7202,8 @@ binary = "deployments-core"
                 "app": {
                     "id": "deployments",
                     "name": "Deployments",
-                    "targets": ["ios"]
+                    "targets": ["ios"],
+                    "capabilities": ["native-mobile"]
                 },
                 "actions": [{
                     "id": "refresh_state",
@@ -7194,7 +7260,7 @@ binary = "deployments-core"
             serde_json::json!({
                 "version": product_runtime::PRODUCT_IR_SCHEMA,
                 "format": "json",
-                "app": {"id": "deployments", "name": "Deployments", "targets": ["macos"]},
+                "app": {"id": "deployments", "name": "Deployments", "targets": ["macos"], "capabilities": ["native-desktop"]},
                 "surfaces": {"desktop": "app-blueprint/desktop.surface.ir.json"},
                 "state": {"snapshotSchema": "deployments-state/v1"},
                 "actions": [{
@@ -7594,7 +7660,7 @@ binary = "deployments-core"
         let product = product_runtime::validate_product_ir_value(&serde_json::json!({
             "version": product_runtime::PRODUCT_IR_SCHEMA,
             "format": "json",
-            "app": {"id": "deployments", "name": "Deployments", "targets": ["linux"]},
+            "app": {"id": "deployments", "name": "Deployments", "targets": ["linux"], "capabilities": ["native-desktop"]},
             "state": {"snapshotSchema": "deployments-state/v1"},
             "actions": [{
                 "id": "refresh_state",
