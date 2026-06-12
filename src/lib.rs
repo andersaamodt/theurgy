@@ -556,6 +556,53 @@ pub mod product_runtime {
         validate_runtime_manifest_value(&value)
     }
 
+    pub fn runtime_bridge_from_manifest_text(text: &str) -> ContractResult<RuntimeBridge> {
+        let value: Value = serde_json::from_str(text)
+            .map_err(|error| ContractError::new(format!("invalid JSON: {error}")))?;
+        runtime_bridge_from_manifest_value(&value)
+    }
+
+    pub fn runtime_bridge_from_manifest_value(value: &Value) -> ContractResult<RuntimeBridge> {
+        let manifest = validate_runtime_manifest_value(value)?;
+        let runtime = value_object(value, "runtime")?;
+        Ok(RuntimeBridge {
+            app_id: manifest.app_id,
+            protocol: manifest.protocol,
+            product_ir: manifest.product_ir,
+            runtime_manifest: "theurgy-runtime.manifest.json".to_string(),
+            source_surface_ir: "theurgy-surface.json".to_string(),
+            legacy_native_desktop_ir: manifest.legacy_native_desktop_ir,
+            compatibility: manifest.compatibility,
+            state_command: value_string_array(runtime, "stateCommand")?,
+            status_command: optional_string_array(
+                runtime,
+                "statusCommand",
+                "runtime manifest statusCommand",
+            )?,
+            subscribe_status_command: optional_string_array(
+                runtime,
+                "subscribeStatusCommand",
+                "runtime manifest subscribeStatusCommand",
+            )?,
+            operation_status_command: optional_string_array(
+                runtime,
+                "operationStatusCommand",
+                "runtime manifest operationStatusCommand",
+            )?,
+            action_command: value_string_array(runtime, "actionCommand")?,
+            history_command: optional_string_array(
+                runtime,
+                "historyCommand",
+                "runtime manifest historyCommand",
+            )?,
+            daemon_command: optional_string_array(
+                runtime,
+                "daemonCommand",
+                "runtime manifest daemonCommand",
+            )?,
+        })
+    }
+
     pub fn validate_generated_runtime_text(text: &str) -> ContractResult<GeneratedRuntime> {
         let value: Value = serde_json::from_str(text)
             .map_err(|error| ContractError::new(format!("invalid JSON: {error}")))?;
@@ -2249,7 +2296,7 @@ mod tests {
 
     #[test]
     fn product_runtime_validates_runtime_manifest_contract() {
-        let manifest = serde_json::json!({
+        let manifest_value = serde_json::json!({
             "version": product_runtime::RUNTIME_MANIFEST_SCHEMA,
             "app": "deployments",
             "productIr": "app-blueprint/product.ir.json",
@@ -2266,7 +2313,7 @@ mod tests {
                 "operationStatusCommand": ["deployments-core", "runtime-operation-status"]
             }
         });
-        let manifest = product_runtime::validate_runtime_manifest_value(&manifest).unwrap();
+        let manifest = product_runtime::validate_runtime_manifest_value(&manifest_value).unwrap();
         assert_eq!(manifest.app_id, "deployments");
         assert_eq!(manifest.product_ir, "app-blueprint/product.ir.json");
         assert_eq!(
@@ -2291,6 +2338,30 @@ mod tests {
             !manifest
                 .compatibility
                 .theurgy_required_for_legacy_wizardry_apps
+        );
+        let bridge = product_runtime::runtime_bridge_from_manifest_value(&manifest_value).unwrap();
+        assert_eq!(bridge.app_id, "deployments");
+        assert_eq!(bridge.product_ir, "app-blueprint/product.ir.json");
+        assert_eq!(
+            bridge.legacy_native_desktop_ir.as_deref(),
+            Some("app-blueprint/app.ir.yaml")
+        );
+        assert_eq!(
+            bridge.state_command,
+            vec!["deployments-core".to_string(), "runtime-state".to_string()]
+        );
+        assert_eq!(
+            bridge.action_command,
+            vec!["deployments-core".to_string(), "runtime-action".to_string()]
+        );
+        assert_eq!(
+            bridge.subscribe_status_command,
+            vec!["deployments-core".to_string(), "runtime-status".to_string()]
+        );
+        assert!(
+            bridge
+                .compatibility
+                .wizardry_apps_shell_first_still_supported
         );
 
         let invalid = serde_json::json!({

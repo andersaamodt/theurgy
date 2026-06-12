@@ -1653,32 +1653,29 @@ fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
 }
 
 fn runtime_contract_from_manifest(text: &str) -> Result<RuntimeContract> {
-    let value = parse_json(text)?;
-    let summary = validate_runtime_manifest_value(&value)?;
-    let runtime = value_object(&value, "runtime")?;
+    let bridge = product_runtime::runtime_bridge_from_manifest_text(text)?;
     Ok(RuntimeContract {
-        app_id: summary.app_id,
-        protocol: summary.protocol,
-        product_ir: summary.product_ir,
-        runtime_manifest: "theurgy-runtime.manifest.json".to_string(),
-        source_surface_ir: "theurgy-surface.json".to_string(),
-        legacy_native_desktop_ir: summary.legacy_native_desktop_ir,
-        compatibility: summary.compatibility,
-        state_command: value_string_array(runtime, "stateCommand")?,
-        status_command: value_string_array(runtime, "statusCommand").unwrap_or_default(),
-        subscribe_status_command: optional_string_array(
-            runtime,
-            "subscribeStatusCommand",
-            "runtime manifest subscribeStatusCommand",
-        )?,
-        operation_status_command: optional_string_array(
-            runtime,
-            "operationStatusCommand",
-            "runtime manifest operationStatusCommand",
-        )?,
-        action_command: value_string_array(runtime, "actionCommand")?,
-        history_command: value_string_array(runtime, "historyCommand").unwrap_or_default(),
-        daemon_command: value_string_array(runtime, "daemonCommand").unwrap_or_default(),
+        app_id: bridge.app_id,
+        protocol: bridge.protocol,
+        product_ir: bridge.product_ir,
+        runtime_manifest: bridge.runtime_manifest,
+        source_surface_ir: bridge.source_surface_ir,
+        legacy_native_desktop_ir: bridge.legacy_native_desktop_ir,
+        compatibility: RuntimeCompatibility {
+            wizardry_apps_shell_first_still_supported: bridge
+                .compatibility
+                .wizardry_apps_shell_first_still_supported,
+            theurgy_required_for_legacy_wizardry_apps: bridge
+                .compatibility
+                .theurgy_required_for_legacy_wizardry_apps,
+        },
+        state_command: bridge.state_command,
+        status_command: bridge.status_command,
+        subscribe_status_command: bridge.subscribe_status_command,
+        operation_status_command: bridge.operation_status_command,
+        action_command: bridge.action_command,
+        history_command: bridge.history_command,
+        daemon_command: bridge.daemon_command,
         product_action_ids: None,
         product_action_contracts: None,
     })
@@ -2036,46 +2033,6 @@ fn value_object<'a>(value: &'a Value, key: &str) -> Result<&'a Value> {
         .get(key)
         .filter(|candidate| candidate.is_object())
         .ok_or_else(|| TheurgyError::new(format!("missing JSON object key: {key}")).into())
-}
-
-fn value_array<'a>(value: &'a Value, key: &str) -> Result<&'a Vec<Value>> {
-    value
-        .get(key)
-        .and_then(Value::as_array)
-        .ok_or_else(|| TheurgyError::new(format!("missing JSON array key: {key}")).into())
-}
-
-fn value_string_array(value: &Value, key: &str) -> Result<Vec<String>> {
-    let array = value_array(value, key)?;
-    let mut values = Vec::new();
-    for item in array {
-        let Some(string) = item.as_str() else {
-            return Err(
-                TheurgyError::new(format!("JSON array key {key} must contain strings")).into(),
-            );
-        };
-        values.push(string.to_string());
-    }
-    Ok(values)
-}
-
-fn optional_string_array(value: &Value, key: &str, label: &str) -> Result<Vec<String>> {
-    let Some(raw) = value.get(key) else {
-        return Ok(Vec::new());
-    };
-    let Some(array) = raw.as_array() else {
-        return Err(TheurgyError::new(format!("{label} must be an array")).into());
-    };
-    let mut values = Vec::new();
-    for item in array {
-        let Some(text) = item.as_str().filter(|text| !text.is_empty()) else {
-            return Err(
-                TheurgyError::new(format!("{label} must contain non-empty strings")).into(),
-            );
-        };
-        values.push(text.to_string());
-    }
-    Ok(values)
 }
 
 fn action_contracts_value(contracts: &[ActionContract]) -> Value {
