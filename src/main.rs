@@ -2293,58 +2293,12 @@ fn compile_native_with_contract(
     out_dir: &Path,
     preserve_existing_legacy_desktop_adapter: bool,
 ) -> Result<()> {
-    if !summary
-        .targets
-        .iter()
-        .any(|candidate| candidate.as_str() == target)
-    {
-        return Err(
-            TheurgyError::new(format!("product IR does not declare target: {target}")).into(),
-        );
-    }
-    let release_target = release_target_for_target(summary, target).ok_or_else(|| {
-        TheurgyError::new(format!(
-            "product IR release target missing for target: {target}"
-        ))
-    })?;
     let surface_summary = validate_surface_ir(surface)?;
-    if surface_summary.product != summary.app_id {
-        return Err(TheurgyError::new("surface IR product does not match product IR app").into());
-    }
-    let expected_surface_target = product_runtime::surface_family_for_target(target)
-        .ok_or_else(|| TheurgyError::new("unsupported target"))?;
-    let expected_surface_schema = product_runtime::surface_schema_for_target(target)
-        .ok_or_else(|| TheurgyError::new("unsupported target"))?;
-    if release_target.surface != expected_surface_target {
-        return Err(TheurgyError::new(format!(
-            "product IR release target surface for {target} must be {expected_surface_target}"
-        ))
-        .into());
-    }
-    if surface_summary.schema != expected_surface_schema {
-        return Err(TheurgyError::new(format!(
-            "surface IR schema for {target} must be {expected_surface_schema}"
-        ))
-        .into());
-    }
-    if surface_summary.target != target && surface_summary.target != expected_surface_target {
-        return Err(TheurgyError::new(format!(
-            "surface IR target must be {target} or {expected_surface_target}"
-        ))
-        .into());
-    }
-    for action_id in &surface_summary.action_ids {
-        if !summary
-            .action_ids
-            .iter()
-            .any(|product_action| product_action == action_id)
-        {
-            return Err(TheurgyError::new(format!(
-                "surface IR action not declared in Product IR: {action_id}"
-            ))
-            .into());
-        }
-    }
+    product_runtime::validate_native_compile_contract(
+        &product_ir_from_summary(summary),
+        &surface_ir_from_summary(&surface_summary),
+        target,
+    )?;
     fs::create_dir_all(out_dir)?;
     write_or_replace(
         &out_dir.join("theurgy-surface.json"),
@@ -2399,16 +2353,6 @@ fn release_target_ids(summary: &ProductSummary) -> Vec<String> {
         .iter()
         .map(|release_target| release_target.id.clone())
         .collect()
-}
-
-fn release_target_for_target<'a>(
-    summary: &'a ProductSummary,
-    target: &str,
-) -> Option<&'a ReleaseTarget> {
-    summary
-        .release_targets
-        .iter()
-        .find(|release_target| release_target.target == target)
 }
 
 fn string_vec_value(values: &[String]) -> Value {

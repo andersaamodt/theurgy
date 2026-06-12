@@ -1301,6 +1301,63 @@ pub mod product_runtime {
             })
     }
 
+    pub fn validate_native_compile_contract(
+        product: &ProductIr,
+        surface: &SurfaceIr,
+        target: &str,
+    ) -> ContractResult<ReleaseTarget> {
+        if !product
+            .targets
+            .iter()
+            .any(|candidate| candidate.as_str() == target)
+        {
+            return Err(ContractError::new(format!(
+                "product IR does not declare target: {target}"
+            )));
+        }
+        let release_target = release_target_for_target(product, target).ok_or_else(|| {
+            ContractError::new(format!(
+                "product IR release target missing for target: {target}"
+            ))
+        })?;
+        if surface.product != product.app_id {
+            return Err(ContractError::new(
+                "surface IR product does not match product IR app",
+            ));
+        }
+        let expected_surface_target = surface_family_for_target(target)
+            .ok_or_else(|| ContractError::new("unsupported target"))?;
+        let expected_surface_schema = surface_schema_for_target(target)
+            .ok_or_else(|| ContractError::new("unsupported target"))?;
+        if release_target.surface != expected_surface_target {
+            return Err(ContractError::new(format!(
+                "product IR release target surface for {target} must be {expected_surface_target}"
+            )));
+        }
+        if surface.schema != expected_surface_schema {
+            return Err(ContractError::new(format!(
+                "surface IR schema for {target} must be {expected_surface_schema}"
+            )));
+        }
+        if surface.target != target && surface.target != expected_surface_target {
+            return Err(ContractError::new(format!(
+                "surface IR target must be {target} or {expected_surface_target}"
+            )));
+        }
+        for action_id in &surface.action_ids {
+            if !product
+                .action_ids
+                .iter()
+                .any(|product_action| product_action == action_id)
+            {
+                return Err(ContractError::new(format!(
+                    "surface IR action not declared in Product IR: {action_id}"
+                )));
+            }
+        }
+        Ok(release_target.clone())
+    }
+
     pub fn validate_action_ir_value(value: &Value) -> ContractResult<ActionIr> {
         expect_value_string(value, "version", ACTION_IR_SCHEMA)?;
         let action_values = value_array(value, "actions")?;
@@ -2721,6 +2778,19 @@ mod tests {
         assert_eq!(desktop.schema, product_runtime::DESKTOP_SURFACE_IR_SCHEMA);
         assert_eq!(desktop.target, "macos");
         assert!(desktop.roles.contains(&"left-list-detail".to_string()));
+        let release_target =
+            product_runtime::validate_native_compile_contract(&product, &desktop, "macos").unwrap();
+        assert_eq!(release_target.id, "macos-native");
+        let mut invalid_surface = desktop.clone();
+        invalid_surface.action_ids = vec!["delete_everything".to_string()];
+        let error =
+            product_runtime::validate_native_compile_contract(&product, &invalid_surface, "macos")
+                .unwrap_err()
+                .to_string();
+        assert_eq!(
+            error,
+            "surface IR action not declared in Product IR: delete_everything"
+        );
 
         let mobile_text = product_runtime::project_surface_from_product_text(
             &serde_json::to_string(&serde_json::json!({
