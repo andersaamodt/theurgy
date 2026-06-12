@@ -1413,6 +1413,158 @@ pub mod product_runtime {
         Ok(files)
     }
 
+    pub fn inspect_app_contract_lines(
+        product: &ProductIr,
+        product_ir_path: &str,
+        runtime_manifest: &RuntimeManifest,
+        runtime: &RuntimeBridge,
+        runtime_text: &str,
+        desktop_surface: Option<(&str, &SurfaceIr)>,
+        mobile_surface: Option<(&str, &SurfaceIr)>,
+    ) -> ContractResult<Vec<String>> {
+        if runtime_manifest.app_id != product.app_id || runtime.app_id != product.app_id {
+            return Err(ContractError::new(
+                "runtime manifest app does not match product IR app",
+            ));
+        }
+        if runtime_manifest.product_ir != product_ir_path {
+            return Err(ContractError::new(format!(
+                "runtime manifest productIr does not match theurgy.project.toml product_ir: {}",
+                runtime_manifest.product_ir
+            )));
+        }
+        validate_product_action_commands(product, runtime)?;
+
+        let mut lines = Vec::new();
+        lines.push(format!("product_app={}", product.app_id));
+        lines.push(format!("product_targets={}", product.targets.join(",")));
+        if let Some(desktop_surface_ir) = &product.desktop_surface_ir {
+            lines.push(format!("product_surface_desktop={desktop_surface_ir}"));
+        }
+        if let Some(mobile_surface_ir) = &product.mobile_surface_ir {
+            lines.push(format!("product_surface_mobile={mobile_surface_ir}"));
+        }
+        lines.push(format!(
+            "product_state_snapshot_schema={}",
+            product.state_snapshot_schema
+        ));
+        if !product.state_command.is_empty() {
+            lines.push(format!(
+                "product_state_command={}",
+                command_text(&product.state_command)
+            ));
+        }
+        if !product.state_status_command.is_empty() {
+            lines.push(format!(
+                "product_state_status_command={}",
+                command_text(&product.state_status_command)
+            ));
+        }
+        lines.push(format!("product_actions={}", product.actions));
+        lines.push(format!(
+            "product_long_running_actions={}",
+            product
+                .action_contracts
+                .iter()
+                .filter(|contract| contract.long_running)
+                .count()
+        ));
+        lines.push(format!(
+            "product_persistence_truth={}",
+            product.persistence_truth
+        ));
+        lines.push(format!(
+            "product_background_jobs={}",
+            product.background_job_ids.join(",")
+        ));
+        for job in &product.background_jobs {
+            if !job.command.is_empty() {
+                lines.push(format!(
+                    "product_background_job_{}_command={}",
+                    job.id,
+                    command_text(&job.command)
+                ));
+            }
+        }
+        lines.push(format!(
+            "product_release_targets={}",
+            release_target_ids(product).join(",")
+        ));
+        lines.push(format!(
+            "product_audit_keys={}",
+            product.audit_keys.join(",")
+        ));
+        lines.push(format!("runtime_protocol={}", runtime.protocol));
+        lines.push(format!(
+            "runtime_state_command={}",
+            command_text(&runtime.state_command)
+        ));
+        lines.push(format!(
+            "runtime_status_command={}",
+            command_text(&runtime.status_command)
+        ));
+        lines.push(format!(
+            "runtime_subscribe_status_command={}",
+            command_text(&effective_subscribe_status_command(runtime))
+        ));
+        lines.push(format!(
+            "runtime_operation_status_command={}",
+            command_text(&runtime.operation_status_command)
+        ));
+        lines.push(format!(
+            "runtime_action_command={}",
+            command_text(&runtime.action_command)
+        ));
+        lines.push(format!(
+            "runtime_history_command={}",
+            command_text(&runtime.history_command)
+        ));
+        lines.push(format!(
+            "runtime_daemon_command={}",
+            command_text(&runtime.daemon_command)
+        ));
+        lines.extend(inspect_runtime_compatibility_lines(runtime_text)?);
+
+        if let Some((desktop_surface_ir, surface)) = desktop_surface {
+            validate_product_surface_path(product, "desktop", desktop_surface_ir)?;
+            validate_surface_contract(product, surface)?;
+            lines.push(format!("desktop_surface_schema={}", surface.schema));
+            lines.push(format!("desktop_surface_target={}", surface.target));
+            lines.push(format!(
+                "desktop_surface_actions={}",
+                surface.action_ids.len()
+            ));
+            lines.push(format!("desktop_surface_roles={}", surface.roles.join(",")));
+            if runtime_manifest.desktop_surface_ir.as_deref() != Some(desktop_surface_ir) {
+                return Err(ContractError::new(
+                    "runtime manifest surfaces.desktop does not match theurgy.project.toml",
+                ));
+            }
+        }
+        if let Some((mobile_surface_ir, surface)) = mobile_surface {
+            validate_product_surface_path(product, "mobile", mobile_surface_ir)?;
+            validate_surface_contract(product, surface)?;
+            lines.push(format!("mobile_surface_schema={}", surface.schema));
+            lines.push(format!("mobile_surface_target={}", surface.target));
+            lines.push(format!(
+                "mobile_surface_actions={}",
+                surface.action_ids.len()
+            ));
+            lines.push(format!("mobile_surface_roles={}", surface.roles.join(",")));
+            if runtime_manifest.mobile_surface_ir.as_deref() != Some(mobile_surface_ir) {
+                return Err(ContractError::new(
+                    "runtime manifest surfaces.mobile does not match theurgy.project.toml",
+                ));
+            }
+        }
+        if let Some(legacy_native_desktop_ir) = &runtime_manifest.legacy_native_desktop_ir {
+            lines.push(format!(
+                "runtime_legacy_native_desktop_ir={legacy_native_desktop_ir}"
+            ));
+        }
+        Ok(lines)
+    }
+
     pub fn adapter_files_for_target(
         product: &ProductIr,
         surface: &SurfaceIr,
@@ -1763,6 +1915,178 @@ pub mod product_runtime {
             .release_targets
             .iter()
             .find(|release_target| release_target.target == target)
+    }
+
+    pub fn validate_product_action_commands(
+        product: &ProductIr,
+        runtime: &RuntimeBridge,
+    ) -> ContractResult<()> {
+        validate_optional_product_command(
+            "state.command",
+            &product.state_command,
+            "stateCommand",
+            &runtime.state_command,
+        )?;
+        validate_optional_product_command(
+            "state.statusCommand",
+            &product.state_status_command,
+            "statusCommand",
+            &runtime.status_command,
+        )?;
+        for job in &product.background_jobs {
+            validate_optional_product_command(
+                &format!("backgroundJobs.{}.command", job.id),
+                &job.command,
+                "daemonCommand",
+                &runtime.daemon_command,
+            )?;
+        }
+        for contract in &product.action_contracts {
+            if contract.command.is_empty() {
+                continue;
+            }
+            if runtime.action_command.is_empty() {
+                return Err(ContractError::new(
+                    "product IR action.command requires runtime manifest actionCommand",
+                ));
+            }
+            let expected_len = runtime.action_command.len() + 2;
+            if contract.command.len() != expected_len {
+                return Err(ContractError::new(format!(
+                    "product IR action.command for {} must be runtime actionCommand plus action id and JSON params",
+                    contract.id
+                )));
+            }
+            if contract.command[..runtime.action_command.len()] != runtime.action_command[..] {
+                return Err(ContractError::new(format!(
+                    "product IR action.command for {} must start with runtime manifest actionCommand",
+                    contract.id
+                )));
+            }
+            if contract.command[runtime.action_command.len()] != contract.id {
+                return Err(ContractError::new(format!(
+                    "product IR action.command action id mismatch for {}",
+                    contract.id
+                )));
+            }
+            let params = contract
+                .command
+                .last()
+                .map(String::as_str)
+                .unwrap_or_default();
+            let expected_params = if contract.input_keys.is_empty() {
+                "{}"
+            } else {
+                "<json>"
+            };
+            if params != expected_params {
+                return Err(ContractError::new(format!(
+                    "product IR action.command params for {} must be {}",
+                    contract.id, expected_params
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_optional_product_command(
+        product_key: &str,
+        product_command: &[String],
+        runtime_key: &str,
+        runtime_command: &[String],
+    ) -> ContractResult<()> {
+        if product_command.is_empty() {
+            return Ok(());
+        }
+        if runtime_command.is_empty() {
+            return Err(ContractError::new(format!(
+                "product IR {product_key} requires runtime manifest {runtime_key}"
+            )));
+        }
+        if product_command != runtime_command {
+            return Err(ContractError::new(format!(
+                "product IR {product_key} must match runtime manifest {runtime_key}"
+            )));
+        }
+        Ok(())
+    }
+
+    pub fn validate_product_surface_path(
+        product: &ProductIr,
+        surface_kind: &str,
+        surface_ir: &str,
+    ) -> ContractResult<()> {
+        let declared = match surface_kind {
+            "desktop" => product.desktop_surface_ir.as_deref(),
+            "mobile" => product.mobile_surface_ir.as_deref(),
+            _ => None,
+        };
+        if let Some(declared) = declared {
+            if declared != surface_ir {
+                return Err(ContractError::new(format!(
+                    "product IR surfaces.{surface_kind} does not match declared surface IR: {declared}"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn validate_surface_contract(
+        product: &ProductIr,
+        surface: &SurfaceIr,
+    ) -> ContractResult<()> {
+        if surface.product != product.app_id {
+            return Err(ContractError::new(
+                "surface IR product does not match product IR app",
+            ));
+        }
+        for action_id in &surface.action_ids {
+            if !product
+                .action_ids
+                .iter()
+                .any(|product_action| product_action == action_id)
+            {
+                return Err(ContractError::new(format!(
+                    "surface IR action not declared in Product IR: {action_id}"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn inspect_runtime_compatibility_lines(runtime_text: &str) -> ContractResult<Vec<String>> {
+        let value: Value = serde_json::from_str(runtime_text)
+            .map_err(|error| ContractError::new(format!("invalid JSON: {error}")))?;
+        let mut lines = Vec::new();
+        let Some(compatibility) = value.get("compatibility") else {
+            return Ok(lines);
+        };
+        let compatibility = compatibility.as_object().ok_or_else(|| {
+            ContractError::new("runtime manifest compatibility must be an object")
+        })?;
+        if let Some(value) = compatibility.get("wizardryAppsShellFirstStillSupported") {
+            let flag = value.as_bool().ok_or_else(|| {
+                ContractError::new(
+                    "runtime manifest compatibility.wizardryAppsShellFirstStillSupported must be boolean",
+                )
+            })?;
+            lines.push(format!("compatibility_wizardry_apps_shell_first={flag}"));
+        }
+        if let Some(value) = compatibility.get("theurgyRequiredForLegacyWizardryApps") {
+            let flag = value.as_bool().ok_or_else(|| {
+                ContractError::new(
+                    "runtime manifest compatibility.theurgyRequiredForLegacyWizardryApps must be boolean",
+                )
+            })?;
+            lines.push(format!(
+                "compatibility_theurgy_required_for_legacy_wizardry_apps={flag}"
+            ));
+        }
+        Ok(lines)
+    }
+
+    fn command_text(command: &[String]) -> String {
+        command.join(" ")
     }
 
     pub fn effective_subscribe_status_command(runtime: &RuntimeBridge) -> Vec<String> {
@@ -4263,6 +4587,52 @@ mod tests {
         );
         assert_eq!(summary.surface_actions, 1);
         assert!(metadata.contains("\"legacyNativeDesktopIr\": \"app-blueprint/app.ir.yaml\""));
+        let runtime_manifest = product_runtime::RuntimeManifest {
+            app_id: "deployments".to_string(),
+            product_ir: "app-blueprint/product.ir.json".to_string(),
+            desktop_surface_ir: Some("app-blueprint/desktop.surface.ir.json".to_string()),
+            mobile_surface_ir: Some("app-blueprint/mobile.surface.ir.json".to_string()),
+            legacy_native_desktop_ir: Some("app-blueprint/app.ir.yaml".to_string()),
+            protocol: product_runtime::RUNTIME_ACTION_PROTOCOL.to_string(),
+            compatibility: product_runtime::RuntimeCompatibility::shell_first_default(),
+        };
+        let runtime_manifest_text = serde_json::json!({
+            "version": product_runtime::RUNTIME_MANIFEST_SCHEMA,
+            "app": "deployments",
+            "productIr": "app-blueprint/product.ir.json",
+            "runtime": {
+                "stateCommand": ["deployments-core", "runtime-state"],
+                "statusCommand": ["deployments-core", "runtime-status"],
+                "operationStatusCommand": ["deployments-core", "runtime-operation-status"],
+                "actionCommand": ["deployments-core", "runtime-action"],
+                "historyCommand": ["deployments-core", "runtime-history"]
+            },
+            "surfaces": {
+                "desktop": "app-blueprint/desktop.surface.ir.json",
+                "mobile": "app-blueprint/mobile.surface.ir.json",
+                "legacyNativeDesktop": "app-blueprint/app.ir.yaml"
+            },
+            "compatibility": {
+                "wizardryAppsShellFirstStillSupported": true,
+                "theurgyRequiredForLegacyWizardryApps": false
+            }
+        })
+        .to_string();
+        let inspect_lines = product_runtime::inspect_app_contract_lines(
+            &product,
+            "app-blueprint/product.ir.json",
+            &runtime_manifest,
+            &runtime,
+            &runtime_manifest_text,
+            Some(("app-blueprint/desktop.surface.ir.json", &surface)),
+            None,
+        )
+        .unwrap();
+        assert!(inspect_lines.contains(&"product_app=deployments".to_string()));
+        assert!(inspect_lines.contains(&"runtime_protocol=theurgy-runtime-action/v1".to_string()));
+        assert!(inspect_lines.contains(&"desktop_surface_actions=1".to_string()));
+        assert!(inspect_lines
+            .contains(&"runtime_legacy_native_desktop_ir=app-blueprint/app.ir.yaml".to_string()));
 
         let files = product_runtime::macos_adapter_files(&product, &surface, &runtime);
         assert_eq!(files.len(), 2);

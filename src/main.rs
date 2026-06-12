@@ -477,7 +477,8 @@ fn command_compile_app(args: &[String]) -> Result<()> {
     } else {
         "mobile"
     };
-    validate_product_surface_path(&product_summary, surface_kind, &surface_ir)?;
+    let product_contract = product_ir_from_summary(&product_summary);
+    product_runtime::validate_product_surface_path(&product_contract, surface_kind, &surface_ir)?;
     if !product_summary
         .targets
         .iter()
@@ -521,24 +522,14 @@ fn command_compile_app(args: &[String]) -> Result<()> {
         runtime_manifest.clone(),
         surface_ir.clone(),
     );
-    validate_product_action_commands(&product_summary, &runtime_contract)?;
+    let runtime_bridge = runtime_bridge_from_contract(&runtime_contract);
+    product_runtime::validate_product_action_commands(&product_contract, &runtime_bridge)?;
     let surface = read_json(&surface_path)?;
     let surface_summary = validate_surface_ir(&surface)?;
-    if surface_summary.product != product_summary.app_id {
-        return Err(TheurgyError::new("surface IR product does not match product IR app").into());
-    }
-    for action_id in &surface_summary.action_ids {
-        if !product_summary
-            .action_ids
-            .iter()
-            .any(|product_action| product_action == action_id)
-        {
-            return Err(TheurgyError::new(format!(
-                "surface IR action not declared in Product IR: {action_id}"
-            ))
-            .into());
-        }
-    }
+    product_runtime::validate_surface_contract(
+        &product_contract,
+        &surface_ir_from_summary(&surface_summary),
+    )?;
     let expected_surface_target = if surface_kind == "desktop" {
         "desktop"
     } else {
@@ -611,334 +602,60 @@ fn inspect_app_lines(path: &Path) -> Result<Vec<String>> {
 
     let product_text = read_json(&path.join(&product_ir))?;
     let product = validate_product_ir(&product_text)?;
-    lines.push(format!("product_app={}", product.app_id));
-    lines.push(format!("product_targets={}", product.targets.join(",")));
-    if let Some(desktop_surface_ir) = &product.desktop_surface_ir {
-        lines.push(format!("product_surface_desktop={desktop_surface_ir}"));
-    }
-    if let Some(mobile_surface_ir) = &product.mobile_surface_ir {
-        lines.push(format!("product_surface_mobile={mobile_surface_ir}"));
-    }
-    lines.push(format!(
-        "product_state_snapshot_schema={}",
-        product.state_snapshot_schema
-    ));
-    if !product.state_command.is_empty() {
-        lines.push(format!(
-            "product_state_command={}",
-            command_text(&product.state_command)
-        ));
-    }
-    if !product.state_status_command.is_empty() {
-        lines.push(format!(
-            "product_state_status_command={}",
-            command_text(&product.state_status_command)
-        ));
-    }
-    lines.push(format!("product_actions={}", product.actions));
-    lines.push(format!(
-        "product_long_running_actions={}",
-        product
-            .action_contracts
-            .iter()
-            .filter(|contract| contract.long_running)
-            .count()
-    ));
-    lines.push(format!(
-        "product_persistence_truth={}",
-        product.persistence_truth
-    ));
-    lines.push(format!(
-        "product_background_jobs={}",
-        product.background_job_ids.join(",")
-    ));
-    for job in &product.background_jobs {
-        if !job.command.is_empty() {
-            lines.push(format!(
-                "product_background_job_{}_command={}",
-                job.id,
-                command_text(&job.command)
-            ));
-        }
-    }
-    lines.push(format!(
-        "product_release_targets={}",
-        release_target_ids(&product).join(",")
-    ));
-    lines.push(format!(
-        "product_audit_keys={}",
-        product.audit_keys.join(",")
-    ));
+    let product_ir = product_ir.to_string();
 
     let runtime_path = path.join(&runtime_manifest);
     let runtime_text = read_json(&runtime_path)?;
     let runtime_summary = validate_runtime_manifest(&runtime_text)?;
-    if runtime_summary.app_id != product.app_id {
-        return Err(TheurgyError::new("runtime manifest app does not match product IR app").into());
-    }
-    if runtime_summary.product_ir != product_ir {
-        return Err(TheurgyError::new(format!(
-            "runtime manifest productIr does not match theurgy.project.toml product_ir: {}",
-            runtime_summary.product_ir
-        ))
-        .into());
-    }
     let runtime = runtime_contract_from_manifest(&runtime_text)?;
-    validate_product_action_commands(&product, &runtime)?;
-    lines.push(format!("runtime_protocol={}", runtime.protocol));
-    lines.push(format!(
-        "runtime_state_command={}",
-        command_text(&runtime.state_command)
-    ));
-    lines.push(format!(
-        "runtime_status_command={}",
-        command_text(&runtime.status_command)
-    ));
-    lines.push(format!(
-        "runtime_subscribe_status_command={}",
-        command_text(&product_runtime::effective_subscribe_status_command(
-            &runtime_bridge_from_contract(&runtime)
-        ))
-    ));
-    lines.push(format!(
-        "runtime_operation_status_command={}",
-        command_text(&runtime.operation_status_command)
-    ));
-    lines.push(format!(
-        "runtime_action_command={}",
-        command_text(&runtime.action_command)
-    ));
-    lines.push(format!(
-        "runtime_history_command={}",
-        command_text(&runtime.history_command)
-    ));
-    lines.push(format!(
-        "runtime_daemon_command={}",
-        command_text(&runtime.daemon_command)
-    ));
-    lines.extend(inspect_runtime_compatibility_lines(&runtime_text)?);
-
-    if let Ok(desktop_surface_ir) = manifest_value(&manifest, "desktop_surface_ir") {
-        validate_product_surface_path(&product, "desktop", &desktop_surface_ir)?;
-        let surface = validate_declared_surface(&path, &desktop_surface_ir, &product)?;
-        lines.push(format!("desktop_surface_schema={}", surface.schema));
-        lines.push(format!("desktop_surface_target={}", surface.target));
-        lines.push(format!(
-            "desktop_surface_actions={}",
-            surface.action_ids.len()
-        ));
-        lines.push(format!("desktop_surface_roles={}", surface.roles.join(",")));
-        if runtime_summary.desktop_surface_ir.as_deref() != Some(desktop_surface_ir.as_str()) {
-            return Err(TheurgyError::new(
-                "runtime manifest surfaces.desktop does not match theurgy.project.toml",
-            )
-            .into());
-        }
-    }
-    if let Ok(mobile_surface_ir) = manifest_value(&manifest, "mobile_surface_ir") {
-        validate_product_surface_path(&product, "mobile", &mobile_surface_ir)?;
-        let surface = validate_declared_surface(&path, &mobile_surface_ir, &product)?;
-        lines.push(format!("mobile_surface_schema={}", surface.schema));
-        lines.push(format!("mobile_surface_target={}", surface.target));
-        lines.push(format!(
-            "mobile_surface_actions={}",
-            surface.action_ids.len()
-        ));
-        lines.push(format!("mobile_surface_roles={}", surface.roles.join(",")));
-        if runtime_summary.mobile_surface_ir.as_deref() != Some(mobile_surface_ir.as_str()) {
-            return Err(TheurgyError::new(
-                "runtime manifest surfaces.mobile does not match theurgy.project.toml",
-            )
-            .into());
-        }
-    }
-    if let Some(legacy_native_desktop_ir) = &runtime_summary.legacy_native_desktop_ir {
-        lines.push(format!(
-            "runtime_legacy_native_desktop_ir={legacy_native_desktop_ir}"
-        ));
-    }
-    Ok(lines)
-}
-
-fn validate_declared_surface(
-    app_dir: &Path,
-    surface_ir: &str,
-    product: &ProductSummary,
-) -> Result<SurfaceSummary> {
-    let surface_text = read_json(&app_dir.join(surface_ir))?;
-    let surface = validate_surface_ir(&surface_text)?;
-    if surface.product != product.app_id {
-        return Err(TheurgyError::new("surface IR product does not match product IR app").into());
-    }
-    for action_id in &surface.action_ids {
-        if !product
-            .action_ids
-            .iter()
-            .any(|product_action| product_action == action_id)
-        {
-            return Err(TheurgyError::new(format!(
-                "surface IR action not declared in Product IR: {action_id}"
-            ))
-            .into());
-        }
-    }
-    Ok(surface)
-}
-
-fn inspect_runtime_compatibility_lines(runtime_text: &str) -> Result<Vec<String>> {
-    let value = parse_json(runtime_text)?;
-    let mut lines = Vec::new();
-    let Some(compatibility) = value.get("compatibility") else {
-        return Ok(lines);
+    let product_ir_contract = product_ir_from_summary(&product);
+    let runtime_manifest_contract = product_runtime::RuntimeManifest {
+        app_id: runtime_summary.app_id,
+        product_ir: runtime_summary.product_ir,
+        desktop_surface_ir: runtime_summary.desktop_surface_ir,
+        mobile_surface_ir: runtime_summary.mobile_surface_ir,
+        legacy_native_desktop_ir: runtime_summary.legacy_native_desktop_ir,
+        protocol: runtime_summary.protocol,
+        compatibility: product_runtime::RuntimeCompatibility {
+            wizardry_apps_shell_first_still_supported: runtime_summary
+                .compatibility
+                .wizardry_apps_shell_first_still_supported,
+            theurgy_required_for_legacy_wizardry_apps: runtime_summary
+                .compatibility
+                .theurgy_required_for_legacy_wizardry_apps,
+        },
     };
-    let compatibility = compatibility
-        .as_object()
-        .ok_or_else(|| TheurgyError::new("runtime manifest compatibility must be an object"))?;
-    if let Some(value) = compatibility.get("wizardryAppsShellFirstStillSupported") {
-        let flag = value.as_bool().ok_or_else(|| {
-            TheurgyError::new(
-                "runtime manifest compatibility.wizardryAppsShellFirstStillSupported must be boolean",
-            )
-        })?;
-        lines.push(format!("compatibility_wizardry_apps_shell_first={flag}"));
-    }
-    if let Some(value) = compatibility.get("theurgyRequiredForLegacyWizardryApps") {
-        let flag = value.as_bool().ok_or_else(|| {
-            TheurgyError::new(
-                "runtime manifest compatibility.theurgyRequiredForLegacyWizardryApps must be boolean",
-            )
-        })?;
-        lines.push(format!(
-            "compatibility_theurgy_required_for_legacy_wizardry_apps={flag}"
-        ));
-    }
-    Ok(lines)
-}
-
-fn validate_product_action_commands(
-    product: &ProductSummary,
-    runtime: &RuntimeContract,
-) -> Result<()> {
-    validate_optional_product_command(
-        "state.command",
-        &product.state_command,
-        "stateCommand",
-        &runtime.state_command,
-    )?;
-    validate_optional_product_command(
-        "state.statusCommand",
-        &product.state_status_command,
-        "statusCommand",
-        &runtime.status_command,
-    )?;
-    for job in &product.background_jobs {
-        validate_optional_product_command(
-            &format!("backgroundJobs.{}.command", job.id),
-            &job.command,
-            "daemonCommand",
-            &runtime.daemon_command,
-        )?;
-    }
-    for contract in &product.action_contracts {
-        if contract.command.is_empty() {
-            continue;
-        }
-        if runtime.action_command.is_empty() {
-            return Err(TheurgyError::new(
-                "product IR action.command requires runtime manifest actionCommand",
-            )
-            .into());
-        }
-        let expected_len = runtime.action_command.len() + 2;
-        if contract.command.len() != expected_len {
-            return Err(TheurgyError::new(format!(
-                "product IR action.command for {} must be runtime actionCommand plus action id and JSON params",
-                contract.id
-            ))
-            .into());
-        }
-        if contract.command[..runtime.action_command.len()] != runtime.action_command[..] {
-            return Err(TheurgyError::new(format!(
-                "product IR action.command for {} must start with runtime manifest actionCommand",
-                contract.id
-            ))
-            .into());
-        }
-        if contract.command[runtime.action_command.len()] != contract.id {
-            return Err(TheurgyError::new(format!(
-                "product IR action.command action id mismatch for {}",
-                contract.id
-            ))
-            .into());
-        }
-        let params = contract
-            .command
-            .last()
-            .map(String::as_str)
-            .unwrap_or_default();
-        let expected_params = if contract.input_keys.is_empty() {
-            "{}"
-        } else {
-            "<json>"
-        };
-        if params != expected_params {
-            return Err(TheurgyError::new(format!(
-                "product IR action.command params for {} must be {}",
-                contract.id, expected_params
-            ))
-            .into());
-        }
-    }
-    Ok(())
-}
-
-fn validate_optional_product_command(
-    product_key: &str,
-    product_command: &[String],
-    runtime_key: &str,
-    runtime_command: &[String],
-) -> Result<()> {
-    if product_command.is_empty() {
-        return Ok(());
-    }
-    if runtime_command.is_empty() {
-        return Err(TheurgyError::new(format!(
-            "product IR {product_key} requires runtime manifest {runtime_key}"
-        ))
-        .into());
-    }
-    if product_command != runtime_command {
-        return Err(TheurgyError::new(format!(
-            "product IR {product_key} must match runtime manifest {runtime_key}"
-        ))
-        .into());
-    }
-    Ok(())
-}
-
-fn validate_product_surface_path(
-    product: &ProductSummary,
-    surface_kind: &str,
-    surface_ir: &str,
-) -> Result<()> {
-    let declared = match surface_kind {
-        "desktop" => product.desktop_surface_ir.as_deref(),
-        "mobile" => product.mobile_surface_ir.as_deref(),
-        _ => None,
+    let runtime_bridge = runtime_bridge_from_contract(&runtime);
+    let desktop_surface_ir = manifest_value(&manifest, "desktop_surface_ir").ok();
+    let desktop_surface = match desktop_surface_ir.as_deref() {
+        Some(surface_path) => Some((
+            surface_path,
+            surface_ir_from_summary(&validate_surface_ir(&read_json(&path.join(surface_path))?)?),
+        )),
+        None => None,
     };
-    if let Some(declared) = declared {
-        if declared != surface_ir {
-            return Err(TheurgyError::new(format!(
-                "product IR surfaces.{surface_kind} does not match declared surface IR: {declared}"
-            ))
-            .into());
-        }
-    }
-    Ok(())
-}
-
-fn command_text(command: &[String]) -> String {
-    command.join(" ")
+    let mobile_surface_ir = manifest_value(&manifest, "mobile_surface_ir").ok();
+    let mobile_surface = match mobile_surface_ir.as_deref() {
+        Some(surface_path) => Some((
+            surface_path,
+            surface_ir_from_summary(&validate_surface_ir(&read_json(&path.join(surface_path))?)?),
+        )),
+        None => None,
+    };
+    lines.extend(product_runtime::inspect_app_contract_lines(
+        &product_ir_contract,
+        &product_ir,
+        &runtime_manifest_contract,
+        &runtime_bridge,
+        &runtime_text,
+        desktop_surface
+            .as_ref()
+            .map(|(surface_path, surface)| (*surface_path, surface)),
+        mobile_surface
+            .as_ref()
+            .map(|(surface_path, surface)| (*surface_path, surface)),
+    )?);
+    Ok(lines)
 }
 
 fn command_run_state(args: &[String]) -> Result<()> {
@@ -2156,14 +1873,6 @@ fn desktop_adapter_source_exists(target: &str, out_dir: &Path) -> bool {
     }
 }
 
-fn release_target_ids(summary: &ProductSummary) -> Vec<String> {
-    summary
-        .release_targets
-        .iter()
-        .map(|release_target| release_target.id.clone())
-        .collect()
-}
-
 fn write_or_replace(path: &Path, contents: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -2672,7 +2381,11 @@ mod tests {
         );
         assert_eq!(summary.background_job_ids, vec!["server-queue".to_string()]);
         assert_eq!(
-            release_target_ids(&summary),
+            summary
+                .release_targets
+                .iter()
+                .map(|release_target| release_target.id.clone())
+                .collect::<Vec<_>>(),
             vec!["macos-app".to_string(), "linux-app".to_string()]
         );
         assert_eq!(
