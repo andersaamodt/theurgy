@@ -16,6 +16,8 @@
     "runtimeStatusSchema",
     "runtimeActionRequestSchema",
     "runtimeActionResultSchema",
+    "operationStatusRequestSchema",
+    "operationHistoryRequestSchema",
     "operationStatusSchema",
     "operationHistorySchema",
     "targetReleaseTarget",
@@ -60,6 +62,12 @@
     },
     "runtimeActionResultSchema": {
       "const": "theurgy-runtime-action-result/v1"
+    },
+    "operationStatusRequestSchema": {
+      "const": "theurgy-operation-status-request/v1"
+    },
+    "operationHistoryRequestSchema": {
+      "const": "theurgy-operation-history-request/v1"
     },
     "operationStatusSchema": {
       "const": "theurgy-operation-status/v1"

@@ -16,6 +16,8 @@ pub mod product_runtime {
     pub const RUNTIME_ACTION_PROTOCOL: &str = "theurgy-runtime-action/v1";
     pub const RUNTIME_ACTION_REQUEST_SCHEMA: &str = "theurgy-runtime-action-request/v1";
     pub const RUNTIME_ACTION_RESULT_SCHEMA: &str = "theurgy-runtime-action-result/v1";
+    pub const OPERATION_STATUS_REQUEST_SCHEMA: &str = "theurgy-operation-status-request/v1";
+    pub const OPERATION_HISTORY_REQUEST_SCHEMA: &str = "theurgy-operation-history-request/v1";
     pub const OPERATION_STATUS_SCHEMA: &str = "theurgy-operation-status/v1";
     pub const OPERATION_HISTORY_SCHEMA: &str = "theurgy-operation-history/v1";
     pub const RUNTIME_MANIFEST_SCHEMA: &str = "theurgy-runtime-manifest/v1";
@@ -160,6 +162,8 @@ pub mod product_runtime {
         pub runtime_status_schema: String,
         pub runtime_action_request_schema: String,
         pub runtime_action_result_schema: String,
+        pub operation_status_request_schema: String,
+        pub operation_history_request_schema: String,
         pub operation_status_schema: String,
         pub operation_history_schema: String,
         pub surface_schema: String,
@@ -1059,6 +1063,16 @@ pub mod product_runtime {
             "runtimeActionResultSchema",
             RUNTIME_ACTION_RESULT_SCHEMA,
         )?;
+        let operation_status_request_schema = expect_and_return_value_string(
+            value,
+            "operationStatusRequestSchema",
+            OPERATION_STATUS_REQUEST_SCHEMA,
+        )?;
+        let operation_history_request_schema = expect_and_return_value_string(
+            value,
+            "operationHistoryRequestSchema",
+            OPERATION_HISTORY_REQUEST_SCHEMA,
+        )?;
         let operation_status_schema = expect_and_return_value_string(
             value,
             "operationStatusSchema",
@@ -1354,6 +1368,8 @@ pub mod product_runtime {
             runtime_status_schema,
             runtime_action_request_schema,
             runtime_action_result_schema,
+            operation_status_request_schema,
+            operation_history_request_schema,
             operation_status_schema,
             operation_history_schema,
             surface_schema,
@@ -1762,6 +1778,14 @@ pub mod product_runtime {
         object.insert(
             "runtimeActionResultSchema".to_string(),
             Value::String(RUNTIME_ACTION_RESULT_SCHEMA.to_string()),
+        );
+        object.insert(
+            "operationStatusRequestSchema".to_string(),
+            Value::String(OPERATION_STATUS_REQUEST_SCHEMA.to_string()),
+        );
+        object.insert(
+            "operationHistoryRequestSchema".to_string(),
+            Value::String(OPERATION_HISTORY_REQUEST_SCHEMA.to_string()),
         );
         object.insert(
             "operationStatusSchema".to_string(),
@@ -3827,6 +3851,8 @@ struct RuntimeContract {
   var runtimeStatusSchema: String { runtimeString(runtimeMetadata, key: "runtimeStatusSchema") }
   var runtimeActionRequestSchema: String { runtimeString(runtimeMetadata, key: "runtimeActionRequestSchema") }
   var runtimeActionResultSchema: String { runtimeString(runtimeMetadata, key: "runtimeActionResultSchema") }
+  var operationStatusRequestSchema: String { runtimeString(runtimeMetadata, key: "operationStatusRequestSchema") }
+  var operationHistoryRequestSchema: String { runtimeString(runtimeMetadata, key: "operationHistoryRequestSchema") }
   var operationStatusSchema: String { runtimeString(runtimeMetadata, key: "operationStatusSchema") }
   var operationHistorySchema: String { runtimeString(runtimeMetadata, key: "operationHistorySchema") }
   var runtimeSurfaceActions: [String] { runtimeStringArray(runtimeMetadata, key: "surfaceActions") }
@@ -3899,6 +3925,7 @@ struct RuntimeContract {
   func operationStatusEnvelope(for operationId: String) -> String {
     let envelope: [String: Any] = [
       "protocol": protocolName,
+      "schema": operationStatusRequestSchema,
       "app": runtimeApp,
       "kind": "operation-status",
       "operation": operationId
@@ -3912,6 +3939,7 @@ struct RuntimeContract {
   func operationHistoryEnvelope(for subject: String, limit: Int) -> String {
     let envelope: [String: Any] = [
       "protocol": protocolName,
+      "schema": operationHistoryRequestSchema,
       "app": runtimeApp,
       "kind": "operation-history",
       "subject": subject,
@@ -3938,6 +3966,8 @@ struct RuntimeContractView: View {
           Text("Runtime status schema: \(contract.runtimeStatusSchema)")
           Text("Runtime action request schema: \(contract.runtimeActionRequestSchema)")
           Text("Runtime action result schema: \(contract.runtimeActionResultSchema)")
+          Text("Operation status request schema: \(contract.operationStatusRequestSchema)")
+          Text("Operation history request schema: \(contract.operationHistoryRequestSchema)")
           Text("Operation status schema: \(contract.operationStatusSchema)")
           Text("Operation history schema: \(contract.operationHistorySchema)")
           Text("Runtime surface actions: \(contract.runtimeSurfaceActions.joined(separator: ", "))")
@@ -4178,10 +4208,11 @@ public final class MainActivity extends Activity {
     }
   }
 
-  private static String operationStatusEnvelope(String app, String operationId) {
+  private static String operationStatusEnvelope(String app, String requestSchema, String operationId) {
     try {
       JSONObject envelope = new JSONObject();
       envelope.put("protocol", PROTOCOL);
+      envelope.put("schema", requestSchema);
       envelope.put("app", app);
       envelope.put("kind", "operation-status");
       envelope.put("operation", operationId);
@@ -4191,10 +4222,11 @@ public final class MainActivity extends Activity {
     }
   }
 
-  private static String operationHistoryEnvelope(String app, String subject, int limit) {
+  private static String operationHistoryEnvelope(String app, String requestSchema, String subject, int limit) {
     try {
       JSONObject envelope = new JSONObject();
       envelope.put("protocol", PROTOCOL);
+      envelope.put("schema", requestSchema);
       envelope.put("app", app);
       envelope.put("kind", "operation-history");
       envelope.put("subject", subject);
@@ -4318,6 +4350,8 @@ public final class MainActivity extends Activity {
     String runtimeMetadata = loadBundledContract("theurgy-runtime.json");
     String surfaceMetadata = loadBundledContract("theurgy-surface.json");
     String runtimeApp = jsonString(runtimeMetadata, "app");
+    String operationStatusRequestSchema = jsonString(runtimeMetadata, "operationStatusRequestSchema");
+    String operationHistoryRequestSchema = jsonString(runtimeMetadata, "operationHistoryRequestSchema");
     StringBuilder text = new StringBuilder();
     text.append("__APP_NAME__\nRuntime: ").append(PROTOCOL)
       .append("\nRuntime app: ").append(runtimeApp)
@@ -4326,6 +4360,8 @@ public final class MainActivity extends Activity {
       .append("\nRuntime status schema: ").append(jsonString(runtimeMetadata, "runtimeStatusSchema"))
       .append("\nRuntime action request schema: ").append(jsonString(runtimeMetadata, "runtimeActionRequestSchema"))
       .append("\nRuntime action result schema: ").append(jsonString(runtimeMetadata, "runtimeActionResultSchema"))
+      .append("\nOperation status request schema: ").append(operationStatusRequestSchema)
+      .append("\nOperation history request schema: ").append(operationHistoryRequestSchema)
       .append("\nOperation status schema: ").append(jsonString(runtimeMetadata, "operationStatusSchema"))
       .append("\nOperation history schema: ").append(jsonString(runtimeMetadata, "operationHistorySchema"))
       .append("\nRuntime surface actions: ").append(jsonStringArray(runtimeMetadata, "surfaceActions"))
@@ -4341,10 +4377,10 @@ __MOBILE_WORKFLOW_TEXT__
       .append("\nStatus: ").append(String.join(" ", STATUS_COMMAND))
       .append("\nSubscribe: ").append(String.join(" ", SUBSCRIBE_STATUS_COMMAND))
       .append("\nOperation status: ").append(String.join(" ", OPERATION_STATUS_COMMAND))
-      .append("\nOperation status envelope: ").append(operationStatusEnvelope(runtimeApp, "default"))
+      .append("\nOperation status envelope: ").append(operationStatusEnvelope(runtimeApp, operationStatusRequestSchema, "default"))
       .append("\nAction: ").append(String.join(" ", ACTION_COMMAND))
       .append("\nHistory: ").append(String.join(" ", HISTORY_COMMAND))
-      .append("\nHistory envelope: ").append(operationHistoryEnvelope(runtimeApp, "default", 20))
+      .append("\nHistory envelope: ").append(operationHistoryEnvelope(runtimeApp, operationHistoryRequestSchema, "default", 20))
       .append("\nDaemon: ").append(String.join(" ", DAEMON_COMMAND))
       .append("\nActions:");
     for (ProductActionContract action : ACTION_CONTRACTS) {
@@ -5507,6 +5543,14 @@ mod tests {
             "theurgy-runtime-action/v1"
         );
         assert_eq!(
+            product_runtime::OPERATION_STATUS_REQUEST_SCHEMA,
+            "theurgy-operation-status-request/v1"
+        );
+        assert_eq!(
+            product_runtime::OPERATION_HISTORY_REQUEST_SCHEMA,
+            "theurgy-operation-history-request/v1"
+        );
+        assert_eq!(
             product_runtime::RUNTIME_MANIFEST_SCHEMA,
             "theurgy-runtime-manifest/v1"
         );
@@ -6570,6 +6614,8 @@ binary = "deployments-core"
   "runtimeStatusSchema": "theurgy-runtime-status/v1",
   "runtimeActionRequestSchema": "theurgy-runtime-action-request/v1",
   "runtimeActionResultSchema": "theurgy-runtime-action-result/v1",
+  "operationStatusRequestSchema": "theurgy-operation-status-request/v1",
+  "operationHistoryRequestSchema": "theurgy-operation-history-request/v1",
   "operationStatusSchema": "theurgy-operation-status/v1",
   "operationHistorySchema": "theurgy-operation-history/v1",
   "stateCommand": ["deployments-core", "runtime-state"],
@@ -6931,9 +6977,29 @@ binary = "deployments-core"
             summary.adapter_runtime_transport,
             product_runtime::DESKTOP_ADAPTER_TRANSPORT
         );
+        assert_eq!(
+            summary.operation_status_request_schema,
+            product_runtime::OPERATION_STATUS_REQUEST_SCHEMA
+        );
+        assert_eq!(
+            summary.operation_history_request_schema,
+            product_runtime::OPERATION_HISTORY_REQUEST_SCHEMA
+        );
         assert_eq!(summary.surface_actions, 1);
         assert!(metadata.contains("\"legacyNativeDesktopIr\": \"app-blueprint/app.ir.yaml\""));
         let runtime_json: serde_json::Value = serde_json::from_str(&metadata).unwrap();
+        assert_eq!(
+            runtime_json
+                .get("operationStatusRequestSchema")
+                .and_then(serde_json::Value::as_str),
+            Some(product_runtime::OPERATION_STATUS_REQUEST_SCHEMA)
+        );
+        assert_eq!(
+            runtime_json
+                .get("operationHistoryRequestSchema")
+                .and_then(serde_json::Value::as_str),
+            Some(product_runtime::OPERATION_HISTORY_REQUEST_SCHEMA)
+        );
         assert_eq!(
             runtime_json.get("productStateProjections").unwrap(),
             &serde_json::json!(["deployments"])
@@ -7129,6 +7195,12 @@ binary = "deployments-core"
                 .contains("let runtimeMetadata = loadBundledContract")
             && file
                 .contents
+                .contains("var operationStatusRequestSchema: String")
+            && file
+                .contents
+                .contains("var operationHistoryRequestSchema: String")
+            && file
+                .contents
                 .contains("func actionEnvelope(for action: ProductActionContract")
             && file
                 .contents
@@ -7188,10 +7260,10 @@ binary = "deployments-core"
                 .contains("private static String operationHistoryEnvelope")
             && file
                 .contents
-                .contains("operationStatusEnvelope(runtimeApp, \"default\")")
+                .contains("operationStatusEnvelope(runtimeApp, operationStatusRequestSchema, \"default\")")
             && file
                 .contents
-                .contains("operationHistoryEnvelope(runtimeApp, \"default\", 20)")
+                .contains("operationHistoryEnvelope(runtimeApp, operationHistoryRequestSchema, \"default\", 20)")
             && file
                 .contents
                 .contains("Mobile workflow: status-overview, focused-action-detail")));

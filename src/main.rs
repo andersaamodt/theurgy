@@ -387,6 +387,14 @@ fn command_validate_generated_runtime(args: &[String]) -> Result<()> {
         summary.runtime_action_result_schema
     );
     println!(
+        "operation_status_request_schema={}",
+        summary.operation_status_request_schema
+    );
+    println!(
+        "operation_history_request_schema={}",
+        summary.operation_history_request_schema
+    );
+    println!(
         "operation_status_schema={}",
         summary.operation_status_schema
     );
@@ -2003,6 +2011,67 @@ mod tests {
     }
 
     #[test]
+    fn operation_request_schemas_declare_mobile_bridge_envelopes() {
+        let status_schema: Value = serde_json::from_str(include_str!(
+            "../schemas/theurgy-operation-status-request-v1.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            status_schema
+                .pointer("/properties/schema/const")
+                .and_then(Value::as_str),
+            Some("theurgy-operation-status-request/v1")
+        );
+        assert_eq!(
+            status_schema
+                .pointer("/properties/protocol/const")
+                .and_then(Value::as_str),
+            Some("theurgy-runtime-action/v1")
+        );
+        assert_eq!(
+            status_schema
+                .pointer("/properties/kind/const")
+                .and_then(Value::as_str),
+            Some("operation-status")
+        );
+        assert_eq!(
+            status_schema
+                .pointer("/properties/operation/minLength")
+                .and_then(Value::as_u64),
+            Some(1)
+        );
+
+        let history_schema: Value = serde_json::from_str(include_str!(
+            "../schemas/theurgy-operation-history-request-v1.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            history_schema
+                .pointer("/properties/schema/const")
+                .and_then(Value::as_str),
+            Some("theurgy-operation-history-request/v1")
+        );
+        assert_eq!(
+            history_schema
+                .pointer("/properties/kind/const")
+                .and_then(Value::as_str),
+            Some("operation-history")
+        );
+        assert_eq!(
+            history_schema
+                .pointer("/properties/subject/minLength")
+                .and_then(Value::as_u64),
+            Some(1)
+        );
+        assert_eq!(
+            history_schema
+                .pointer("/properties/limit/minimum")
+                .and_then(Value::as_u64),
+            Some(1)
+        );
+    }
+
+    #[test]
     fn surface_ir_schemas_allow_family_targets() {
         let desktop_schema: Value = serde_json::from_str(include_str!(
             "../schemas/theurgy-desktop-surface-ir-v1.json"
@@ -2835,6 +2904,14 @@ mod tests {
             "theurgy-runtime-action-result/v1"
         );
         assert_eq!(
+            generated.operation_status_request_schema,
+            "theurgy-operation-status-request/v1"
+        );
+        assert_eq!(
+            generated.operation_history_request_schema,
+            "theurgy-operation-history-request/v1"
+        );
+        assert_eq!(
             generated.operation_status_schema,
             "theurgy-operation-status/v1"
         );
@@ -2895,6 +2972,18 @@ mod tests {
                 .get("runtimeActionResultSchema")
                 .and_then(Value::as_str),
             Some("theurgy-runtime-action-result/v1")
+        );
+        assert_eq!(
+            runtime_json
+                .get("operationStatusRequestSchema")
+                .and_then(Value::as_str),
+            Some("theurgy-operation-status-request/v1")
+        );
+        assert_eq!(
+            runtime_json
+                .get("operationHistoryRequestSchema")
+                .and_then(Value::as_str),
+            Some("theurgy-operation-history-request/v1")
         );
         assert_eq!(
             runtime_json

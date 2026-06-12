@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wizardry.app/schemas/theurgy-operation-history-request-v1.json",
+  "title": "Theurgy Operation History Request v1",
+  "type": "object",
+  "required": ["schema", "protocol", "app", "kind", "subject", "limit"],
+  "properties": {
+    "schema": { "const": "theurgy-operation-history-request/v1" },
+    "protocol": { "const": "theurgy-runtime-action/v1" },
+    "app": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "kind": { "const": "operation-history" },
+    "subject": { "type": "string", "minLength": 1 },
+    "limit": { "type": "integer", "minimum": 1 }
+  },
+  "additionalProperties": false
+}
