@@ -3210,6 +3210,10 @@ pub mod product_runtime {
             .first()
             .map(|contract| contract.id.clone())
             .unwrap_or_default();
+        let default_action_params_json = action_contracts
+            .first()
+            .map(default_action_params_json)
+            .unwrap_or_else(|| "{}".to_string());
         let action_text = runtime.action_command.join(" ");
         let subscribe_status_text = subscribe_status_command.join(" ");
         let operation_status_text = runtime.operation_status_command.join(" ");
@@ -3427,7 +3431,7 @@ static char *load_operation_history(void) {
 
 static char *run_default_action(void) {
   g_autofree char *runtime = resolve_executable("__ACTION_EXECUTABLE__");
-  const char *argv[] = { runtime, __ACTION_ARGUMENTS__ "__DEFAULT_ACTION_ID__", "{}", NULL };
+  const char *argv[] = { runtime, __ACTION_ARGUMENTS__ "__DEFAULT_ACTION_ID__", "__DEFAULT_ACTION_PARAMS_JSON__", NULL };
   return run_runtime_command(argv);
 }
 
@@ -3586,6 +3590,10 @@ int main(int argc, char **argv) {
             .replace("__ACTION_ARGUMENTS__", &action_arguments)
             .replace("__DEFAULT_ACTION_ID__", &c_escape(&default_action_id))
             .replace(
+                "__DEFAULT_ACTION_PARAMS_JSON__",
+                &c_escape(&default_action_params_json),
+            )
+            .replace(
                 "__STATE_COMMAND_TEXT__",
                 &c_escape(&runtime.state_command.join(" ")),
             )
@@ -3619,6 +3627,32 @@ int main(int argc, char **argv) {
                         .join(", "),
                 ),
             )
+    }
+
+    fn default_action_params_json(contract: &ProductActionContract) -> String {
+        let mut params = serde_json::Map::new();
+        for (key, descriptor) in &contract.input_shape {
+            params.insert(key.clone(), default_shape_value(descriptor));
+        }
+        serde_json::to_string(&Value::Object(params)).unwrap_or_else(|_| "{}".to_string())
+    }
+
+    fn default_shape_value(descriptor: &str) -> Value {
+        let required = descriptor.strip_suffix('?').unwrap_or(descriptor);
+        if let Some((first, _rest)) = required.split_once('|') {
+            return Value::String(first.to_string());
+        }
+        match required {
+            "boolean" => Value::Bool(false),
+            "number" => serde_json::Number::from_f64(0.0)
+                .map(Value::Number)
+                .unwrap_or(Value::Null),
+            "integer" => Value::Number(serde_json::Number::from(0)),
+            "array" => Value::Array(Vec::new()),
+            "object" => Value::Object(serde_json::Map::new()),
+            "json" => Value::Null,
+            _ => Value::String(String::new()),
+        }
     }
 
     fn linux_desktop_surface_layout(surface: &SurfaceIr) -> String {
