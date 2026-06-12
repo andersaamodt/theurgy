@@ -452,6 +452,11 @@ fn command_validate_generated_runtime(args: &[String]) -> Result<()> {
         "surface_action_contracts={}",
         summary.surface_action_contracts
     );
+    println!("surface_screens={}", summary.surface_screens);
+    println!(
+        "surface_screen_contracts={}",
+        summary.surface_screen_contracts
+    );
     Ok(())
 }
 

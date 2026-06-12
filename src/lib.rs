@@ -185,6 +185,8 @@ pub mod product_runtime {
         pub product_actions: usize,
         pub surface_actions: usize,
         pub surface_action_contracts: usize,
+        pub surface_screens: usize,
+        pub surface_screen_contracts: usize,
     }
 
     #[derive(Clone, Debug, Eq, PartialEq)]
@@ -307,6 +309,17 @@ pub mod product_runtime {
         pub product: String,
         pub target: String,
         pub action_ids: Vec<String>,
+        pub roles: Vec<String>,
+        pub mobile_screens: Vec<MobileScreenContract>,
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct MobileScreenContract {
+        pub id: String,
+        pub title: String,
+        pub node_id: String,
+        pub node_type: String,
+        pub role: Option<String>,
         pub roles: Vec<String>,
     }
 
@@ -1224,6 +1237,7 @@ pub mod product_runtime {
             "productAuditKeys",
             "surfaceActions",
             "surfaceRoles",
+            "surfaceScreens",
         ] {
             optional_string_array(value, key, &format!("generated runtime {key}"))?;
         }
@@ -1387,6 +1401,22 @@ pub mod product_runtime {
                 )));
             }
         }
+        let surface_screens = value_string_array(value, "surfaceScreens")?;
+        let surface_screen_contracts = value_array(value, "surfaceScreenContracts")?;
+        if surface_screen_contracts.len() != surface_screens.len() {
+            return Err(ContractError::new(
+                "generated runtime surfaceScreenContracts must match surfaceScreens length",
+            ));
+        }
+        let mut surface_screen_contract_ids = Vec::new();
+        for contract in surface_screen_contracts {
+            surface_screen_contract_ids.push(validate_generated_mobile_screen_contract(contract)?);
+        }
+        if surface_screen_contract_ids != surface_screens {
+            return Err(ContractError::new(
+                "generated runtime surfaceScreenContracts order must match surfaceScreens",
+            ));
+        }
         value_string(value, "surface")
             .filter(|surface| !surface.is_empty())
             .ok_or_else(|| ContractError::new("generated runtime surface required"))?;
@@ -1419,6 +1449,16 @@ pub mod product_runtime {
                 "generated runtime surfaceTarget invalid for target",
             ));
         }
+        if matches!(target.as_str(), "ios" | "android") && surface_screens.is_empty() {
+            return Err(ContractError::new(
+                "generated runtime mobile targets require surfaceScreens",
+            ));
+        }
+        if matches!(target.as_str(), "macos" | "linux") && !surface_screens.is_empty() {
+            return Err(ContractError::new(
+                "generated runtime desktop targets must not declare mobile surfaceScreens",
+            ));
+        }
         Ok(GeneratedRuntime {
             app_id,
             target,
@@ -1440,6 +1480,8 @@ pub mod product_runtime {
             product_actions: product_actions.len(),
             surface_actions: surface_actions.len(),
             surface_action_contracts: surface_contracts.len(),
+            surface_screens: surface_screens.len(),
+            surface_screen_contracts: surface_screen_contracts.len(),
         })
     }
 
@@ -1565,6 +1607,7 @@ pub mod product_runtime {
             .ok_or_else(|| ContractError::new("surface IR target required"))?;
         let action_ids = surface_action_ids(value)?;
         let mut roles = Vec::new();
+        let mut mobile_screens = Vec::new();
         if schema == DESKTOP_SURFACE_IR_SCHEMA {
             if !matches!(target.as_str(), "desktop" | "macos" | "linux") {
                 return Err(ContractError::new("desktop surface IR target invalid"));
@@ -1576,6 +1619,7 @@ pub mod product_runtime {
                 return Err(ContractError::new("mobile surface IR target invalid"));
             }
             for screen in value_array(value, "screens")? {
+                mobile_screens.push(validate_mobile_screen_contract(screen)?);
                 if let Ok(node) = value_object(screen, "node") {
                     collect_surface_roles(node, &mut roles);
                 }
@@ -1589,6 +1633,7 @@ pub mod product_runtime {
             target,
             action_ids,
             roles,
+            mobile_screens,
         })
     }
 
@@ -1914,6 +1959,20 @@ pub mod product_runtime {
             action_contracts_value(&surface_action_contracts(product, surface)),
         );
         object.insert("surfaceRoles".to_string(), string_vec_value(&surface.roles));
+        object.insert(
+            "surfaceScreens".to_string(),
+            string_vec_value(
+                &surface
+                    .mobile_screens
+                    .iter()
+                    .map(|screen| screen.id.clone())
+                    .collect::<Vec<_>>(),
+            ),
+        );
+        object.insert(
+            "surfaceScreenContracts".to_string(),
+            mobile_screen_contracts_value(&surface.mobile_screens),
+        );
         let metadata = Value::Object(object);
         validate_generated_runtime_value(&metadata)?;
         serde_json::to_string_pretty(&metadata)
@@ -3173,6 +3232,29 @@ pub mod product_runtime {
         )
     }
 
+    fn mobile_screen_contracts_value(screens: &[MobileScreenContract]) -> Value {
+        Value::Array(
+            screens
+                .iter()
+                .map(|screen| {
+                    let mut object = serde_json::Map::new();
+                    object.insert("id".to_string(), Value::String(screen.id.clone()));
+                    object.insert("title".to_string(), Value::String(screen.title.clone()));
+                    object.insert("nodeId".to_string(), Value::String(screen.node_id.clone()));
+                    object.insert(
+                        "nodeType".to_string(),
+                        Value::String(screen.node_type.clone()),
+                    );
+                    if let Some(role) = &screen.role {
+                        object.insert("role".to_string(), Value::String(role.clone()));
+                    }
+                    object.insert("roles".to_string(), string_vec_value(&screen.roles));
+                    Value::Object(object)
+                })
+                .collect(),
+        )
+    }
+
     fn background_job_contracts_value(jobs: &[BackgroundJob]) -> Value {
         Value::Array(
             jobs.iter()
@@ -3904,6 +3986,15 @@ struct ProductActionContract {
   let failureShape: [String: String]
 }
 
+struct MobileScreenContract {
+  let id: String
+  let title: String
+  let nodeId: String
+  let nodeType: String
+  let role: String?
+  let roles: [String]
+}
+
 struct RuntimeContract {
   let runtimeMetadata = loadBundledContract("theurgy-runtime")
   let surfaceMetadata = loadBundledContract("theurgy-surface")
@@ -3934,6 +4025,7 @@ struct RuntimeContract {
   let historyCommand = __HISTORY_COMMAND__
   let daemonCommand = __DAEMON_COMMAND__
   let actionContracts = __ACTION_CONTRACTS__
+  let screenContracts = __SCREEN_CONTRACTS__
 
   func command(for action: ProductActionContract, json: String) -> [String] {
     actionCommand + [action.id, json]
@@ -4049,6 +4141,14 @@ struct RuntimeContractView: View {
           Text("Surface schema: \(contract.surfaceSchema)")
           Text("Surface target: \(contract.surfaceTarget)")
           Text("Surface screens: \(contract.surfaceScreens.joined(separator: ", "))")
+          ForEach(contract.screenContracts, id: \.id) { screen in
+            VStack(alignment: .leading) {
+              Text("\(screen.title) [\(screen.nodeType)]")
+              Text("Node: \(screen.nodeId)")
+              Text("Role: \(screen.role ?? "none")")
+              Text("Roles: \(screen.roles.joined(separator: ", "))")
+            }
+          }
         }
         Section("Product") {
           Text("Domain objects: \(contract.productDomainObjects.joined(separator: ", "))")
@@ -4116,6 +4216,10 @@ struct TheurgyMobileApp: App {
                 "__ACTION_CONTRACTS__",
                 &swift_action_contracts_literal(&action_contracts),
             )
+            .replace(
+                "__SCREEN_CONTRACTS__",
+                &swift_mobile_screen_contracts_literal(&surface.mobile_screens),
+            )
             .replace("__MOBILE_WORKFLOW_SECTION__", &mobile_workflow_section)
     }
 
@@ -4181,6 +4285,7 @@ public final class MainActivity extends Activity {
   private static final String[] HISTORY_COMMAND = __HISTORY_COMMAND__;
   private static final String[] DAEMON_COMMAND = __DAEMON_COMMAND__;
   private static final ProductActionContract[] ACTION_CONTRACTS = __ACTION_CONTRACTS__;
+  private static final MobileScreenContract[] SCREEN_CONTRACTS = __SCREEN_CONTRACTS__;
 
   private static final class ProductActionContract {
     final String id;
@@ -4211,6 +4316,24 @@ public final class MainActivity extends Activity {
       this.inputShape = inputShape;
       this.outputShape = outputShape;
       this.failureShape = failureShape;
+    }
+  }
+
+  private static final class MobileScreenContract {
+    final String id;
+    final String title;
+    final String nodeId;
+    final String nodeType;
+    final String role;
+    final String[] roles;
+
+    MobileScreenContract(String id, String title, String nodeId, String nodeType, String role, String[] roles) {
+      this.id = id;
+      this.title = title;
+      this.nodeId = nodeId;
+      this.nodeType = nodeType;
+      this.role = role;
+      this.roles = roles;
     }
   }
 
@@ -4436,6 +4559,14 @@ public final class MainActivity extends Activity {
       .append("\nSurface schema: ").append(jsonString(surfaceMetadata, "version"))
       .append("\nSurface target: ").append(jsonString(surfaceMetadata, "target"))
       .append("\nSurface screens: ").append(surfaceScreens(surfaceMetadata))
+      .append("\nScreen contracts:");
+    for (MobileScreenContract screen : SCREEN_CONTRACTS) {
+      text.append("\n").append(screen.title).append(" [").append(screen.nodeType).append("]")
+        .append("\n  node: ").append(screen.nodeId)
+        .append("\n  role: ").append(screen.role == null ? "none" : screen.role)
+        .append("\n  roles: ").append(String.join(", ", screen.roles));
+    }
+    text
 __MOBILE_WORKFLOW_TEXT__
       .append("\nState: ").append(String.join(" ", STATE_COMMAND))
       .append("\nStatus: ").append(String.join(" ", STATUS_COMMAND))
@@ -4492,6 +4623,10 @@ __MOBILE_WORKFLOW_TEXT__
             .replace(
                 "__ACTION_CONTRACTS__",
                 &java_action_contracts_literal(&action_contracts),
+            )
+            .replace(
+                "__SCREEN_CONTRACTS__",
+                &java_mobile_screen_contracts_literal(&surface.mobile_screens),
             )
             .replace("__MOBILE_WORKFLOW_TEXT__", &mobile_workflow_text)
     }
@@ -4830,6 +4965,30 @@ struct TheurgyNativeApp: App {
         format!("[{items}]")
     }
 
+    fn swift_mobile_screen_contracts_literal(screens: &[MobileScreenContract]) -> String {
+        let items = screens
+            .iter()
+            .map(|screen| {
+                let role = screen
+                    .role
+                    .as_ref()
+                    .map(|role| format!("\"{}\"", swift_escape(role)))
+                    .unwrap_or_else(|| "nil".to_string());
+                format!(
+                    "MobileScreenContract(id: \"{}\", title: \"{}\", nodeId: \"{}\", nodeType: \"{}\", role: {}, roles: {})",
+                    swift_escape(&screen.id),
+                    swift_escape(&screen.title),
+                    swift_escape(&screen.node_id),
+                    swift_escape(&screen.node_type),
+                    role,
+                    swift_string_array_literal(&screen.roles),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("[{items}]")
+    }
+
     fn swift_bool(value: bool) -> &'static str {
         if value {
             "true"
@@ -4890,6 +5049,30 @@ struct TheurgyNativeApp: App {
             .collect::<Vec<_>>()
             .join(", ");
         format!("new ProductActionContract[] {{{items}}}")
+    }
+
+    fn java_mobile_screen_contracts_literal(screens: &[MobileScreenContract]) -> String {
+        let items = screens
+            .iter()
+            .map(|screen| {
+                let role = screen
+                    .role
+                    .as_ref()
+                    .map(|role| format!("\"{}\"", java_escape(role)))
+                    .unwrap_or_else(|| "null".to_string());
+                format!(
+                    "new MobileScreenContract(\"{}\", \"{}\", \"{}\", \"{}\", {}, {})",
+                    java_escape(&screen.id),
+                    java_escape(&screen.title),
+                    java_escape(&screen.node_id),
+                    java_escape(&screen.node_type),
+                    role,
+                    java_string_array_literal(&screen.roles),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("new MobileScreenContract[] {{{items}}}")
     }
 
     fn java_bool(value: bool) -> &'static str {
@@ -5088,6 +5271,40 @@ struct TheurgyNativeApp: App {
         Ok(id)
     }
 
+    fn validate_generated_mobile_screen_contract(contract: &Value) -> ContractResult<String> {
+        let id = value_string(contract, "id")
+            .filter(|id| valid_action_id(id))
+            .ok_or_else(|| {
+                ContractError::new("generated runtime mobile screen contract id invalid")
+            })?;
+        value_string(contract, "title")
+            .filter(|title| !title.is_empty())
+            .ok_or_else(|| {
+                ContractError::new("generated runtime mobile screen contract title required")
+            })?;
+        value_string(contract, "nodeId")
+            .filter(|node_id| !node_id.is_empty())
+            .ok_or_else(|| {
+                ContractError::new("generated runtime mobile screen contract nodeId required")
+            })?;
+        value_string(contract, "nodeType")
+            .filter(|node_type| !node_type.is_empty())
+            .ok_or_else(|| {
+                ContractError::new("generated runtime mobile screen contract nodeType required")
+            })?;
+        optional_nonempty_string(
+            contract,
+            "role",
+            "generated runtime mobile screen contract role",
+        )?;
+        value_string_array(contract, "roles").map_err(|_| {
+            ContractError::new(
+                "generated runtime mobile screen contract roles must be a string array",
+            )
+        })?;
+        Ok(id)
+    }
+
     fn surface_action_ids(value: &Value) -> ContractResult<Vec<String>> {
         let Some(actions) = value.get("actions") else {
             return Ok(Vec::new());
@@ -5129,6 +5346,35 @@ struct TheurgyNativeApp: App {
             }
             _ => {}
         }
+    }
+
+    fn validate_mobile_screen_contract(screen: &Value) -> ContractResult<MobileScreenContract> {
+        let id = value_string(screen, "id")
+            .filter(|id| valid_action_id(id))
+            .ok_or_else(|| ContractError::new("mobile surface screen.id required"))?;
+        let title = value_string(screen, "title")
+            .filter(|title| !title.is_empty())
+            .ok_or_else(|| ContractError::new("mobile surface screen.title required"))?;
+        let node = value_object(screen, "node")?;
+        let node_id = value_string(node, "id")
+            .filter(|node_id| !node_id.is_empty())
+            .ok_or_else(|| ContractError::new("mobile surface screen node.id required"))?;
+        let node_type = value_string(node, "type")
+            .filter(|node_type| !node_type.is_empty())
+            .ok_or_else(|| ContractError::new("mobile surface screen node.type required"))?;
+        let role = value_string(node, "role").filter(|role| !role.is_empty());
+        let mut roles = Vec::new();
+        collect_surface_roles(node, &mut roles);
+        roles.sort();
+        roles.dedup();
+        Ok(MobileScreenContract {
+            id,
+            title,
+            node_id,
+            node_type,
+            role,
+            roles,
+        })
     }
 
     fn value_string(value: &Value, key: &str) -> Option<String> {
@@ -6717,7 +6963,9 @@ binary = "deployments-core"
     "outputShape": {"params": "object"},
     "failureShape": {}
   }],
-  "surfaceRoles": ["left-list-detail"]
+  "surfaceRoles": ["left-list-detail"],
+  "surfaceScreens": [],
+  "surfaceScreenContracts": []
 }"#,
         )
         .unwrap();
@@ -6728,6 +6976,8 @@ binary = "deployments-core"
             product_runtime::DESKTOP_ADAPTER_TRANSPORT
         );
         assert_eq!(summary.surface_action_contracts, 1);
+        assert_eq!(summary.surface_screens, 0);
+        assert_eq!(summary.surface_screen_contracts, 0);
 
         let mut invalid = runtime.clone();
         invalid.as_object_mut().unwrap().insert(

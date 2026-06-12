@@ -41,7 +41,9 @@
     "productReleaseTargetContracts",
     "surfaceActions",
     "surfaceActionContracts",
-    "surfaceRoles"
+    "surfaceRoles",
+    "surfaceScreens",
+    "surfaceScreenContracts"
   ],
   "properties": {
     "version": { "const": "theurgy-generated-runtime/v1" },
@@ -131,7 +133,12 @@
       "type": "array",
       "items": { "$ref": "#/$defs/actionContract" }
     },
-    "surfaceRoles": { "$ref": "#/$defs/stringList" }
+    "surfaceRoles": { "$ref": "#/$defs/stringList" },
+    "surfaceScreens": { "$ref": "#/$defs/actionIdList" },
+    "surfaceScreenContracts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/mobileScreenContract" }
+    }
   },
   "allOf": [
     {
@@ -143,7 +150,9 @@
         "properties": {
           "adapterRuntimeTransport": { "const": "local-process-json" },
           "surfaceSchema": { "const": "theurgy-desktop-surface-ir/v1" },
-          "surfaceTarget": { "enum": ["desktop", "macos", "linux"] }
+          "surfaceTarget": { "enum": ["desktop", "macos", "linux"] },
+          "surfaceScreens": { "maxItems": 0 },
+          "surfaceScreenContracts": { "maxItems": 0 }
         }
       }
     },
@@ -156,7 +165,9 @@
         "properties": {
           "adapterRuntimeTransport": { "const": "external-json-abi" },
           "surfaceSchema": { "const": "theurgy-mobile-surface-ir/v1" },
-          "surfaceTarget": { "enum": ["mobile", "ios", "android"] }
+          "surfaceTarget": { "enum": ["mobile", "ios", "android"] },
+          "surfaceScreens": { "minItems": 1 },
+          "surfaceScreenContracts": { "minItems": 1 }
         }
       }
     }
@@ -248,6 +259,19 @@
         "id": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
         "label": { "type": "string", "minLength": 1 },
         "source": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "mobileScreenContract": {
+      "type": "object",
+      "required": ["id", "title", "nodeId", "nodeType", "roles"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
+        "title": { "type": "string", "minLength": 1 },
+        "nodeId": { "type": "string", "minLength": 1 },
+        "nodeType": { "type": "string", "minLength": 1 },
+        "role": { "type": "string", "minLength": 1 },
+        "roles": { "$ref": "#/$defs/stringList" }
       },
       "additionalProperties": false
     },
