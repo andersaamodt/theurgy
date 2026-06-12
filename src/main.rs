@@ -1017,36 +1017,7 @@ fn project_surface(product: &str, target: &str) -> Result<String> {
 fn compile_native(product: &str, target: &str, out_dir: &Path) -> Result<()> {
     let summary = validate_product_ir(product)?;
     let surface = project_surface(product, target)?;
-    let runtime = RuntimeContract {
-        app_id: summary.app_id.clone(),
-        protocol: product_runtime::RUNTIME_ACTION_PROTOCOL.to_string(),
-        product_ir: "direct-product-ir".to_string(),
-        runtime_manifest: "generated-runtime-manifest".to_string(),
-        source_surface_ir: "projected-surface-ir".to_string(),
-        legacy_native_desktop_ir: None,
-        compatibility: product_runtime::RuntimeCompatibility::shell_first_default(),
-        state_command: vec![
-            format!("{}-core", summary.app_id),
-            "runtime-state".to_string(),
-        ],
-        status_command: vec![
-            format!("{}-core", summary.app_id),
-            "runtime-status".to_string(),
-        ],
-        subscribe_status_command: Vec::new(),
-        operation_status_command: vec![
-            format!("{}-core", summary.app_id),
-            "runtime-operation-status".to_string(),
-        ],
-        action_command: vec![
-            format!("{}-core", summary.app_id),
-            "runtime-action".to_string(),
-        ],
-        history_command: Vec::new(),
-        daemon_command: Vec::new(),
-        product_action_ids: Some(summary.action_ids.clone()),
-        product_action_contracts: Some(summary.action_contracts.clone()),
-    };
+    let runtime = product_runtime::default_runtime_bridge_for_product(&summary);
     compile_native_with_contract(&summary, &surface, &runtime, target, out_dir, false)
 }
 

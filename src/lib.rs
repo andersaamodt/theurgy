@@ -1719,6 +1719,39 @@ pub mod product_runtime {
             })
     }
 
+    pub fn default_runtime_bridge_for_product(product: &ProductIr) -> RuntimeBridge {
+        RuntimeBridge {
+            app_id: product.app_id.clone(),
+            protocol: RUNTIME_ACTION_PROTOCOL.to_string(),
+            product_ir: "direct-product-ir".to_string(),
+            runtime_manifest: "generated-runtime-manifest".to_string(),
+            source_surface_ir: "projected-surface-ir".to_string(),
+            legacy_native_desktop_ir: None,
+            compatibility: RuntimeCompatibility::shell_first_default(),
+            state_command: vec![
+                format!("{}-core", product.app_id),
+                "runtime-state".to_string(),
+            ],
+            status_command: vec![
+                format!("{}-core", product.app_id),
+                "runtime-status".to_string(),
+            ],
+            subscribe_status_command: Vec::new(),
+            operation_status_command: vec![
+                format!("{}-core", product.app_id),
+                "runtime-operation-status".to_string(),
+            ],
+            action_command: vec![
+                format!("{}-core", product.app_id),
+                "runtime-action".to_string(),
+            ],
+            history_command: Vec::new(),
+            daemon_command: Vec::new(),
+            product_action_ids: Some(product.action_ids.clone()),
+            product_action_contracts: Some(product.action_contracts.clone()),
+        }
+    }
+
     pub fn validate_native_compile_contract(
         product: &ProductIr,
         surface: &SurfaceIr,
@@ -5697,6 +5730,54 @@ binary = "deployments-core"
         assert_eq!(
             error,
             "runtime action param type mismatch for publish_changes.deployment: expected string"
+        );
+    }
+
+    #[test]
+    fn product_runtime_builds_default_runtime_bridge_for_direct_compile() {
+        let product = product_runtime::validate_product_ir_value(&serde_json::json!({
+            "version": product_runtime::PRODUCT_IR_SCHEMA,
+            "format": "json",
+            "app": {"id": "deployments", "name": "Deployments", "targets": ["linux"]},
+            "state": {"snapshotSchema": "deployments-state/v1"},
+            "actions": [{
+                "id": "refresh_state",
+                "label": "Refresh",
+                "input": {},
+                "output": {"snapshot": "object"},
+                "effect": "read",
+                "failure": {"error": "string"},
+                "safe": true,
+                "mutating": false,
+                "longRunning": false,
+                "privileged": false
+            }],
+            "releaseTargets": [{
+                "id": "linux-native",
+                "target": "linux",
+                "surface": "desktop",
+                "artifact": "generated/linux"
+            }]
+        }))
+        .unwrap();
+
+        let runtime = product_runtime::default_runtime_bridge_for_product(&product);
+        assert_eq!(runtime.app_id, "deployments");
+        assert_eq!(runtime.protocol, product_runtime::RUNTIME_ACTION_PROTOCOL);
+        assert_eq!(runtime.product_ir, "direct-product-ir");
+        assert_eq!(runtime.runtime_manifest, "generated-runtime-manifest");
+        assert_eq!(runtime.source_surface_ir, "projected-surface-ir");
+        assert_eq!(
+            runtime.state_command,
+            vec!["deployments-core".to_string(), "runtime-state".to_string()]
+        );
+        assert_eq!(
+            runtime.action_command,
+            vec!["deployments-core".to_string(), "runtime-action".to_string()]
+        );
+        assert_eq!(
+            runtime.product_action_ids,
+            Some(vec!["refresh_state".to_string()])
         );
     }
 
