@@ -1529,7 +1529,18 @@ pub mod product_runtime {
         }
         let mut surface_screen_contract_ids = Vec::new();
         for contract in surface_screen_contracts {
-            surface_screen_contract_ids.push(validate_generated_mobile_screen_contract(contract)?);
+            let (screen_id, screen_actions) = validate_generated_mobile_screen_contract(contract)?;
+            for action_id in screen_actions {
+                if !surface_actions
+                    .iter()
+                    .any(|surface_action| surface_action == &action_id)
+                {
+                    return Err(ContractError::new(format!(
+                        "generated runtime mobile screen action not declared in surfaceActions: {action_id}"
+                    )));
+                }
+            }
+            surface_screen_contract_ids.push(screen_id);
         }
         if surface_screen_contract_ids != surface_screens {
             return Err(ContractError::new(
@@ -5747,7 +5758,9 @@ struct TheurgyNativeApp: App {
         Ok(id)
     }
 
-    fn validate_generated_mobile_screen_contract(contract: &Value) -> ContractResult<String> {
+    fn validate_generated_mobile_screen_contract(
+        contract: &Value,
+    ) -> ContractResult<(String, Vec<String>)> {
         let id = value_string(contract, "id")
             .filter(|id| valid_action_id(id))
             .ok_or_else(|| {
@@ -5778,12 +5791,19 @@ struct TheurgyNativeApp: App {
                 "generated runtime mobile screen contract roles must be a string array",
             )
         })?;
-        value_string_array(contract, "actions").map_err(|_| {
+        let actions = value_string_array(contract, "actions").map_err(|_| {
             ContractError::new(
                 "generated runtime mobile screen contract actions must be a string array",
             )
         })?;
-        Ok(id)
+        for action_id in &actions {
+            if !valid_action_id(action_id) {
+                return Err(ContractError::new(
+                    "generated runtime mobile screen contract action must be a stable action id",
+                ));
+            }
+        }
+        Ok((id, actions))
     }
 
     fn surface_action_ids(value: &Value) -> ContractResult<Vec<String>> {

@@ -5816,6 +5816,26 @@ mod tests {
                 .and_then(Value::as_str),
             Some("external-json-abi")
         );
+        let mut screen_action_drift = ios_runtime.clone();
+        screen_action_drift["surfaceScreenContracts"][0]["actions"][0] =
+            Value::String("not_in_mobile_surface".to_string());
+        let error = product_runtime::validate_generated_runtime_value(&screen_action_drift)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            "generated runtime mobile screen action not declared in surfaceActions: not_in_mobile_surface"
+        );
+        let mut invalid_screen_action = ios_runtime.clone();
+        invalid_screen_action["surfaceScreenContracts"][0]["actions"][0] =
+            Value::String("Not Stable".to_string());
+        let error = product_runtime::validate_generated_runtime_value(&invalid_screen_action)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            "generated runtime mobile screen contract action must be a stable action id"
+        );
 
         let android = fs::read_to_string(
             android_root.join("app/src/main/java/app/theurgy/generated/MainActivity.java"),
