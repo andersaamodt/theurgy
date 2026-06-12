@@ -901,6 +901,15 @@ pub mod product_runtime {
                 "runtime manifest commands must be non-empty arrays",
             ));
         }
+        validate_runtime_command_items(&state_command, "runtime manifest stateCommand")?;
+        validate_runtime_command_items(&action_command, "runtime manifest actionCommand")?;
+        let status_command =
+            optional_string_array(runtime, "statusCommand", "runtime manifest statusCommand")?;
+        if runtime.get("statusCommand").is_some() && status_command.is_empty() {
+            return Err(ContractError::new(
+                "runtime manifest statusCommand must be non-empty",
+            ));
+        }
         let subscribe_status_command = optional_string_array(
             runtime,
             "subscribeStatusCommand",
@@ -919,6 +928,20 @@ pub mod product_runtime {
         if runtime.get("operationStatusCommand").is_some() && operation_status_command.is_empty() {
             return Err(ContractError::new(
                 "runtime manifest operationStatusCommand must be non-empty",
+            ));
+        }
+        let history_command =
+            optional_string_array(runtime, "historyCommand", "runtime manifest historyCommand")?;
+        if runtime.get("historyCommand").is_some() && history_command.is_empty() {
+            return Err(ContractError::new(
+                "runtime manifest historyCommand must be non-empty",
+            ));
+        }
+        let daemon_command =
+            optional_string_array(runtime, "daemonCommand", "runtime manifest daemonCommand")?;
+        if runtime.get("daemonCommand").is_some() && daemon_command.is_empty() {
+            return Err(ContractError::new(
+                "runtime manifest daemonCommand must be non-empty",
             ));
         }
         let protocol = value_string(runtime, "protocol")
@@ -5963,6 +5986,15 @@ struct TheurgyNativeApp: App {
             values.push(string.to_string());
         }
         Ok(values)
+    }
+
+    fn validate_runtime_command_items(command: &[String], label: &str) -> ContractResult<()> {
+        if command.iter().any(|item| item.is_empty()) {
+            return Err(ContractError::new(format!(
+                "{label} must contain non-empty strings"
+            )));
+        }
+        Ok(())
     }
 
     fn string_vec_value(values: &[String]) -> Value {
