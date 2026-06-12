@@ -466,87 +466,10 @@ fn command_inspect_app(args: &[String]) -> Result<()> {
         .first()
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
-    for line in inspect_app_lines(&path)? {
+    for line in product_runtime::load_app_inspection_lines(&path)? {
         println!("{line}");
     }
     Ok(())
-}
-
-fn inspect_app_lines(path: &Path) -> Result<Vec<String>> {
-    let manifest_path = path.join("theurgy.project.toml");
-    let manifest = fs::read_to_string(&manifest_path).map_err(|error| {
-        TheurgyError::new(format!(
-            "could not read {}: {error}",
-            manifest_path.display()
-        ))
-    })?;
-    let manifest_summary = inspect_manifest(&manifest)?;
-    let mut lines = vec![
-        format!("name={}", manifest_summary.name),
-        format!("kind={}", manifest_summary.kind),
-        format!("source_root={}", manifest_summary.source_root),
-        "truth=file-first".to_string(),
-    ];
-    let product_ir = required_project_manifest_path(&manifest_summary.product_ir, "product_ir")?;
-    let runtime_manifest =
-        required_project_manifest_path(&manifest_summary.runtime_manifest, "runtime_manifest")?;
-    lines.push(format!("product_ir={product_ir}"));
-    if let Some(desktop_surface_ir) = &manifest_summary.desktop_surface_ir {
-        lines.push(format!("desktop_surface_ir={desktop_surface_ir}"));
-    }
-    if let Some(mobile_surface_ir) = &manifest_summary.mobile_surface_ir {
-        lines.push(format!("mobile_surface_ir={mobile_surface_ir}"));
-    }
-    lines.push(format!("runtime_manifest={runtime_manifest}"));
-
-    let product_text = read_json(&path.join(&product_ir))?;
-    let product = validate_product_ir(&product_text)?;
-    let product_ir = product_ir.to_string();
-
-    let runtime_path = path.join(&runtime_manifest);
-    let runtime_text = read_json(&runtime_path)?;
-    let runtime_summary = validate_runtime_manifest(&runtime_text)?;
-    let runtime = runtime_contract_from_manifest(&runtime_text)?;
-    let product_ir_contract = product.clone();
-    let runtime_manifest_contract = product_runtime::RuntimeManifest {
-        app_id: runtime_summary.app_id,
-        product_ir: runtime_summary.product_ir,
-        desktop_surface_ir: runtime_summary.desktop_surface_ir,
-        mobile_surface_ir: runtime_summary.mobile_surface_ir,
-        legacy_native_desktop_ir: runtime_summary.legacy_native_desktop_ir,
-        protocol: runtime_summary.protocol,
-        compatibility: runtime_summary.compatibility,
-    };
-    let desktop_surface_ir = manifest_summary.desktop_surface_ir.clone();
-    let desktop_surface = match desktop_surface_ir.as_deref() {
-        Some(surface_path) => Some((
-            surface_path,
-            validate_surface_ir(&read_json(&path.join(surface_path))?)?,
-        )),
-        None => None,
-    };
-    let mobile_surface_ir = manifest_summary.mobile_surface_ir.clone();
-    let mobile_surface = match mobile_surface_ir.as_deref() {
-        Some(surface_path) => Some((
-            surface_path,
-            validate_surface_ir(&read_json(&path.join(surface_path))?)?,
-        )),
-        None => None,
-    };
-    lines.extend(product_runtime::inspect_app_contract_lines(
-        &product_ir_contract,
-        &product_ir,
-        &runtime_manifest_contract,
-        &runtime,
-        &runtime_text,
-        desktop_surface
-            .as_ref()
-            .map(|(surface_path, surface)| (*surface_path, surface)),
-        mobile_surface
-            .as_ref()
-            .map(|(surface_path, surface)| (*surface_path, surface)),
-    )?);
-    Ok(lines)
 }
 
 fn command_run_state(args: &[String]) -> Result<()> {
@@ -923,6 +846,7 @@ type RuntimeActionRequestSummary = product_runtime::RuntimeActionRequest;
 type RuntimeActionResultSummary = product_runtime::RuntimeActionResult;
 type OperationStatusSummary = product_runtime::OperationStatus;
 type OperationHistorySummary = product_runtime::OperationHistory;
+#[cfg(test)]
 type RuntimeManifestSummary = product_runtime::RuntimeManifest;
 type GeneratedRuntimeSummary = product_runtime::GeneratedRuntime;
 type SurfaceSummary = product_runtime::SurfaceIr;
@@ -937,15 +861,17 @@ fn read_json(path: &Path) -> Result<String> {
     Ok(text)
 }
 
+fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
+    product_runtime::validate_generated_runtime_text(text).map_err(Into::into)
+}
+
+#[cfg(test)]
 fn validate_runtime_manifest(text: &str) -> Result<RuntimeManifestSummary> {
     let value = parse_json(text)?;
     validate_runtime_manifest_value(&value)
 }
 
-fn validate_generated_runtime(text: &str) -> Result<GeneratedRuntimeSummary> {
-    product_runtime::validate_generated_runtime_text(text).map_err(Into::into)
-}
-
+#[cfg(test)]
 fn runtime_contract_from_manifest(text: &str) -> Result<RuntimeContract> {
     product_runtime::runtime_bridge_from_manifest_text(text).map_err(Into::into)
 }
@@ -1033,13 +959,14 @@ fn validate_product_ir_value(value: &Value) -> Result<ProductSummary> {
     product_runtime::validate_product_ir_value(value).map_err(Into::into)
 }
 
-fn validate_runtime_manifest_value(value: &Value) -> Result<RuntimeManifestSummary> {
-    product_runtime::validate_runtime_manifest_value(value).map_err(Into::into)
-}
-
 fn parse_json(text: &str) -> Result<Value> {
     serde_json::from_str(text)
         .map_err(|error| TheurgyError::new(format!("invalid JSON: {error}")).into())
+}
+
+#[cfg(test)]
+fn validate_runtime_manifest_value(value: &Value) -> Result<RuntimeManifestSummary> {
+    product_runtime::validate_runtime_manifest_value(value).map_err(Into::into)
 }
 
 fn validate_json_params(raw: &str) -> Result<()> {
@@ -1424,12 +1351,6 @@ fn inspect_manifest(manifest: &str) -> Result<ManifestSummary> {
     product_runtime::validate_project_manifest_text(manifest).map_err(Into::into)
 }
 
-fn required_project_manifest_path(value: &Option<String>, key: &str) -> Result<String> {
-    value
-        .clone()
-        .ok_or_else(|| TheurgyError::new(format!("manifest missing string key: {key}")).into())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1482,7 +1403,7 @@ mod tests {
         )
         .unwrap();
 
-        let lines = inspect_app_lines(&app).unwrap();
+        let lines = product_runtime::load_app_inspection_lines(&app).unwrap();
         assert!(lines.contains(&"product_app=deployments".to_string()));
         assert!(lines.contains(
             &"product_surface_desktop=app-blueprint/desktop.surface.ir.json".to_string()
@@ -1540,7 +1461,9 @@ mod tests {
         )
         .unwrap();
 
-        let error = inspect_app_lines(&app).unwrap_err().to_string();
+        let error = product_runtime::load_app_inspection_lines(&app)
+            .unwrap_err()
+            .to_string();
         assert!(error.contains("surface IR action not declared in Product IR: delete_everything"));
         fs::remove_dir_all(app).unwrap();
     }

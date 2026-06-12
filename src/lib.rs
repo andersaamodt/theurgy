@@ -907,6 +907,65 @@ pub mod product_runtime {
         })
     }
 
+    pub fn load_app_inspection_lines(app_dir: impl AsRef<Path>) -> ContractResult<Vec<String>> {
+        let app_dir = app_dir.as_ref();
+        let manifest_path = app_dir.join("theurgy.project.toml");
+        let manifest_text = read_text(&manifest_path)?;
+        let project_manifest = validate_project_manifest_text(&manifest_text)?;
+        let mut lines = vec![
+            format!("name={}", project_manifest.name),
+            format!("kind={}", project_manifest.kind),
+            format!("source_root={}", project_manifest.source_root),
+            "truth=file-first".to_string(),
+        ];
+        let product_ir_path =
+            required_project_manifest_path(&project_manifest.product_ir, "product_ir")?;
+        let runtime_manifest_path =
+            required_project_manifest_path(&project_manifest.runtime_manifest, "runtime_manifest")?;
+        lines.push(format!("product_ir={product_ir_path}"));
+        if let Some(desktop_surface_ir) = &project_manifest.desktop_surface_ir {
+            lines.push(format!("desktop_surface_ir={desktop_surface_ir}"));
+        }
+        if let Some(mobile_surface_ir) = &project_manifest.mobile_surface_ir {
+            lines.push(format!("mobile_surface_ir={mobile_surface_ir}"));
+        }
+        lines.push(format!("runtime_manifest={runtime_manifest_path}"));
+
+        let product_text = read_text(&app_dir.join(&product_ir_path))?;
+        let product = validate_product_ir_text(&product_text)?;
+        let runtime_text = read_text(&app_dir.join(&runtime_manifest_path))?;
+        let runtime_manifest = validate_runtime_manifest_text(&runtime_text)?;
+        let runtime = runtime_bridge_from_manifest_text(&runtime_text)?;
+        let desktop_surface = match project_manifest.desktop_surface_ir.as_deref() {
+            Some(surface_path) => Some((
+                surface_path.to_string(),
+                validate_surface_ir_text(&read_text(&app_dir.join(surface_path))?)?,
+            )),
+            None => None,
+        };
+        let mobile_surface = match project_manifest.mobile_surface_ir.as_deref() {
+            Some(surface_path) => Some((
+                surface_path.to_string(),
+                validate_surface_ir_text(&read_text(&app_dir.join(surface_path))?)?,
+            )),
+            None => None,
+        };
+        lines.extend(inspect_app_contract_lines(
+            &product,
+            &product_ir_path,
+            &runtime_manifest,
+            &runtime,
+            &runtime_text,
+            desktop_surface
+                .as_ref()
+                .map(|(surface_path, surface)| (surface_path.as_str(), surface)),
+            mobile_surface
+                .as_ref()
+                .map(|(surface_path, surface)| (surface_path.as_str(), surface)),
+        )?);
+        Ok(lines)
+    }
+
     pub fn runtime_bridge_from_manifest_value(value: &Value) -> ContractResult<RuntimeBridge> {
         let manifest = validate_runtime_manifest_value(value)?;
         let runtime = value_object(value, "runtime")?;
