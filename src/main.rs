@@ -7,7 +7,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use theurgy::product_runtime;
 
 const AGPL_NOTICE: &str = "GNU AGPL-3.0-or-later\n";
@@ -707,6 +707,7 @@ fn run_action_output(
     validate_json_params(params)?;
     if let Some(path) = manifest_path {
         let runtime = runtime_contract_from_path_with_product_actions(path)?;
+        validate_runtime_action_dispatch_request(&runtime, action_id, params)?;
         return run_manifest_action(&runtime, action_id, params);
     }
     Ok(format!(
@@ -716,6 +717,23 @@ fn run_action_output(
         json_escape(action_id),
         params
     ))
+}
+
+fn validate_runtime_action_dispatch_request(
+    runtime: &RuntimeContract,
+    action_id: &str,
+    params: &str,
+) -> Result<()> {
+    let params_value = parse_json(params)?;
+    let request = json!({
+        "schema": product_runtime::RUNTIME_ACTION_REQUEST_SCHEMA,
+        "protocol": product_runtime::RUNTIME_ACTION_PROTOCOL,
+        "app": runtime.app_id,
+        "action": action_id,
+        "params": params_value
+    });
+    let summary = validate_runtime_action_request_value(&request)?;
+    validate_runtime_action_request_against_runtime(&summary, &request, runtime)
 }
 
 fn run_manifest_action(runtime: &RuntimeContract, action_id: &str, params: &str) -> Result<String> {
@@ -2580,7 +2598,7 @@ mod tests {
         let error = run_action_output("delete_everything", "{}", Some(&manifest)).unwrap_err();
         assert_eq!(
             error.to_string(),
-            "runtime action not declared in Product IR: delete_everything"
+            "runtime action request not declared in Product IR: delete_everything"
         );
 
         fs::remove_dir_all(root).unwrap();
@@ -2695,10 +2713,7 @@ mod tests {
         let manifest = root.join("runtime.manifest.json");
 
         let error = run_action_output("refresh_state", "[]", Some(&manifest)).unwrap_err();
-        assert_eq!(
-            error.to_string(),
-            "runtime action params must be a JSON object for Product IR action: refresh_state"
-        );
+        assert_eq!(error.to_string(), "missing JSON object key: params");
 
         fs::remove_dir_all(root).unwrap();
     }
