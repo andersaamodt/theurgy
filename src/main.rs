@@ -525,10 +525,7 @@ fn command_compile_app(args: &[String]) -> Result<()> {
     product_runtime::validate_product_action_commands(&product_contract, &runtime_bridge)?;
     let surface = read_json(&surface_path)?;
     let surface_summary = validate_surface_ir(&surface)?;
-    product_runtime::validate_surface_contract(
-        &product_contract,
-        &surface_ir_from_summary(&surface_summary),
-    )?;
+    product_runtime::validate_surface_contract(&product_contract, &surface_summary)?;
     let expected_surface_target = if surface_kind == "desktop" {
         "desktop"
     } else {
@@ -629,7 +626,7 @@ fn inspect_app_lines(path: &Path) -> Result<Vec<String>> {
     let desktop_surface = match desktop_surface_ir.as_deref() {
         Some(surface_path) => Some((
             surface_path,
-            surface_ir_from_summary(&validate_surface_ir(&read_json(&path.join(surface_path))?)?),
+            validate_surface_ir(&read_json(&path.join(surface_path))?)?,
         )),
         None => None,
     };
@@ -637,7 +634,7 @@ fn inspect_app_lines(path: &Path) -> Result<Vec<String>> {
     let mobile_surface = match mobile_surface_ir.as_deref() {
         Some(surface_path) => Some((
             surface_path,
-            surface_ir_from_summary(&validate_surface_ir(&read_json(&path.join(surface_path))?)?),
+            validate_surface_ir(&read_json(&path.join(surface_path))?)?,
         )),
         None => None,
     };
@@ -1237,15 +1234,7 @@ struct RuntimeManifestSummary {
 }
 
 type GeneratedRuntimeSummary = product_runtime::GeneratedRuntime;
-
-#[derive(Debug, Eq, PartialEq)]
-struct SurfaceSummary {
-    schema: String,
-    product: String,
-    target: String,
-    action_ids: Vec<String>,
-    roles: Vec<String>,
-}
+type SurfaceSummary = product_runtime::SurfaceIr;
 
 #[derive(Debug, Eq, PartialEq)]
 struct RuntimeContract {
@@ -1344,18 +1333,7 @@ fn runtime_contract_from_manifest(text: &str) -> Result<RuntimeContract> {
 
 fn validate_surface_ir(text: &str) -> Result<SurfaceSummary> {
     let value = parse_json(text)?;
-    let surface = product_runtime::validate_surface_ir_value(&value)?;
-    Ok(surface_summary_from_library(surface))
-}
-
-fn surface_summary_from_library(surface: product_runtime::SurfaceIr) -> SurfaceSummary {
-    SurfaceSummary {
-        schema: surface.schema,
-        product: surface.product,
-        target: surface.target,
-        action_ids: surface.action_ids,
-        roles: surface.roles,
-    }
+    product_runtime::validate_surface_ir_value(&value).map_err(Into::into)
 }
 
 fn validate_product_ir(text: &str) -> Result<ProductSummary> {
@@ -1479,16 +1457,6 @@ fn validate_operation_history_value(value: &Value) -> Result<OperationHistorySum
 
 fn validate_product_ir_value(value: &Value) -> Result<ProductSummary> {
     product_runtime::validate_product_ir_value(value).map_err(Into::into)
-}
-
-fn surface_ir_from_summary(surface: &SurfaceSummary) -> product_runtime::SurfaceIr {
-    product_runtime::SurfaceIr {
-        schema: surface.schema.clone(),
-        product: surface.product.clone(),
-        target: surface.target.clone(),
-        action_ids: surface.action_ids.clone(),
-        roles: surface.roles.clone(),
-    }
 }
 
 fn runtime_bridge_from_contract(runtime: &RuntimeContract) -> product_runtime::RuntimeBridge {
@@ -1647,7 +1615,7 @@ fn compile_native_with_contract(
     let surface_summary = validate_surface_ir(surface)?;
     fs::create_dir_all(out_dir)?;
     let product = summary.clone();
-    let surface_ir = surface_ir_from_summary(&surface_summary);
+    let surface_ir = surface_summary.clone();
     let runtime_bridge = runtime_bridge_from_contract(runtime);
     let files = product_runtime::native_compile_files(
         &product,
