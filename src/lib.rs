@@ -2949,6 +2949,9 @@ pub mod product_runtime {
             .unwrap_or_default();
         let operation_status_tail = runtime.operation_status_command.get(1..).unwrap_or(&[]);
         let operation_status_arguments = c_argv_tail_literal(operation_status_tail);
+        let history_executable = runtime.history_command.first().cloned().unwrap_or_default();
+        let history_tail = runtime.history_command.get(1..).unwrap_or(&[]);
+        let history_arguments = c_argv_tail_literal(history_tail);
         let action_executable = runtime.action_command.first().cloned().unwrap_or_default();
         let action_tail = runtime.action_command.get(1..).unwrap_or(&[]);
         let action_arguments = c_argv_tail_literal(action_tail);
@@ -3017,6 +3020,12 @@ static char *load_operation_status(void) {
   return run_runtime_command(argv);
 }
 
+static char *load_operation_history(void) {
+  g_autofree char *runtime = resolve_executable("__HISTORY_EXECUTABLE__");
+  const char *argv[] = { runtime, __HISTORY_ARGUMENTS__"default", "20", NULL };
+  return run_runtime_command(argv);
+}
+
 static char *run_default_action(void) {
   g_autofree char *runtime = resolve_executable("__ACTION_EXECUTABLE__");
   const char *argv[] = { runtime, __ACTION_ARGUMENTS__ "__DEFAULT_ACTION_ID__", "{}", NULL };
@@ -3075,6 +3084,13 @@ static void refresh_operation_status(GtkButton *button, gpointer user_data) {
   gtk_label_set_text(label, state);
 }
 
+static void refresh_operation_history(GtkButton *button, gpointer user_data) {
+  (void)button;
+  GtkLabel *label = GTK_LABEL(user_data);
+  g_autofree char *state = load_operation_history();
+  gtk_label_set_text(label, state);
+}
+
 static void run_action(GtkButton *button, gpointer user_data) {
   (void)button;
   GtkLabel *label = GTK_LABEL(user_data);
@@ -3092,6 +3108,7 @@ static void activate(GtkApplication *app, gpointer user_data) {
   GtkWidget *status_button = gtk_button_new_with_label("Status");
   GtkWidget *subscribe_button = gtk_button_new_with_label("Subscribe");
   GtkWidget *operation_button = gtk_button_new_with_label("Operation Status");
+  GtkWidget *history_button = gtk_button_new_with_label("History");
   GtkWidget *action_button = gtk_button_new_with_label("Action");
   GtkWidget *label = gtk_label_new("Runtime state not loaded.");
   gtk_window_set_title(GTK_WINDOW(window), "__APP_NAME__");
@@ -3104,6 +3121,7 @@ static void activate(GtkApplication *app, gpointer user_data) {
   gtk_box_append(GTK_BOX(button_box), status_button);
   gtk_box_append(GTK_BOX(button_box), subscribe_button);
   gtk_box_append(GTK_BOX(button_box), operation_button);
+  gtk_box_append(GTK_BOX(button_box), history_button);
   gtk_box_append(GTK_BOX(button_box), action_button);
 __SURFACE_LAYOUT__
   gtk_window_set_child(GTK_WINDOW(window), box);
@@ -3111,6 +3129,7 @@ __SURFACE_LAYOUT__
   g_signal_connect(status_button, "clicked", G_CALLBACK(refresh_status), label);
   g_signal_connect(subscribe_button, "clicked", G_CALLBACK(subscribe_status), label);
   g_signal_connect(operation_button, "clicked", G_CALLBACK(refresh_operation_status), label);
+  g_signal_connect(history_button, "clicked", G_CALLBACK(refresh_operation_history), label);
   g_signal_connect(action_button, "clicked", G_CALLBACK(run_action), label);
   refresh_state(GTK_BUTTON(button), label);
   gtk_window_present(GTK_WINDOW(window));
@@ -3147,6 +3166,8 @@ int main(int argc, char **argv) {
                 "__OPERATION_STATUS_ARGUMENTS__",
                 &operation_status_arguments,
             )
+            .replace("__HISTORY_EXECUTABLE__", &c_escape(&history_executable))
+            .replace("__HISTORY_ARGUMENTS__", &history_arguments)
             .replace("__ACTION_EXECUTABLE__", &c_escape(&action_executable))
             .replace("__ACTION_ARGUMENTS__", &action_arguments)
             .replace("__DEFAULT_ACTION_ID__", &c_escape(&default_action_id))

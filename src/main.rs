@@ -2942,6 +2942,12 @@ mod tests {
             "GtkWidget *operation_button = gtk_button_new_with_label(\"Operation Status\")"
         ));
         assert!(main_c.contains("G_CALLBACK(refresh_operation_status)"));
+        assert!(main_c.contains("static char *load_operation_history(void)"));
+        assert!(main_c.contains("\"default\", \"20\", NULL"));
+        assert!(
+            main_c.contains("GtkWidget *history_button = gtk_button_new_with_label(\"History\")")
+        );
+        assert!(main_c.contains("G_CALLBACK(refresh_operation_history)"));
         assert!(main_c.contains("g_subprocess_newv"));
         assert!(main_c.contains("json-glib/json-glib.h"));
         assert!(main_c.contains("surface_action_contracts_json"));
