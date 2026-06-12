@@ -449,22 +449,20 @@ fn command_compile_app(args: &[String]) -> Result<()> {
             manifest_path.display()
         ))
     })?;
-    let product_ir = manifest_value(&manifest, "product_ir").map_err(|_| {
-        TheurgyError::new("compile-app requires product_ir in theurgy.project.toml")
-    })?;
-    let runtime_manifest = manifest_value(&manifest, "runtime_manifest").map_err(|_| {
-        TheurgyError::new("compile-app requires runtime_manifest in theurgy.project.toml")
-    })?;
+    let project_manifest = inspect_manifest(&manifest)?;
+    let product_ir = required_project_manifest_path(&project_manifest.product_ir, "product_ir")?;
+    let runtime_manifest =
+        required_project_manifest_path(&project_manifest.runtime_manifest, "runtime_manifest")?;
     let surface_key = if matches!(target, "macos" | "linux") {
         "desktop_surface_ir"
     } else {
         "mobile_surface_ir"
     };
-    let surface_ir = manifest_value(&manifest, surface_key).map_err(|_| {
-        TheurgyError::new(format!(
-            "compile-app requires {surface_key} in theurgy.project.toml for target {target}"
-        ))
-    })?;
+    let surface_ir = if matches!(target, "macos" | "linux") {
+        required_project_manifest_path(&project_manifest.desktop_surface_ir, surface_key)?
+    } else {
+        required_project_manifest_path(&project_manifest.mobile_surface_ir, surface_key)?
+    };
     let product_path = app_dir.join(&product_ir);
     let runtime_path = app_dir.join(&runtime_manifest);
     let surface_path = app_dir.join(&surface_ir);
@@ -534,17 +532,14 @@ fn inspect_app_lines(path: &Path) -> Result<Vec<String>> {
         format!("source_root={}", manifest_summary.source_root),
         "truth=file-first".to_string(),
     ];
-    let product_ir = manifest_value(&manifest, "product_ir").map_err(|_| {
-        TheurgyError::new("inspect-app requires product_ir in theurgy.project.toml")
-    })?;
-    let runtime_manifest = manifest_value(&manifest, "runtime_manifest").map_err(|_| {
-        TheurgyError::new("inspect-app requires runtime_manifest in theurgy.project.toml")
-    })?;
+    let product_ir = required_project_manifest_path(&manifest_summary.product_ir, "product_ir")?;
+    let runtime_manifest =
+        required_project_manifest_path(&manifest_summary.runtime_manifest, "runtime_manifest")?;
     lines.push(format!("product_ir={product_ir}"));
-    if let Ok(desktop_surface_ir) = manifest_value(&manifest, "desktop_surface_ir") {
+    if let Some(desktop_surface_ir) = &manifest_summary.desktop_surface_ir {
         lines.push(format!("desktop_surface_ir={desktop_surface_ir}"));
     }
-    if let Ok(mobile_surface_ir) = manifest_value(&manifest, "mobile_surface_ir") {
+    if let Some(mobile_surface_ir) = &manifest_summary.mobile_surface_ir {
         lines.push(format!("mobile_surface_ir={mobile_surface_ir}"));
     }
     lines.push(format!("runtime_manifest={runtime_manifest}"));
@@ -567,7 +562,7 @@ fn inspect_app_lines(path: &Path) -> Result<Vec<String>> {
         protocol: runtime_summary.protocol,
         compatibility: runtime_summary.compatibility,
     };
-    let desktop_surface_ir = manifest_value(&manifest, "desktop_surface_ir").ok();
+    let desktop_surface_ir = manifest_summary.desktop_surface_ir.clone();
     let desktop_surface = match desktop_surface_ir.as_deref() {
         Some(surface_path) => Some((
             surface_path,
@@ -575,7 +570,7 @@ fn inspect_app_lines(path: &Path) -> Result<Vec<String>> {
         )),
         None => None,
     };
-    let mobile_surface_ir = manifest_value(&manifest, "mobile_surface_ir").ok();
+    let mobile_surface_ir = manifest_summary.mobile_surface_ir.clone();
     let mobile_surface = match mobile_surface_ir.as_deref() {
         Some(surface_path) => Some((
             surface_path,
@@ -1134,6 +1129,7 @@ type RuntimeManifestSummary = product_runtime::RuntimeManifest;
 type GeneratedRuntimeSummary = product_runtime::GeneratedRuntime;
 type SurfaceSummary = product_runtime::SurfaceIr;
 type RuntimeContract = product_runtime::RuntimeBridge;
+type ManifestSummary = product_runtime::ProjectManifest;
 
 fn read_json(path: &Path) -> Result<String> {
     let text = fs::read_to_string(path).map_err(|error| {
@@ -1649,37 +1645,14 @@ fn json_escape(raw: &str) -> String {
     escaped
 }
 
-#[derive(Debug, Eq, PartialEq)]
-struct ManifestSummary {
-    name: String,
-    kind: String,
-    source_root: String,
-}
-
 fn inspect_manifest(manifest: &str) -> Result<ManifestSummary> {
-    let name = manifest_value(manifest, "name")?;
-    let kind = manifest_value(manifest, "kind")?;
-    let source_root = manifest_value(manifest, "source_root")?;
-    Ok(ManifestSummary {
-        name,
-        kind,
-        source_root,
-    })
+    product_runtime::validate_project_manifest_text(manifest).map_err(Into::into)
 }
 
-fn manifest_value(manifest: &str, key: &str) -> Result<String> {
-    for line in manifest.lines() {
-        let Some((left, right)) = line.split_once('=') else {
-            continue;
-        };
-        if left.trim() == key {
-            let value = right.trim();
-            if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') {
-                return Ok(value[1..value.len() - 1].to_string());
-            }
-        }
-    }
-    Err(TheurgyError::new(format!("manifest missing string key: {key}")).into())
+fn required_project_manifest_path(value: &Option<String>, key: &str) -> Result<String> {
+    value
+        .clone()
+        .ok_or_else(|| TheurgyError::new(format!("manifest missing string key: {key}")).into())
 }
 
 #[cfg(test)]
@@ -1703,14 +1676,10 @@ mod tests {
             "name = \"demo\"\nkind = \"desktop\"\nsource_root = \"src\"\ntruth = \"file-first\"\n",
         )
         .unwrap();
-        assert_eq!(
-            summary,
-            ManifestSummary {
-                name: "demo".to_string(),
-                kind: "desktop".to_string(),
-                source_root: "src".to_string()
-            }
-        );
+        assert_eq!(summary.name, "demo");
+        assert_eq!(summary.kind, "desktop");
+        assert_eq!(summary.source_root, "src");
+        assert_eq!(summary.truth.as_deref(), Some("file-first"));
     }
 
     #[test]

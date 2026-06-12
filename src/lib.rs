@@ -220,6 +220,24 @@ pub mod product_runtime {
     }
 
     #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct ProjectManifest {
+        pub name: String,
+        pub kind: String,
+        pub source_root: String,
+        pub track: Option<String>,
+        pub runtime: Option<String>,
+        pub truth: Option<String>,
+        pub native_ir: Option<String>,
+        pub product_ir: Option<String>,
+        pub desktop_surface_ir: Option<String>,
+        pub mobile_surface_ir: Option<String>,
+        pub runtime_manifest: Option<String>,
+        pub desktop_targets: Vec<String>,
+        pub mobile_targets: Vec<String>,
+        pub license: Option<String>,
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
     pub struct BackgroundJob {
         pub id: String,
         pub command: Vec<String>,
@@ -582,6 +600,26 @@ pub mod product_runtime {
         let value: Value = serde_json::from_str(text)
             .map_err(|error| ContractError::new(format!("invalid JSON: {error}")))?;
         runtime_bridge_from_manifest_value(&value)
+    }
+
+    pub fn validate_project_manifest_text(text: &str) -> ContractResult<ProjectManifest> {
+        let values = top_level_manifest_values(text)?;
+        Ok(ProjectManifest {
+            name: required_manifest_string(&values, "name")?,
+            kind: required_manifest_string(&values, "kind")?,
+            source_root: required_manifest_string(&values, "source_root")?,
+            track: optional_manifest_string(&values, "track")?,
+            runtime: optional_manifest_string(&values, "runtime")?,
+            truth: optional_manifest_string(&values, "truth")?,
+            native_ir: optional_manifest_string(&values, "native_ir")?,
+            product_ir: optional_manifest_string(&values, "product_ir")?,
+            desktop_surface_ir: optional_manifest_string(&values, "desktop_surface_ir")?,
+            mobile_surface_ir: optional_manifest_string(&values, "mobile_surface_ir")?,
+            runtime_manifest: optional_manifest_string(&values, "runtime_manifest")?,
+            desktop_targets: optional_manifest_string_array(&values, "desktop_targets")?,
+            mobile_targets: optional_manifest_string_array(&values, "mobile_targets")?,
+            license: optional_manifest_string(&values, "license")?,
+        })
     }
 
     pub fn runtime_bridge_from_manifest_value(value: &Value) -> ContractResult<RuntimeBridge> {
@@ -1985,6 +2023,228 @@ pub mod product_runtime {
             "object" => value.is_object(),
             "json" => true,
             _ => false,
+        }
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    enum ManifestValue {
+        String(String),
+        StringArray(Vec<String>),
+    }
+
+    fn top_level_manifest_values(text: &str) -> ContractResult<BTreeMap<String, ManifestValue>> {
+        let mut values = BTreeMap::new();
+        let mut in_top_level = true;
+        for (index, raw_line) in text.lines().enumerate() {
+            let line_number = index + 1;
+            let line = strip_manifest_comment(raw_line).trim().to_string();
+            if line.is_empty() {
+                continue;
+            }
+            if line.starts_with('[') && line.ends_with(']') {
+                in_top_level = false;
+                continue;
+            }
+            if !in_top_level {
+                continue;
+            }
+            let Some((key, raw_value)) = line.split_once('=') else {
+                return Err(ContractError::new(format!(
+                    "project manifest line {line_number} missing key/value separator"
+                )));
+            };
+            let key = key.trim();
+            if key.is_empty()
+                || !key
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte == b'_')
+            {
+                return Err(ContractError::new(format!(
+                    "project manifest line {line_number} has invalid key"
+                )));
+            }
+            if values.contains_key(key) {
+                return Err(ContractError::new(format!(
+                    "project manifest duplicate key: {key}"
+                )));
+            }
+            let value = parse_manifest_value(raw_value.trim(), line_number)?;
+            values.insert(key.to_string(), value);
+        }
+        Ok(values)
+    }
+
+    fn strip_manifest_comment(line: &str) -> String {
+        let mut in_string = false;
+        let mut escaped = false;
+        let mut out = String::new();
+        for character in line.chars() {
+            if escaped {
+                out.push(character);
+                escaped = false;
+                continue;
+            }
+            if character == '\\' && in_string {
+                out.push(character);
+                escaped = true;
+                continue;
+            }
+            if character == '"' {
+                in_string = !in_string;
+                out.push(character);
+                continue;
+            }
+            if character == '#' && !in_string {
+                break;
+            }
+            out.push(character);
+        }
+        out
+    }
+
+    fn parse_manifest_value(raw: &str, line_number: usize) -> ContractResult<ManifestValue> {
+        if raw.starts_with('"') {
+            return Ok(ManifestValue::String(parse_manifest_string(
+                raw,
+                line_number,
+            )?));
+        }
+        if raw.starts_with('[') {
+            return Ok(ManifestValue::StringArray(parse_manifest_string_array(
+                raw,
+                line_number,
+            )?));
+        }
+        Err(ContractError::new(format!(
+            "project manifest line {line_number} must use a string or string array"
+        )))
+    }
+
+    fn parse_manifest_string(raw: &str, line_number: usize) -> ContractResult<String> {
+        if !raw.ends_with('"') || raw.len() < 2 {
+            return Err(ContractError::new(format!(
+                "project manifest line {line_number} has invalid string"
+            )));
+        }
+        let inner = &raw[1..raw.len() - 1];
+        let mut out = String::new();
+        let mut escaped = false;
+        for character in inner.chars() {
+            if escaped {
+                match character {
+                    '"' => out.push('"'),
+                    '\\' => out.push('\\'),
+                    'n' => out.push('\n'),
+                    'r' => out.push('\r'),
+                    't' => out.push('\t'),
+                    other => {
+                        return Err(ContractError::new(format!(
+                            "project manifest line {line_number} has unsupported escape: \\{other}"
+                        )))
+                    }
+                }
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else {
+                out.push(character);
+            }
+        }
+        if escaped {
+            return Err(ContractError::new(format!(
+                "project manifest line {line_number} ends with incomplete escape"
+            )));
+        }
+        if out.is_empty() {
+            return Err(ContractError::new(format!(
+                "project manifest line {line_number} has empty string"
+            )));
+        }
+        Ok(out)
+    }
+
+    fn parse_manifest_string_array(raw: &str, line_number: usize) -> ContractResult<Vec<String>> {
+        if !raw.ends_with(']') {
+            return Err(ContractError::new(format!(
+                "project manifest line {line_number} has invalid string array"
+            )));
+        }
+        let mut values = Vec::new();
+        let mut rest = raw[1..raw.len() - 1].trim();
+        while !rest.is_empty() {
+            if !rest.starts_with('"') {
+                return Err(ContractError::new(format!(
+                    "project manifest line {line_number} string array item must be quoted"
+                )));
+            }
+            let end = manifest_string_end(rest, line_number)?;
+            values.push(parse_manifest_string(&rest[..=end], line_number)?);
+            rest = rest[end + 1..].trim_start();
+            if rest.is_empty() {
+                break;
+            }
+            if !rest.starts_with(',') {
+                return Err(ContractError::new(format!(
+                    "project manifest line {line_number} string array items must be comma separated"
+                )));
+            }
+            rest = rest[1..].trim_start();
+            if rest.is_empty() {
+                return Err(ContractError::new(format!(
+                    "project manifest line {line_number} string array has trailing comma"
+                )));
+            }
+        }
+        Ok(values)
+    }
+
+    fn manifest_string_end(raw: &str, line_number: usize) -> ContractResult<usize> {
+        let mut escaped = false;
+        for (index, character) in raw.char_indices().skip(1) {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                return Ok(index);
+            }
+        }
+        Err(ContractError::new(format!(
+            "project manifest line {line_number} has unterminated string"
+        )))
+    }
+
+    fn required_manifest_string(
+        values: &BTreeMap<String, ManifestValue>,
+        key: &str,
+    ) -> ContractResult<String> {
+        optional_manifest_string(values, key)?
+            .ok_or_else(|| ContractError::new(format!("project manifest {key} required")))
+    }
+
+    fn optional_manifest_string(
+        values: &BTreeMap<String, ManifestValue>,
+        key: &str,
+    ) -> ContractResult<Option<String>> {
+        match values.get(key) {
+            None => Ok(None),
+            Some(ManifestValue::String(value)) => Ok(Some(value.clone())),
+            Some(ManifestValue::StringArray(_)) => Err(ContractError::new(format!(
+                "project manifest {key} must be a string"
+            ))),
+        }
+    }
+
+    fn optional_manifest_string_array(
+        values: &BTreeMap<String, ManifestValue>,
+        key: &str,
+    ) -> ContractResult<Vec<String>> {
+        match values.get(key) {
+            None => Ok(Vec::new()),
+            Some(ManifestValue::StringArray(value)) => Ok(value.clone()),
+            Some(ManifestValue::String(_)) => Err(ContractError::new(format!(
+                "project manifest {key} must be a string array"
+            ))),
         }
     }
 
@@ -3805,6 +4065,73 @@ mod tests {
         assert_eq!(
             product_runtime::adapter_runtime_transport("ios"),
             product_runtime::MOBILE_ADAPTER_TRANSPORT
+        );
+    }
+
+    #[test]
+    fn product_runtime_validates_project_manifest_contract() {
+        let manifest = product_runtime::validate_project_manifest_text(
+            r#"
+name = "deployments"
+kind = "desktop"
+track = "native-desktop"
+runtime = "rust"
+source_root = "src"
+truth = "file-first"
+native_ir = "app-blueprint/app.ir.yaml"
+product_ir = "app-blueprint/product.ir.json"
+desktop_surface_ir = "app-blueprint/desktop.surface.ir.json"
+mobile_surface_ir = "app-blueprint/mobile.surface.ir.json"
+runtime_manifest = "app-blueprint/runtime.manifest.json"
+desktop_targets = ["macos", "linux"]
+mobile_targets = ["ios", "android"]
+license = "OWL-3.1"
+
+[core]
+binary = "deployments-core"
+"#,
+        )
+        .unwrap();
+        assert_eq!(manifest.name, "deployments");
+        assert_eq!(manifest.kind, "desktop");
+        assert_eq!(manifest.source_root, "src");
+        assert_eq!(
+            manifest.product_ir.as_deref(),
+            Some("app-blueprint/product.ir.json")
+        );
+        assert_eq!(
+            manifest.desktop_surface_ir.as_deref(),
+            Some("app-blueprint/desktop.surface.ir.json")
+        );
+        assert_eq!(
+            manifest.mobile_surface_ir.as_deref(),
+            Some("app-blueprint/mobile.surface.ir.json")
+        );
+        assert_eq!(
+            manifest.runtime_manifest.as_deref(),
+            Some("app-blueprint/runtime.manifest.json")
+        );
+        assert_eq!(manifest.desktop_targets, vec!["macos", "linux"]);
+        assert_eq!(manifest.mobile_targets, vec!["ios", "android"]);
+    }
+
+    #[test]
+    fn product_runtime_rejects_project_manifest_type_drift() {
+        let error = product_runtime::validate_project_manifest_text(
+            "name = \"deployments\"\nkind = [\"desktop\"]\nsource_root = \"src\"\n",
+        )
+        .unwrap_err()
+        .to_string();
+        assert_eq!(error, "project manifest kind must be a string");
+
+        let error = product_runtime::validate_project_manifest_text(
+            "name = \"deployments\"\nkind = \"desktop\"\nsource_root = \"src\"\ndesktop_targets = \"macos\"\n",
+        )
+        .unwrap_err()
+        .to_string();
+        assert_eq!(
+            error,
+            "project manifest desktop_targets must be a string array"
         );
     }
 
