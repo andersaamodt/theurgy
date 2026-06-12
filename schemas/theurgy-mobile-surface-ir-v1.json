@@ -26,13 +26,27 @@
         "id": { "type": "string", "minLength": 1 },
         "title": { "type": "string", "minLength": 1 },
         "actions": { "$ref": "#/$defs/actionIdList" },
-        "node": { "type": "object" }
+        "node": { "$ref": "#/$defs/node" }
       },
       "additionalProperties": true
     },
     "actionIdList": {
       "type": "array",
       "items": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" }
+    },
+    "node": {
+      "type": "object",
+      "required": ["id", "type"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": { "type": "string", "minLength": 1 },
+        "role": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
+        "action": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
+        "actions": { "$ref": "#/$defs/actionIdList" },
+        "children": { "type": "array", "items": { "$ref": "#/$defs/node" } },
+        "child": { "$ref": "#/$defs/node" }
+      },
+      "additionalProperties": true
     }
   },
   "additionalProperties": true

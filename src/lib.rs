@@ -1807,6 +1807,7 @@ pub mod product_runtime {
                 return Err(ContractError::new("desktop surface IR target invalid"));
             }
             let window = value_object(value, "window")?;
+            validate_surface_node_contract(window, &action_ids, "desktop surface node")?;
             collect_surface_roles(window, &mut roles);
         } else {
             if !matches!(target.as_str(), "mobile" | "ios" | "android") {
@@ -1815,6 +1816,7 @@ pub mod product_runtime {
             for screen in value_array(value, "screens")? {
                 mobile_screens.push(validate_mobile_screen_contract(screen)?);
                 if let Ok(node) = value_object(screen, "node") {
+                    validate_surface_node_contract(node, &action_ids, "mobile surface node")?;
                     collect_surface_roles(node, &mut roles);
                 }
             }
@@ -5908,6 +5910,73 @@ struct TheurgyNativeApp: App {
         }
     }
 
+    fn validate_surface_node_contract(
+        node: &Value,
+        surface_actions: &[String],
+        label: &str,
+    ) -> ContractResult<()> {
+        match node {
+            Value::Object(object) => {
+                if let Some(role) = object.get("role") {
+                    let Some(role) = role.as_str().filter(|role| !role.is_empty()) else {
+                        return Err(ContractError::new(format!(
+                            "{label}.role must be a non-empty string"
+                        )));
+                    };
+                    if !valid_action_id(role) {
+                        return Err(ContractError::new(format!(
+                            "{label}.role must be a stable role id"
+                        )));
+                    }
+                }
+                if let Some(action) = object.get("action") {
+                    let Some(action_id) = action.as_str().filter(|action| valid_action_id(action))
+                    else {
+                        return Err(ContractError::new(format!(
+                            "{label}.action must be a stable action id"
+                        )));
+                    };
+                    if !surface_actions.iter().any(|id| id == action_id) {
+                        return Err(ContractError::new(format!(
+                            "{label}.action not declared in surface actions: {action_id}"
+                        )));
+                    }
+                }
+                if let Some(actions) = object.get("actions") {
+                    let Some(actions) = actions.as_array() else {
+                        return Err(ContractError::new(format!(
+                            "{label}.actions must be an array"
+                        )));
+                    };
+                    for action in actions {
+                        let Some(action_id) =
+                            action.as_str().filter(|action| valid_action_id(action))
+                        else {
+                            return Err(ContractError::new(format!(
+                                "{label}.actions must contain stable action ids"
+                            )));
+                        };
+                        if !surface_actions.iter().any(|id| id == action_id) {
+                            return Err(ContractError::new(format!(
+                                "{label}.actions item not declared in surface actions: {action_id}"
+                            )));
+                        }
+                    }
+                }
+                for child in object.values() {
+                    validate_surface_node_contract(child, surface_actions, label)?;
+                }
+            }
+            Value::Array(children) => {
+                for child in children {
+                    validate_surface_node_contract(child, surface_actions, label)?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     fn validate_mobile_screen_contract(screen: &Value) -> ContractResult<MobileScreenContract> {
         let id = value_string(screen, "id")
             .filter(|id| valid_action_id(id))
@@ -7304,6 +7373,52 @@ binary = "deployments-core"
         assert!(desktop.roles.contains(&"left-list-detail".to_string()));
         assert!(desktop.roles.contains(&"native-product-root".to_string()));
 
+        let invalid_desktop_action = serde_json::json!({
+            "version": product_runtime::DESKTOP_SURFACE_IR_SCHEMA,
+            "format": "json",
+            "product": "deployments",
+            "target": "desktop",
+            "actions": ["refresh_state"],
+            "window": {
+                "id": "window.main",
+                "type": "Window",
+                "role": "native-product-root",
+                "children": [{
+                    "id": "menu.main",
+                    "type": "ActionMenu",
+                    "role": "deployment-row-menu",
+                    "actions": ["publish_changes"]
+                }]
+            }
+        });
+        let error = product_runtime::validate_surface_ir_value(&invalid_desktop_action)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            "desktop surface node.actions item not declared in surface actions: publish_changes"
+        );
+
+        let invalid_desktop_role = serde_json::json!({
+            "version": product_runtime::DESKTOP_SURFACE_IR_SCHEMA,
+            "format": "json",
+            "product": "deployments",
+            "target": "desktop",
+            "actions": ["refresh_state"],
+            "window": {
+                "id": "window.main",
+                "type": "Window",
+                "role": ""
+            }
+        });
+        let error = product_runtime::validate_surface_ir_value(&invalid_desktop_role)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            "desktop surface node.role must be a non-empty string"
+        );
+
         let mobile = serde_json::json!({
             "version": product_runtime::MOBILE_SURFACE_IR_SCHEMA,
             "format": "json",
@@ -7327,6 +7442,31 @@ binary = "deployments-core"
         assert_eq!(
             mobile.mobile_screens[0].action_ids,
             vec!["refresh_state".to_string()]
+        );
+
+        let invalid_mobile_action = serde_json::json!({
+            "version": product_runtime::MOBILE_SURFACE_IR_SCHEMA,
+            "format": "json",
+            "product": "deployments",
+            "target": "mobile",
+            "actions": ["refresh_state"],
+            "screens": [{
+                "id": "overview",
+                "title": "Deployments",
+                "node": {
+                    "id": "screen.overview",
+                    "type": "NavigationStack",
+                    "role": "status-overview",
+                    "action": "publish_changes"
+                }
+            }]
+        });
+        let error = product_runtime::validate_surface_ir_value(&invalid_mobile_action)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            "mobile surface node.action not declared in surface actions: publish_changes"
         );
 
         let invalid = serde_json::json!({

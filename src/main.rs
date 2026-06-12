@@ -2964,6 +2964,18 @@ mod tests {
             .is_some_and(|types| types
                 .iter()
                 .any(|value| value.as_str() == Some("StatusPill"))));
+        assert_eq!(
+            desktop_schema
+                .pointer("/$defs/node/properties/role/pattern")
+                .and_then(Value::as_str),
+            Some("^[a-z][a-z0-9_.-]*$")
+        );
+        assert_eq!(
+            desktop_schema
+                .pointer("/$defs/node/properties/actions/$ref")
+                .and_then(Value::as_str),
+            Some("#/$defs/actionIdList")
+        );
         let mobile_schema: Value =
             serde_json::from_str(include_str!("../schemas/theurgy-mobile-surface-ir-v1.json"))
                 .unwrap();
@@ -2982,6 +2994,30 @@ mod tests {
         assert_eq!(
             mobile_schema
                 .pointer("/$defs/screen/properties/actions/$ref")
+                .and_then(Value::as_str),
+            Some("#/$defs/actionIdList")
+        );
+        assert_eq!(
+            mobile_schema
+                .pointer("/$defs/screen/properties/node/$ref")
+                .and_then(Value::as_str),
+            Some("#/$defs/node")
+        );
+        assert_eq!(
+            mobile_schema
+                .pointer("/$defs/node/properties/role/pattern")
+                .and_then(Value::as_str),
+            Some("^[a-z][a-z0-9_.-]*$")
+        );
+        assert_eq!(
+            mobile_schema
+                .pointer("/$defs/node/properties/action/pattern")
+                .and_then(Value::as_str),
+            Some("^[a-z][a-z0-9_.-]*$")
+        );
+        assert_eq!(
+            mobile_schema
+                .pointer("/$defs/node/properties/actions/$ref")
                 .and_then(Value::as_str),
             Some("#/$defs/actionIdList")
         );

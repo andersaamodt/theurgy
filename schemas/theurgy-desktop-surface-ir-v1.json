@@ -31,7 +31,9 @@
         "type": {
           "enum": ["Window", "MenuBar", "Toolbar", "SplitPane", "TreeList", "Detail", "DetailDrawer", "StatusBar", "ActionMenu", "StatusPill", "ProgressModal", "Modal", "Text", "Button", "Toggle", "ToggleGroup"]
         },
-        "role": { "type": "string" },
+        "role": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
+        "action": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
+        "actions": { "$ref": "#/$defs/actionIdList" },
         "children": { "type": "array", "items": { "$ref": "#/$defs/node" } },
         "child": { "$ref": "#/$defs/node" }
       },
