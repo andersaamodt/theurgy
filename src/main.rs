@@ -2035,57 +2035,6 @@ fn value_object<'a>(value: &'a Value, key: &str) -> Result<&'a Value> {
         .ok_or_else(|| TheurgyError::new(format!("missing JSON object key: {key}")).into())
 }
 
-fn action_contracts_value(contracts: &[ActionContract]) -> Value {
-    Value::Array(
-        contracts
-            .iter()
-            .map(|contract| {
-                let mut object = serde_json::Map::new();
-                object.insert("id".to_string(), Value::String(contract.id.clone()));
-                object.insert("label".to_string(), Value::String(contract.label.clone()));
-                object.insert("effect".to_string(), Value::String(contract.effect.clone()));
-                object.insert("safe".to_string(), Value::Bool(contract.safe));
-                object.insert("mutating".to_string(), Value::Bool(contract.mutating));
-                object.insert(
-                    "longRunning".to_string(),
-                    Value::Bool(contract.long_running),
-                );
-                object.insert("privileged".to_string(), Value::Bool(contract.privileged));
-                object.insert(
-                    "inputKeys".to_string(),
-                    string_vec_value(&contract.input_keys),
-                );
-                object.insert(
-                    "outputKeys".to_string(),
-                    string_vec_value(&contract.output_keys),
-                );
-                object.insert(
-                    "failureKeys".to_string(),
-                    string_vec_value(&contract.failure_keys),
-                );
-                object.insert("inputShape".to_string(), shape_value(&contract.input_shape));
-                object.insert(
-                    "outputShape".to_string(),
-                    shape_value(&contract.output_shape),
-                );
-                object.insert(
-                    "failureShape".to_string(),
-                    shape_value(&contract.failure_shape),
-                );
-                Value::Object(object)
-            })
-            .collect(),
-    )
-}
-
-fn shape_value(shape: &BTreeMap<String, String>) -> Value {
-    let mut object = serde_json::Map::new();
-    for (key, type_name) in shape {
-        object.insert(key.clone(), Value::String(type_name.clone()));
-    }
-    Value::Object(object)
-}
-
 fn swift_string_array_literal(values: &[String]) -> String {
     let items = values
         .iter()
@@ -2137,21 +2086,6 @@ fn swift_bool(value: bool) -> &'static str {
         "true"
     } else {
         "false"
-    }
-}
-
-fn c_argv_tail_literal(values: &[String]) -> String {
-    if values.is_empty() {
-        String::new()
-    } else {
-        format!(
-            "{}, ",
-            values
-                .iter()
-                .map(|value| format!("\"{}\"", c_escape(value)))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
     }
 }
 
@@ -2355,10 +2289,6 @@ fn release_target_ids(summary: &ProductSummary) -> Vec<String> {
         .collect()
 }
 
-fn string_vec_value(values: &[String]) -> Value {
-    Value::Array(values.iter().cloned().map(Value::String).collect())
-}
-
 fn effective_subscribe_status_command(runtime: &RuntimeContract) -> Vec<String> {
     if !runtime.subscribe_status_command.is_empty() {
         return runtime.subscribe_status_command.clone();
@@ -2397,250 +2327,14 @@ fn compile_linux(
     runtime: &RuntimeContract,
     out_dir: &Path,
 ) -> Result<()> {
-    fs::create_dir_all(out_dir.join("src"))?;
-    write_or_replace(
-        &out_dir.join("meson.build"),
-        &format!(
-            "project('{}', 'c', version: '0.1.0')\ngtk = dependency('gtk4')\njson_glib = dependency('json-glib-1.0')\nexecutable('{}', 'src/main.c', dependencies: [gtk, json_glib], install: true)\n",
-            summary.app_id, summary.app_id
-        ),
-    )?;
-    write_or_replace(
-        &out_dir.join("src/main.c"),
-        &linux_adapter_source(summary, surface, runtime),
-    )
-}
-
-fn linux_adapter_source(
-    summary: &ProductSummary,
-    surface: &SurfaceSummary,
-    runtime: &RuntimeContract,
-) -> String {
-    let action_contracts = surface_action_contracts(summary, surface);
-    let action_contracts_json =
-        serde_json::to_string(&action_contracts_value(&action_contracts)).unwrap_or_default();
-    let subscribe_status_command = effective_subscribe_status_command(runtime);
-    let subscribe_status_executable = subscribe_status_command
-        .first()
-        .cloned()
-        .unwrap_or_default();
-    let subscribe_status_arguments = c_argv_tail_literal(&subscribe_status_command[1..]);
-    let executable = runtime.state_command.first().cloned().unwrap_or_default();
-    let arguments = c_argv_tail_literal(&runtime.state_command[1..]);
-    let status_executable = runtime.status_command.first().cloned().unwrap_or_default();
-    let status_tail = runtime.status_command.get(1..).unwrap_or(&[]);
-    let status_arguments = c_argv_tail_literal(status_tail);
-    let action_executable = runtime.action_command.first().cloned().unwrap_or_default();
-    let action_tail = runtime.action_command.get(1..).unwrap_or(&[]);
-    let action_arguments = c_argv_tail_literal(action_tail);
-    let default_action_id = action_contracts
-        .first()
-        .map(|contract| contract.id.clone())
-        .unwrap_or_default();
-    let action_text = runtime.action_command.join(" ");
-    let subscribe_status_text = subscribe_status_command.join(" ");
-    let operation_status_text = runtime.operation_status_command.join(" ");
-    let history_text = runtime.history_command.join(" ");
-    let daemon_text = runtime.daemon_command.join(" ");
-    let template = r#"/* Generated by theurgy-runtime compile-native.
- * Runtime: theurgy-runtime.json
- * Surface: theurgy-surface.json
- */
-#include <gtk/gtk.h>
-#include <json-glib/json-glib.h>
-
-static const char *surface_action_contracts_json = "__ACTION_CONTRACTS_JSON__";
-
-static char *resolve_executable(const char *name) {
-  const char *override = g_getenv("THEURGY_RUNTIME_EXECUTABLE");
-  if (override != NULL && g_file_test(override, G_FILE_TEST_IS_EXECUTABLE)) {
-    return g_strdup(override);
-  }
-  g_autofree char *self_path = g_file_read_link("/proc/self/exe", NULL);
-  if (self_path != NULL) {
-    g_autofree char *self_dir = g_path_get_dirname(self_path);
-    g_autofree char *beside_exe = g_build_filename(self_dir, name, NULL);
-    if (g_file_test(beside_exe, G_FILE_TEST_IS_EXECUTABLE)) {
-      return g_strdup(beside_exe);
+    for file in product_runtime::linux_adapter_files(
+        &product_ir_from_summary(summary),
+        &surface_ir_from_summary(surface),
+        &runtime_bridge_from_contract(runtime),
+    ) {
+        write_or_replace(&out_dir.join(file.path), &file.contents)?;
     }
-    g_autofree char *libexec = g_build_filename(self_dir, "..", "libexec", name, NULL);
-    if (g_file_test(libexec, G_FILE_TEST_IS_EXECUTABLE)) {
-      return g_canonicalize_filename(libexec, NULL);
-    }
-  }
-  return g_strdup(name);
-}
-
-static char *run_runtime_command(const char *argv[]);
-
-static char *load_runtime_state(void) {
-  g_autofree char *runtime = resolve_executable("__STATE_EXECUTABLE__");
-  const char *argv[] = { runtime, __STATE_ARGUMENTS__ NULL };
-  return run_runtime_command(argv);
-}
-
-static char *load_runtime_status(void) {
-  g_autofree char *runtime = resolve_executable("__STATUS_EXECUTABLE__");
-  const char *argv[] = { runtime, __STATUS_ARGUMENTS__ NULL };
-  return run_runtime_command(argv);
-}
-
-static char *subscribe_runtime_status(void) {
-  g_autofree char *runtime = resolve_executable("__SUBSCRIBE_STATUS_EXECUTABLE__");
-  const char *argv[] = { runtime, __SUBSCRIBE_STATUS_ARGUMENTS__ NULL };
-  return run_runtime_command(argv);
-}
-
-static char *run_default_action(void) {
-  g_autofree char *runtime = resolve_executable("__ACTION_EXECUTABLE__");
-  const char *argv[] = { runtime, __ACTION_ARGUMENTS__ "__DEFAULT_ACTION_ID__", "{}", NULL };
-  return run_runtime_command(argv);
-}
-
-static char *run_runtime_command(const char *argv[]) {
-  g_autoptr(GError) error = NULL;
-  g_autoptr(GSubprocess) process = g_subprocess_newv(
-      argv,
-      G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_PIPE,
-      &error);
-  if (process == NULL) {
-    return g_strdup(error != NULL ? error->message : "could not start runtime command");
-  }
-  char *stdout_text = NULL;
-  char *stderr_text = NULL;
-  if (!g_subprocess_communicate_utf8(process, NULL, NULL, &stdout_text, &stderr_text, &error)) {
-    g_free(stdout_text);
-    g_free(stderr_text);
-    return g_strdup(error != NULL ? error->message : "runtime command failed");
-  }
-  if (!g_subprocess_get_successful(process)) {
-    g_free(stdout_text);
-    return stderr_text != NULL ? stderr_text : g_strdup("runtime command exited unsuccessfully");
-  }
-  g_free(stderr_text);
-  return stdout_text;
-}
-
-static void refresh_state(GtkButton *button, gpointer user_data) {
-  (void)button;
-  GtkLabel *label = GTK_LABEL(user_data);
-  g_autofree char *state = load_runtime_state();
-  gtk_label_set_text(label, state);
-}
-
-static void refresh_status(GtkButton *button, gpointer user_data) {
-  (void)button;
-  GtkLabel *label = GTK_LABEL(user_data);
-  g_autofree char *state = load_runtime_status();
-  gtk_label_set_text(label, state);
-}
-
-static void subscribe_status(GtkButton *button, gpointer user_data) {
-  (void)button;
-  GtkLabel *label = GTK_LABEL(user_data);
-  g_autofree char *state = subscribe_runtime_status();
-  gtk_label_set_text(label, state);
-}
-
-static void run_action(GtkButton *button, gpointer user_data) {
-  (void)button;
-  GtkLabel *label = GTK_LABEL(user_data);
-  g_autofree char *state = run_default_action();
-  gtk_label_set_text(label, state);
-}
-
-static void activate(GtkApplication *app, gpointer user_data) {
-  (void)user_data;
-  GtkWidget *window = gtk_application_window_new(app);
-  GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
-  GtkWidget *contract = gtk_label_new("State: __STATE_COMMAND_TEXT__\nStatus: __STATUS_COMMAND_TEXT__\nSubscribe: __SUBSCRIBE_STATUS_COMMAND_TEXT__\nOperation status: __OPERATION_STATUS_COMMAND_TEXT__\nAction: __ACTION_COMMAND_TEXT__\nHistory: __HISTORY_COMMAND_TEXT__\nDaemon: __DAEMON_COMMAND_TEXT__\nSurface action contracts: __ACTION_CONTRACT_IDS__");
-  GtkWidget *button_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-  GtkWidget *button = gtk_button_new_with_label("State");
-  GtkWidget *status_button = gtk_button_new_with_label("Status");
-  GtkWidget *subscribe_button = gtk_button_new_with_label("Subscribe");
-  GtkWidget *action_button = gtk_button_new_with_label("Action");
-  GtkWidget *label = gtk_label_new("Runtime state not loaded.");
-  gtk_window_set_title(GTK_WINDOW(window), "__APP_NAME__");
-  gtk_window_set_default_size(GTK_WINDOW(window), 960, 640);
-  gtk_label_set_xalign(GTK_LABEL(contract), 0.0);
-  gtk_label_set_wrap(GTK_LABEL(contract), TRUE);
-  gtk_label_set_xalign(GTK_LABEL(label), 0.0);
-  gtk_label_set_wrap(GTK_LABEL(label), TRUE);
-  gtk_box_append(GTK_BOX(button_box), button);
-  gtk_box_append(GTK_BOX(button_box), status_button);
-  gtk_box_append(GTK_BOX(button_box), subscribe_button);
-  gtk_box_append(GTK_BOX(button_box), action_button);
-  gtk_box_append(GTK_BOX(box), contract);
-  gtk_box_append(GTK_BOX(box), button_box);
-  gtk_box_append(GTK_BOX(box), label);
-  gtk_window_set_child(GTK_WINDOW(window), box);
-  g_signal_connect(button, "clicked", G_CALLBACK(refresh_state), label);
-  g_signal_connect(status_button, "clicked", G_CALLBACK(refresh_status), label);
-  g_signal_connect(subscribe_button, "clicked", G_CALLBACK(subscribe_status), label);
-  g_signal_connect(action_button, "clicked", G_CALLBACK(run_action), label);
-  refresh_state(GTK_BUTTON(button), label);
-  gtk_window_present(GTK_WINDOW(window));
-}
-
-int main(int argc, char **argv) {
-  GtkApplication *app = gtk_application_new("app.theurgy.__APP_ID__", G_APPLICATION_DEFAULT_FLAGS);
-  g_signal_connect(app, "activate", G_CALLBACK(activate), NULL);
-  int status = g_application_run(G_APPLICATION(app), argc, argv);
-  g_object_unref(app);
-  return status;
-}
-"#;
-    template
-        .replace("__APP_NAME__", &c_escape(&summary.app_name))
-        .replace("__APP_ID__", &c_escape(&summary.app_id.replace('-', "_")))
-        .replace("__STATE_EXECUTABLE__", &c_escape(&executable))
-        .replace("__STATE_ARGUMENTS__", &arguments)
-        .replace("__STATUS_EXECUTABLE__", &c_escape(&status_executable))
-        .replace("__STATUS_ARGUMENTS__", &status_arguments)
-        .replace(
-            "__SUBSCRIBE_STATUS_EXECUTABLE__",
-            &c_escape(&subscribe_status_executable),
-        )
-        .replace(
-            "__SUBSCRIBE_STATUS_ARGUMENTS__",
-            &subscribe_status_arguments,
-        )
-        .replace("__ACTION_EXECUTABLE__", &c_escape(&action_executable))
-        .replace("__ACTION_ARGUMENTS__", &action_arguments)
-        .replace("__DEFAULT_ACTION_ID__", &c_escape(&default_action_id))
-        .replace(
-            "__STATE_COMMAND_TEXT__",
-            &c_escape(&runtime.state_command.join(" ")),
-        )
-        .replace(
-            "__STATUS_COMMAND_TEXT__",
-            &c_escape(&runtime.status_command.join(" ")),
-        )
-        .replace(
-            "__SUBSCRIBE_STATUS_COMMAND_TEXT__",
-            &c_escape(&subscribe_status_text),
-        )
-        .replace(
-            "__OPERATION_STATUS_COMMAND_TEXT__",
-            &c_escape(&operation_status_text),
-        )
-        .replace("__ACTION_COMMAND_TEXT__", &c_escape(&action_text))
-        .replace("__HISTORY_COMMAND_TEXT__", &c_escape(&history_text))
-        .replace("__DAEMON_COMMAND_TEXT__", &c_escape(&daemon_text))
-        .replace(
-            "__ACTION_CONTRACTS_JSON__",
-            &c_escape(&action_contracts_json),
-        )
-        .replace(
-            "__ACTION_CONTRACT_IDS__",
-            &c_escape(
-                &action_contracts
-                    .iter()
-                    .map(|contract| contract.id.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            ),
-        )
+    Ok(())
 }
 
 fn compile_ios(
