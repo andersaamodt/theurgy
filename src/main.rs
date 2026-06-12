@@ -2496,6 +2496,12 @@ mod tests {
                 .and_then(Value::as_str),
             Some("mobile")
         );
+        assert_eq!(
+            mobile_schema
+                .pointer("/$defs/screen/properties/actions/$ref")
+                .and_then(Value::as_str),
+            Some("#/$defs/actionIdList")
+        );
     }
 
     #[test]
@@ -2570,6 +2576,21 @@ mod tests {
                 .pointer("/properties/productDomainObjectContracts/items/$ref")
                 .and_then(Value::as_str),
             Some("#/$defs/domainObjectContract")
+        );
+        assert_eq!(
+            schema
+                .pointer("/$defs/mobileScreenContract/required")
+                .and_then(Value::as_array)
+                .map(|values| values.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
+            Some(vec![
+                "id", "title", "nodeId", "nodeType", "roles", "actions"
+            ])
+        );
+        assert_eq!(
+            schema
+                .pointer("/$defs/mobileScreenContract/properties/actions/$ref")
+                .and_then(Value::as_str),
+            Some("#/$defs/actionIdList")
         );
         assert_eq!(
             schema

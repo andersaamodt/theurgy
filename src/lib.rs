@@ -345,6 +345,7 @@ pub mod product_runtime {
         pub node_type: String,
         pub role: Option<String>,
         pub roles: Vec<String>,
+        pub action_ids: Vec<String>,
     }
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1815,6 +1816,18 @@ pub mod product_runtime {
                 }
             })
         } else if is_mobile_target(target) {
+            let overview_actions = product
+                .action_contracts
+                .iter()
+                .filter(|action| action.safe || action.effect == "read")
+                .map(|action| action.id.clone())
+                .collect::<Vec<_>>();
+            let detail_actions = product
+                .action_contracts
+                .iter()
+                .filter(|action| action.mutating || action.long_running)
+                .map(|action| action.id.clone())
+                .collect::<Vec<_>>();
             serde_json::json!({
                 "version": MOBILE_SURFACE_IR_SCHEMA,
                 "format": "json",
@@ -1825,6 +1838,7 @@ pub mod product_runtime {
                     {
                         "id": "overview",
                         "title": product.app_name,
+                        "actions": overview_actions,
                         "node": {
                             "id": "screen.overview",
                             "type": "NavigationStack",
@@ -1834,6 +1848,7 @@ pub mod product_runtime {
                     {
                         "id": "detail",
                         "title": "Detail",
+                        "actions": detail_actions,
                         "node": {
                             "id": "screen.detail",
                             "type": "Screen",
@@ -3284,6 +3299,28 @@ pub mod product_runtime {
                 )));
             }
         }
+        for screen in &surface.mobile_screens {
+            for action_id in &screen.action_ids {
+                if !surface
+                    .action_ids
+                    .iter()
+                    .any(|surface_action| surface_action == action_id)
+                {
+                    return Err(ContractError::new(format!(
+                        "mobile surface screen action not declared in surface IR actions: {action_id}"
+                    )));
+                }
+                if !product
+                    .action_ids
+                    .iter()
+                    .any(|product_action| product_action == action_id)
+                {
+                    return Err(ContractError::new(format!(
+                        "mobile surface screen action not declared in Product IR: {action_id}"
+                    )));
+                }
+            }
+        }
         Ok(())
     }
 
@@ -3415,6 +3452,7 @@ pub mod product_runtime {
                         object.insert("role".to_string(), Value::String(role.clone()));
                     }
                     object.insert("roles".to_string(), string_vec_value(&screen.roles));
+                    object.insert("actions".to_string(), string_vec_value(&screen.action_ids));
                     Value::Object(object)
                 })
                 .collect(),
@@ -4159,6 +4197,7 @@ struct MobileScreenContract {
   let nodeType: String
   let role: String?
   let roles: [String]
+  let actions: [String]
 }
 
 struct RuntimeContract {
@@ -4313,6 +4352,15 @@ struct RuntimeContract {
     }
     return String(data: data, encoding: .utf8) ?? "{}"
   }
+
+  func actionContracts(for screen: MobileScreenContract) -> [ProductActionContract] {
+    if screen.actions.isEmpty {
+      return []
+    }
+    return actionContracts.filter { action in
+      screen.actions.contains(action.id)
+    }
+  }
 }
 
 struct RuntimeContractView: View {
@@ -4342,6 +4390,7 @@ struct MobileSurfaceScreenView: View {
           Text("Node: \(screen.nodeId)")
           Text("Role: \(screen.role ?? "none")")
           Text("Roles: \(screen.roles.joined(separator: ", "))")
+          Text("Actions: \(screen.actions.joined(separator: ", "))")
         }
         Section("Runtime") {
           Text(contract.protocolName)
@@ -4383,6 +4432,7 @@ struct MobileSurfaceScreenView: View {
               Text("Node: \(screen.nodeId)")
               Text("Role: \(screen.role ?? "none")")
               Text("Roles: \(screen.roles.joined(separator: ", "))")
+              Text("Actions: \(screen.actions.joined(separator: ", "))")
             }
           }
         }
@@ -4393,7 +4443,7 @@ struct MobileSurfaceScreenView: View {
         }
 __MOBILE_WORKFLOW_SECTION__
         Section("Actions") {
-          ForEach(contract.actionContracts, id: \.id) { action in
+          ForEach(contract.actionContracts(for: screen), id: \.id) { action in
             VStack(alignment: .leading) {
               Text(action.label)
               Text(action.effect)
@@ -4566,14 +4616,16 @@ public final class MainActivity extends Activity {
     final String nodeType;
     final String role;
     final String[] roles;
+    final String[] actions;
 
-    MobileScreenContract(String id, String title, String nodeId, String nodeType, String role, String[] roles) {
+    MobileScreenContract(String id, String title, String nodeId, String nodeType, String role, String[] roles, String[] actions) {
       this.id = id;
       this.title = title;
       this.nodeId = nodeId;
       this.nodeType = nodeType;
       this.role = role;
       this.roles = roles;
+      this.actions = actions;
     }
   }
 
@@ -4835,7 +4887,7 @@ public final class MainActivity extends Activity {
     ScrollView scroll = new ScrollView(this);
     scroll.addView(view);
     root.addView(scroll);
-    MobileScreenContract initialScreen = SCREEN_CONTRACTS.length > 0 ? SCREEN_CONTRACTS[0] : new MobileScreenContract("runtime", "__APP_NAME__", "runtime", "Screen", null, new String[] {});
+    MobileScreenContract initialScreen = SCREEN_CONTRACTS.length > 0 ? SCREEN_CONTRACTS[0] : new MobileScreenContract("runtime", "__APP_NAME__", "runtime", "Screen", null, new String[] {}, new String[] {});
     view.setText(renderScreenText(initialScreen, runtimeMetadata, surfaceMetadata, runtimeApp, runtimeStateRequestSchema, runtimeStatusRequestSchema, runtimeSubscribeStatusRequestSchema, operationStatusRequestSchema, operationHistoryRequestSchema));
     setContentView(root);
   }
@@ -4846,6 +4898,7 @@ public final class MainActivity extends Activity {
       .append("\nScreen node: ").append(activeScreen.nodeId)
       .append("\nScreen role: ").append(activeScreen.role == null ? "none" : activeScreen.role)
       .append("\nScreen roles: ").append(String.join(", ", activeScreen.roles))
+      .append("\nScreen actions: ").append(String.join(", ", activeScreen.actions))
       .append("\nRuntime: ").append(PROTOCOL)
       .append("\nRuntime app: ").append(runtimeApp)
       .append("\nRuntime target: ").append(jsonString(runtimeMetadata, "target"))
@@ -4873,7 +4926,8 @@ public final class MainActivity extends Activity {
       text.append("\n").append(screen.title).append(" [").append(screen.nodeType).append("]")
         .append("\n  node: ").append(screen.nodeId)
         .append("\n  role: ").append(screen.role == null ? "none" : screen.role)
-        .append("\n  roles: ").append(String.join(", ", screen.roles));
+        .append("\n  roles: ").append(String.join(", ", screen.roles))
+        .append("\n  actions: ").append(String.join(", ", screen.actions));
     }
     text
 __MOBILE_WORKFLOW_TEXT__
@@ -4891,12 +4945,24 @@ __MOBILE_WORKFLOW_TEXT__
       .append("\nDaemon: ").append(String.join(" ", DAEMON_COMMAND))
       .append("\nActions:");
     for (ProductActionContract action : ACTION_CONTRACTS) {
+      if (!screenAllowsAction(activeScreen, action.id)) {
+        continue;
+      }
       JSONObject params = defaultParams(action);
       text.append("\n").append(action.label).append(" [").append(action.effect).append("] ")
         .append(String.join(" ", commandFor(action, params.toString())))
         .append("\n  envelope: ").append(actionEnvelope(runtimeApp, runtimeActionRequestSchema, action, params));
     }
     return text.toString();
+  }
+
+  private static boolean screenAllowsAction(MobileScreenContract screen, String actionId) {
+    for (String allowed : screen.actions) {
+      if (allowed.equals(actionId)) {
+        return true;
+      }
+    }
+    return false;
   }
 }
 "#;
@@ -5286,13 +5352,14 @@ struct TheurgyNativeApp: App {
                     .map(|role| format!("\"{}\"", swift_escape(role)))
                     .unwrap_or_else(|| "nil".to_string());
                 format!(
-                    "MobileScreenContract(id: \"{}\", title: \"{}\", nodeId: \"{}\", nodeType: \"{}\", role: {}, roles: {})",
+                    "MobileScreenContract(id: \"{}\", title: \"{}\", nodeId: \"{}\", nodeType: \"{}\", role: {}, roles: {}, actions: {})",
                     swift_escape(&screen.id),
                     swift_escape(&screen.title),
                     swift_escape(&screen.node_id),
                     swift_escape(&screen.node_type),
                     role,
                     swift_string_array_literal(&screen.roles),
+                    swift_string_array_literal(&screen.action_ids),
                 )
             })
             .collect::<Vec<_>>()
@@ -5372,13 +5439,14 @@ struct TheurgyNativeApp: App {
                     .map(|role| format!("\"{}\"", java_escape(role)))
                     .unwrap_or_else(|| "null".to_string());
                 format!(
-                    "new MobileScreenContract(\"{}\", \"{}\", \"{}\", \"{}\", {}, {})",
+                    "new MobileScreenContract(\"{}\", \"{}\", \"{}\", \"{}\", {}, {}, {})",
                     java_escape(&screen.id),
                     java_escape(&screen.title),
                     java_escape(&screen.node_id),
                     java_escape(&screen.node_type),
                     role,
                     java_string_array_literal(&screen.roles),
+                    java_string_array_literal(&screen.action_ids),
                 )
             })
             .collect::<Vec<_>>()
@@ -5613,6 +5681,11 @@ struct TheurgyNativeApp: App {
                 "generated runtime mobile screen contract roles must be a string array",
             )
         })?;
+        value_string_array(contract, "actions").map_err(|_| {
+            ContractError::new(
+                "generated runtime mobile screen contract actions must be a string array",
+            )
+        })?;
         Ok(id)
     }
 
@@ -5678,6 +5751,7 @@ struct TheurgyNativeApp: App {
         collect_surface_roles(node, &mut roles);
         roles.sort();
         roles.dedup();
+        let action_ids = surface_action_ids(screen)?;
         Ok(MobileScreenContract {
             id,
             title,
@@ -5685,6 +5759,7 @@ struct TheurgyNativeApp: App {
             node_type,
             role,
             roles,
+            action_ids,
         })
     }
 
@@ -6979,6 +7054,7 @@ binary = "deployments-core"
             "screens": [{
                 "id": "overview",
                 "title": "Deployments",
+                "actions": ["refresh_state"],
                 "node": {
                     "id": "screen.overview",
                     "type": "NavigationStack",
@@ -6989,6 +7065,10 @@ binary = "deployments-core"
         let mobile = product_runtime::validate_surface_ir_value(&mobile).unwrap();
         assert_eq!(mobile.schema, product_runtime::MOBILE_SURFACE_IR_SCHEMA);
         assert_eq!(mobile.roles, vec!["status-overview".to_string()]);
+        assert_eq!(
+            mobile.mobile_screens[0].action_ids,
+            vec!["refresh_state".to_string()]
+        );
 
         let invalid = serde_json::json!({
             "version": product_runtime::MOBILE_SURFACE_IR_SCHEMA,
@@ -7002,6 +7082,42 @@ binary = "deployments-core"
             .unwrap_err()
             .to_string();
         assert_eq!(error, "mobile surface IR target invalid");
+
+        let product = serde_json::json!({
+            "version": product_runtime::PRODUCT_IR_SCHEMA,
+            "format": "json",
+            "app": {
+                "id": "deployments",
+                "name": "Deployments",
+                "targets": ["ios"]
+            },
+            "actions": [{
+                "id": "refresh_state",
+                "label": "Refresh",
+                "input": {},
+                "output": {},
+                "effect": "read",
+                "failure": {},
+                "safe": true,
+                "mutating": false,
+                "longRunning": false,
+                "privileged": false
+            }],
+            "state": {"snapshotSchema": "deployments-state/v1"},
+            "releaseTargets": [
+                {"id": "ios-native", "target": "ios", "surface": "mobile", "artifact": "generated/mobile/ios"}
+            ]
+        });
+        let product = product_runtime::validate_product_ir_value(&product).unwrap();
+        let mut invalid_mobile = mobile.clone();
+        invalid_mobile.mobile_screens[0].action_ids = vec!["publish_changes".to_string()];
+        let error = product_runtime::validate_surface_contract(&product, &invalid_mobile)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            "mobile surface screen action not declared in surface IR actions: publish_changes"
+        );
     }
 
     #[test]
@@ -7084,6 +7200,8 @@ binary = "deployments-core"
         .unwrap();
         assert!(mobile_text.contains("\"version\": \"theurgy-mobile-surface-ir/v1\""));
         assert!(mobile_text.contains("\"role\": \"status-overview\""));
+        assert!(mobile_text.contains("\"actions\": ["));
+        assert!(mobile_text.contains("\"refresh_state\""));
 
         let error = product_runtime::project_surface_from_product(&product, "android")
             .unwrap_err()

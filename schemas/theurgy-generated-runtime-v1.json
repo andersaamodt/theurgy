@@ -281,14 +281,15 @@
     },
     "mobileScreenContract": {
       "type": "object",
-      "required": ["id", "title", "nodeId", "nodeType", "roles"],
+      "required": ["id", "title", "nodeId", "nodeType", "roles", "actions"],
       "properties": {
         "id": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" },
         "title": { "type": "string", "minLength": 1 },
         "nodeId": { "type": "string", "minLength": 1 },
         "nodeType": { "type": "string", "minLength": 1 },
         "role": { "type": "string", "minLength": 1 },
-        "roles": { "$ref": "#/$defs/stringList" }
+        "roles": { "$ref": "#/$defs/stringList" },
+        "actions": { "$ref": "#/$defs/actionIdList" }
       },
       "additionalProperties": false
     },

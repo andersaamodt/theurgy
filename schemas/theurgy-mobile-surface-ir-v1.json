@@ -19,9 +19,14 @@
       "properties": {
         "id": { "type": "string", "minLength": 1 },
         "title": { "type": "string", "minLength": 1 },
+        "actions": { "$ref": "#/$defs/actionIdList" },
         "node": { "type": "object" }
       },
       "additionalProperties": true
+    },
+    "actionIdList": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]*$" }
     }
   },
   "additionalProperties": true
