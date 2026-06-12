@@ -4111,7 +4111,20 @@ mod tests {
         assert!(ios.contains("runtimeString(runtimeMetadata, key: \"operationStatusSchema\")"));
         assert!(ios.contains("runtimeString(runtimeMetadata, key: \"operationHistorySchema\")"));
         assert!(ios.contains("runtimeStringArray(runtimeMetadata, key: \"surfaceActions\")"));
+        assert!(
+            ios.contains("runtimeStringArray(runtimeMetadata, key: \"productStateProjections\")")
+        );
+        assert!(ios.contains(
+            "runtimeObjectSummaries(runtimeMetadata, key: \"productDomainObjectContracts\", fields: [\"label\", \"source\"])"
+        ));
+        assert!(ios.contains(
+            "runtimeObjectSummaries(runtimeMetadata, key: \"productPersistenceRootContracts\", fields: [\"kind\", \"path\"])"
+        ));
+        assert!(ios.contains(
+            "runtimeObjectSummaries(runtimeMetadata, key: \"productReleaseTargetContracts\", fields: [\"target\", \"surface\", \"artifact\"])"
+        ));
         assert!(ios.contains("func surfaceScreens(_ json: String) -> [String]"));
+        assert!(ios.contains("func runtimeObjectSummaries(_ json: String, key: String, fields: [String]) -> [String]"));
         assert!(ios.contains("contractObject(json)?[\"screens\"] as? [[String: Any]]"));
         assert!(ios.contains(
             "var surfaceSchema: String { runtimeString(surfaceMetadata, key: \"version\") }"
@@ -4133,9 +4146,16 @@ mod tests {
         assert!(ios.contains("Operation status schema: \\(contract.operationStatusSchema)"));
         assert!(ios.contains("Operation history schema: \\(contract.operationHistorySchema)"));
         assert!(ios.contains("Runtime surface actions: \\(contract.runtimeSurfaceActions.joined"));
+        assert!(
+            ios.contains("Product state projections: \\(contract.productStateProjections.joined")
+        );
         assert!(ios.contains("Surface schema: \\(contract.surfaceSchema)"));
         assert!(ios.contains("Surface target: \\(contract.surfaceTarget)"));
         assert!(ios.contains("Surface screens: \\(contract.surfaceScreens.joined"));
+        assert!(ios.contains("Section(\"Product\")"));
+        assert!(ios.contains("Domain objects: \\(contract.productDomainObjects.joined"));
+        assert!(ios.contains("Persistence roots: \\(contract.productPersistenceRoots.joined"));
+        assert!(ios.contains("Release targets: \\(contract.productReleaseTargets.joined"));
         assert!(ios.contains("Section(\"Mobile Workflow\")"));
         assert!(ios.contains("Text(\"status-overview\")"));
         assert!(ios.contains("Text(\"focused-action-detail\")"));
@@ -4276,7 +4296,20 @@ mod tests {
         assert!(android.contains("jsonString(runtimeMetadata, \"operationStatusSchema\")"));
         assert!(android.contains("jsonString(runtimeMetadata, \"operationHistorySchema\")"));
         assert!(android.contains("jsonStringArray(runtimeMetadata, \"surfaceActions\")"));
+        assert!(android.contains("jsonStringArray(runtimeMetadata, \"productStateProjections\")"));
+        assert!(android.contains(
+            "jsonObjectArraySummary(runtimeMetadata, \"productDomainObjectContracts\", new String[] {\"label\", \"source\"})"
+        ));
+        assert!(android.contains(
+            "jsonObjectArraySummary(runtimeMetadata, \"productPersistenceRootContracts\", new String[] {\"kind\", \"path\"})"
+        ));
+        assert!(android.contains(
+            "jsonObjectArraySummary(runtimeMetadata, \"productReleaseTargetContracts\", new String[] {\"target\", \"surface\", \"artifact\"})"
+        ));
         assert!(android.contains("private static String surfaceScreens(String json)"));
+        assert!(android.contains(
+            "private static String jsonObjectArraySummary(String json, String key, String[] fields)"
+        ));
         assert!(android.contains("new JSONObject(json).optJSONArray(\"screens\")"));
         assert!(android.contains("screen.optString(\"title\", id)"));
         assert!(android.contains("Runtime app: "));
@@ -4288,6 +4321,10 @@ mod tests {
         assert!(android.contains("Operation status schema: "));
         assert!(android.contains("Operation history schema: "));
         assert!(android.contains("Runtime surface actions: "));
+        assert!(android.contains("Product state projections: "));
+        assert!(android.contains("Product domain objects: "));
+        assert!(android.contains("Product persistence roots: "));
+        assert!(android.contains("Product release targets: "));
         assert!(android.contains("Surface schema: "));
         assert!(android.contains("Surface target: "));
         assert!(android.contains("Surface screens: "));

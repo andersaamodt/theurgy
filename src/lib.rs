@@ -3646,6 +3646,22 @@ func surfaceScreens(_ json: String) -> [String] {
   }
 }
 
+func runtimeObjectSummaries(_ json: String, key: String, fields: [String]) -> [String] {
+  guard let objects = contractObject(json)?[key] as? [[String: Any]] else {
+    return []
+  }
+  return objects.compactMap { object in
+    guard let id = object["id"] as? String else {
+      return nil
+    }
+    let values = fields.compactMap { field in object[field] as? String }
+    if values.isEmpty {
+      return id
+    }
+    return "\(id): \(values.joined(separator: " / "))"
+  }
+}
+
 struct ProductActionContract {
   let id: String
   let label: String
@@ -3674,6 +3690,10 @@ struct RuntimeContract {
   var operationStatusSchema: String { runtimeString(runtimeMetadata, key: "operationStatusSchema") }
   var operationHistorySchema: String { runtimeString(runtimeMetadata, key: "operationHistorySchema") }
   var runtimeSurfaceActions: [String] { runtimeStringArray(runtimeMetadata, key: "surfaceActions") }
+  var productStateProjections: [String] { runtimeStringArray(runtimeMetadata, key: "productStateProjections") }
+  var productDomainObjects: [String] { runtimeObjectSummaries(runtimeMetadata, key: "productDomainObjectContracts", fields: ["label", "source"]) }
+  var productPersistenceRoots: [String] { runtimeObjectSummaries(runtimeMetadata, key: "productPersistenceRootContracts", fields: ["kind", "path"]) }
+  var productReleaseTargets: [String] { runtimeObjectSummaries(runtimeMetadata, key: "productReleaseTargetContracts", fields: ["target", "surface", "artifact"]) }
   var surfaceSchema: String { runtimeString(surfaceMetadata, key: "version") }
   var surfaceTarget: String { runtimeString(surfaceMetadata, key: "target") }
   var surfaceScreens: [String] { surfaceScreens(surfaceMetadata) }
@@ -3754,6 +3774,7 @@ struct RuntimeContractView: View {
           Text("Operation status schema: \(contract.operationStatusSchema)")
           Text("Operation history schema: \(contract.operationHistorySchema)")
           Text("Runtime surface actions: \(contract.runtimeSurfaceActions.joined(separator: ", "))")
+          Text("Product state projections: \(contract.productStateProjections.joined(separator: ", "))")
           Text(contract.stateCommand.joined(separator: " "))
           Text(contract.statusCommand.joined(separator: " "))
           Text(contract.subscribeStatusCommand.joined(separator: " "))
@@ -3766,6 +3787,11 @@ struct RuntimeContractView: View {
           Text("Surface schema: \(contract.surfaceSchema)")
           Text("Surface target: \(contract.surfaceTarget)")
           Text("Surface screens: \(contract.surfaceScreens.joined(separator: ", "))")
+        }
+        Section("Product") {
+          Text("Domain objects: \(contract.productDomainObjects.joined(separator: ", "))")
+          Text("Persistence roots: \(contract.productPersistenceRoots.joined(separator: ", "))")
+          Text("Release targets: \(contract.productReleaseTargets.joined(separator: ", "))")
         }
 __MOBILE_WORKFLOW_SECTION__
         Section("Actions") {
@@ -4050,6 +4076,46 @@ public final class MainActivity extends Activity {
     }
   }
 
+  private static String jsonObjectArraySummary(String json, String key, String[] fields) {
+    try {
+      JSONArray values = new JSONObject(json).optJSONArray(key);
+      if (values == null) {
+        return "";
+      }
+      StringBuilder text = new StringBuilder();
+      for (int i = 0; i < values.length(); i += 1) {
+        JSONObject object = values.optJSONObject(i);
+        if (object == null) {
+          continue;
+        }
+        String id = object.optString("id");
+        if (id.isEmpty()) {
+          continue;
+        }
+        if (text.length() > 0) {
+          text.append(", ");
+        }
+        text.append(id);
+        StringBuilder details = new StringBuilder();
+        for (String field : fields) {
+          String value = object.optString(field);
+          if (!value.isEmpty()) {
+            if (details.length() > 0) {
+              details.append(" / ");
+            }
+            details.append(value);
+          }
+        }
+        if (details.length() > 0) {
+          text.append(": ").append(details);
+        }
+      }
+      return text.toString();
+    } catch (JSONException error) {
+      return "";
+    }
+  }
+
   @Override public void onCreate(Bundle state) {
     super.onCreate(state);
     TextView view = new TextView(this);
@@ -4067,6 +4133,10 @@ public final class MainActivity extends Activity {
       .append("\nOperation status schema: ").append(jsonString(runtimeMetadata, "operationStatusSchema"))
       .append("\nOperation history schema: ").append(jsonString(runtimeMetadata, "operationHistorySchema"))
       .append("\nRuntime surface actions: ").append(jsonStringArray(runtimeMetadata, "surfaceActions"))
+      .append("\nProduct state projections: ").append(jsonStringArray(runtimeMetadata, "productStateProjections"))
+      .append("\nProduct domain objects: ").append(jsonObjectArraySummary(runtimeMetadata, "productDomainObjectContracts", new String[] {"label", "source"}))
+      .append("\nProduct persistence roots: ").append(jsonObjectArraySummary(runtimeMetadata, "productPersistenceRootContracts", new String[] {"kind", "path"}))
+      .append("\nProduct release targets: ").append(jsonObjectArraySummary(runtimeMetadata, "productReleaseTargetContracts", new String[] {"target", "surface", "artifact"}))
       .append("\nSurface schema: ").append(jsonString(surfaceMetadata, "version"))
       .append("\nSurface target: ").append(jsonString(surfaceMetadata, "target"))
       .append("\nSurface screens: ").append(surfaceScreens(surfaceMetadata))
