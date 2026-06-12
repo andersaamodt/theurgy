@@ -910,6 +910,7 @@ pub mod product_runtime {
                 "runtime manifest statusCommand must be non-empty",
             ));
         }
+        validate_runtime_command_items(&status_command, "runtime manifest statusCommand")?;
         let subscribe_status_command = optional_string_array(
             runtime,
             "subscribeStatusCommand",
@@ -920,6 +921,10 @@ pub mod product_runtime {
                 "runtime manifest subscribeStatusCommand must be non-empty",
             ));
         }
+        validate_runtime_command_items(
+            &subscribe_status_command,
+            "runtime manifest subscribeStatusCommand",
+        )?;
         let operation_status_command = optional_string_array(
             runtime,
             "operationStatusCommand",
@@ -930,6 +935,10 @@ pub mod product_runtime {
                 "runtime manifest operationStatusCommand must be non-empty",
             ));
         }
+        validate_runtime_command_items(
+            &operation_status_command,
+            "runtime manifest operationStatusCommand",
+        )?;
         let history_command =
             optional_string_array(runtime, "historyCommand", "runtime manifest historyCommand")?;
         if runtime.get("historyCommand").is_some() && history_command.is_empty() {
@@ -937,6 +946,7 @@ pub mod product_runtime {
                 "runtime manifest historyCommand must be non-empty",
             ));
         }
+        validate_runtime_command_items(&history_command, "runtime manifest historyCommand")?;
         let daemon_command =
             optional_string_array(runtime, "daemonCommand", "runtime manifest daemonCommand")?;
         if runtime.get("daemonCommand").is_some() && daemon_command.is_empty() {
@@ -944,6 +954,7 @@ pub mod product_runtime {
                 "runtime manifest daemonCommand must be non-empty",
             ));
         }
+        validate_runtime_command_items(&daemon_command, "runtime manifest daemonCommand")?;
         let protocol = value_string(runtime, "protocol")
             .filter(|protocol| !protocol.is_empty())
             .ok_or_else(|| ContractError::new("runtime manifest protocol required"))?;

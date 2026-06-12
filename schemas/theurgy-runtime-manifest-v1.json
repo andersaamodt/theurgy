@@ -44,7 +44,7 @@
   "$defs": {
     "command": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": { "type": "string", "minLength": 1 },
       "minItems": 1
     }
   },

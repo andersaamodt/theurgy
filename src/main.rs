@@ -2706,6 +2706,19 @@ mod tests {
     }
 
     #[test]
+    fn runtime_manifest_schema_rejects_empty_command_entries() {
+        let schema: Value =
+            serde_json::from_str(include_str!("../schemas/theurgy-runtime-manifest-v1.json"))
+                .unwrap();
+        assert_eq!(
+            schema
+                .pointer("/$defs/command/items/minLength")
+                .and_then(Value::as_u64),
+            Some(1)
+        );
+    }
+
+    #[test]
     fn runtime_action_result_schema_declares_operation_contract() {
         let schema: Value = serde_json::from_str(include_str!(
             "../schemas/theurgy-runtime-action-result-v1.json"
@@ -3222,6 +3235,28 @@ mod tests {
             .to_string();
         assert!(error.contains("stateCommand must contain strings"));
         let manifest = sample_runtime_manifest().replace(
+            "\"stateCommand\": [\"custom-core\", \"state\"]",
+            "\"stateCommand\": [\"custom-core\", \"\"]",
+        );
+        let error = runtime_contract_from_manifest(&manifest)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            "runtime manifest stateCommand must contain non-empty strings"
+        );
+        let manifest = sample_runtime_manifest().replace(
+            "\"actionCommand\": [\"custom-core\", \"action\"]",
+            "\"actionCommand\": [\"custom-core\", \"\"]",
+        );
+        let error = runtime_contract_from_manifest(&manifest)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            "runtime manifest actionCommand must contain non-empty strings"
+        );
+        let manifest = sample_runtime_manifest().replace(
             "\"desktop\": \"app-blueprint/desktop.surface.ir.json\"",
             "\"desktop\": []",
         );
@@ -3232,18 +3267,67 @@ mod tests {
     }
 
     #[test]
-    fn runtime_manifest_validation_rejects_empty_subscribe_status_command() {
-        let manifest = sample_runtime_manifest().replace(
-            "\"statusCommand\": [\"custom-core\", \"status\"]",
-            "\"statusCommand\": [\"custom-core\", \"status\"],\n    \"subscribeStatusCommand\": []",
-        );
-        let error = runtime_contract_from_manifest(&manifest)
-            .unwrap_err()
-            .to_string();
-        assert_eq!(
-            error,
-            "runtime manifest subscribeStatusCommand must be non-empty"
-        );
+    fn runtime_manifest_validation_rejects_empty_optional_commands() {
+        for (replacement, expected) in [
+            (
+                "\"statusCommand\": []",
+                "runtime manifest statusCommand must be non-empty",
+            ),
+            (
+                "\"statusCommand\": [\"custom-core\", \"status\"],\n    \"subscribeStatusCommand\": []",
+                "runtime manifest subscribeStatusCommand must be non-empty",
+            ),
+            (
+                "\"operationStatusCommand\": []",
+                "runtime manifest operationStatusCommand must be non-empty",
+            ),
+            (
+                "\"historyCommand\": []",
+                "runtime manifest historyCommand must be non-empty",
+            ),
+            (
+                "\"daemonCommand\": []",
+                "runtime manifest daemonCommand must be non-empty",
+            ),
+        ] {
+            let manifest = sample_runtime_manifest()
+                .replace("\"statusCommand\": [\"custom-core\", \"status\"]", replacement);
+            let error = runtime_contract_from_manifest(&manifest)
+                .unwrap_err()
+                .to_string();
+            assert_eq!(error, expected);
+        }
+    }
+
+    #[test]
+    fn runtime_manifest_validation_rejects_empty_optional_command_entries() {
+        for (replacement, expected) in [
+            (
+                "\"statusCommand\": [\"custom-core\", \"\"]",
+                "runtime manifest statusCommand must contain non-empty strings",
+            ),
+            (
+                "\"operationStatusCommand\": [\"custom-core\", \"\"]",
+                "runtime manifest operationStatusCommand must contain non-empty strings",
+            ),
+            (
+                "\"historyCommand\": [\"custom-core\", \"\"]",
+                "runtime manifest historyCommand must contain non-empty strings",
+            ),
+            (
+                "\"daemonCommand\": [\"\"]",
+                "runtime manifest daemonCommand must contain non-empty strings",
+            ),
+        ] {
+            let manifest = sample_runtime_manifest().replace(
+                "\"statusCommand\": [\"custom-core\", \"status\"]",
+                replacement,
+            );
+            let error = runtime_contract_from_manifest(&manifest)
+                .unwrap_err()
+                .to_string();
+            assert_eq!(error, expected);
+        }
     }
 
     #[test]
