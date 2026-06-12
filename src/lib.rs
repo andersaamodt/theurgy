@@ -3895,6 +3895,33 @@ struct RuntimeContract {
     }
     return String(data: data, encoding: .utf8) ?? "{}"
   }
+
+  func operationStatusEnvelope(for operationId: String) -> String {
+    let envelope: [String: Any] = [
+      "protocol": protocolName,
+      "app": runtimeApp,
+      "kind": "operation-status",
+      "operation": operationId
+    ]
+    guard let data = try? JSONSerialization.data(withJSONObject: envelope, options: [.sortedKeys]) else {
+      return "{}"
+    }
+    return String(data: data, encoding: .utf8) ?? "{}"
+  }
+
+  func operationHistoryEnvelope(for subject: String, limit: Int) -> String {
+    let envelope: [String: Any] = [
+      "protocol": protocolName,
+      "app": runtimeApp,
+      "kind": "operation-history",
+      "subject": subject,
+      "limit": limit
+    ]
+    guard let data = try? JSONSerialization.data(withJSONObject: envelope, options: [.sortedKeys]) else {
+      return "{}"
+    }
+    return String(data: data, encoding: .utf8) ?? "{}"
+  }
 }
 
 struct RuntimeContractView: View {
@@ -3919,8 +3946,10 @@ struct RuntimeContractView: View {
           Text(contract.statusCommand.joined(separator: " "))
           Text(contract.subscribeStatusCommand.joined(separator: " "))
           Text(contract.operationStatusCommand.joined(separator: " "))
+          Text(contract.operationStatusEnvelope(for: "default"))
           Text(contract.actionCommand.joined(separator: " "))
           Text(contract.historyCommand.joined(separator: " "))
+          Text(contract.operationHistoryEnvelope(for: "default", limit: 20))
           Text(contract.daemonCommand.joined(separator: " "))
         }
         Section("Surface") {
@@ -4149,6 +4178,33 @@ public final class MainActivity extends Activity {
     }
   }
 
+  private static String operationStatusEnvelope(String app, String operationId) {
+    try {
+      JSONObject envelope = new JSONObject();
+      envelope.put("protocol", PROTOCOL);
+      envelope.put("app", app);
+      envelope.put("kind", "operation-status");
+      envelope.put("operation", operationId);
+      return envelope.toString();
+    } catch (JSONException error) {
+      return "{}";
+    }
+  }
+
+  private static String operationHistoryEnvelope(String app, String subject, int limit) {
+    try {
+      JSONObject envelope = new JSONObject();
+      envelope.put("protocol", PROTOCOL);
+      envelope.put("app", app);
+      envelope.put("kind", "operation-history");
+      envelope.put("subject", subject);
+      envelope.put("limit", limit);
+      return envelope.toString();
+    } catch (JSONException error) {
+      return "{}";
+    }
+  }
+
   private String loadBundledContract(String name) {
     try (InputStream input = getAssets().open(name)) {
       ByteArrayOutputStream output = new ByteArrayOutputStream();
@@ -4285,8 +4341,10 @@ __MOBILE_WORKFLOW_TEXT__
       .append("\nStatus: ").append(String.join(" ", STATUS_COMMAND))
       .append("\nSubscribe: ").append(String.join(" ", SUBSCRIBE_STATUS_COMMAND))
       .append("\nOperation status: ").append(String.join(" ", OPERATION_STATUS_COMMAND))
+      .append("\nOperation status envelope: ").append(operationStatusEnvelope(runtimeApp, "default"))
       .append("\nAction: ").append(String.join(" ", ACTION_COMMAND))
       .append("\nHistory: ").append(String.join(" ", HISTORY_COMMAND))
+      .append("\nHistory envelope: ").append(operationHistoryEnvelope(runtimeApp, "default", 20))
       .append("\nDaemon: ").append(String.join(" ", DAEMON_COMMAND))
       .append("\nActions:");
     for (ProductActionContract action : ACTION_CONTRACTS) {
@@ -7072,6 +7130,18 @@ binary = "deployments-core"
             && file
                 .contents
                 .contains("func actionEnvelope(for action: ProductActionContract")
+            && file
+                .contents
+                .contains("func operationStatusEnvelope(for operationId: String) -> String")
+            && file.contents.contains(
+                "func operationHistoryEnvelope(for subject: String, limit: Int) -> String"
+            )
+            && file
+                .contents
+                .contains("Text(contract.operationStatusEnvelope(for: \"default\"))")
+            && file
+                .contents
+                .contains("Text(contract.operationHistoryEnvelope(for: \"default\", limit: 20))")
             && file.contents.contains("Section(\"Mobile Workflow\")")
             && file.contents.contains("Text(\"status-overview\")")
             && file.contents.contains("Text(\"focused-action-detail\")")));
@@ -7110,6 +7180,18 @@ binary = "deployments-core"
             && file
                 .contents
                 .contains("private static String actionEnvelope")
+            && file
+                .contents
+                .contains("private static String operationStatusEnvelope")
+            && file
+                .contents
+                .contains("private static String operationHistoryEnvelope")
+            && file
+                .contents
+                .contains("operationStatusEnvelope(runtimeApp, \"default\")")
+            && file
+                .contents
+                .contains("operationHistoryEnvelope(runtimeApp, \"default\", 20)")
             && file
                 .contents
                 .contains("Mobile workflow: status-overview, focused-action-detail")));
