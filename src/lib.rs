@@ -1245,7 +1245,7 @@ pub mod product_runtime {
         value_string(value, "productIr")
             .filter(|path| !path.is_empty())
             .ok_or_else(|| ContractError::new("generated runtime productIr required"))?;
-        value_string(value, "runtimeManifest")
+        let runtime_manifest = value_string(value, "runtimeManifest")
             .filter(|path| !path.is_empty())
             .ok_or_else(|| ContractError::new("generated runtime runtimeManifest required"))?;
         value_string(value, "sourceSurfaceIr")
@@ -1302,9 +1302,19 @@ pub mod product_runtime {
                     "generated runtime requestCommand required for local-process-json targets",
                 ));
             }
+            if request_command != ["theurgy-runtime".to_string(), "run-request".to_string()] {
+                return Err(ContractError::new(
+                    "generated runtime requestCommand must be theurgy-runtime run-request for local-process-json targets",
+                ));
+            }
             if request_command_manifest.is_none() {
                 return Err(ContractError::new(
                     "generated runtime requestCommandManifest required for local-process-json targets",
+                ));
+            }
+            if request_command_manifest.as_deref() != Some(runtime_manifest.as_str()) {
+                return Err(ContractError::new(
+                    "generated runtime requestCommandManifest must match runtimeManifest",
                 ));
             }
         } else if !request_command.is_empty() || request_command_manifest.is_some() {
@@ -7605,6 +7615,32 @@ binary = "deployments-core"
         assert_eq!(
             error,
             "generated runtime adapterRuntimeTransport must match target family"
+        );
+
+        let mut invalid = runtime.clone();
+        invalid.as_object_mut().unwrap().insert(
+            "requestCommand".to_string(),
+            serde_json::json!(["custom-runtime", "run-request"]),
+        );
+        let error = product_runtime::validate_generated_runtime_value(&invalid)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            "generated runtime requestCommand must be theurgy-runtime run-request for local-process-json targets"
+        );
+
+        let mut invalid = runtime.clone();
+        invalid.as_object_mut().unwrap().insert(
+            "requestCommandManifest".to_string(),
+            serde_json::json!("other-runtime.manifest.json"),
+        );
+        let error = product_runtime::validate_generated_runtime_value(&invalid)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            "generated runtime requestCommandManifest must match runtimeManifest"
         );
     }
 

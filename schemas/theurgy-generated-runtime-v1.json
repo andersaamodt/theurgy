@@ -165,6 +165,9 @@
       "then": {
         "properties": {
           "adapterRuntimeTransport": { "const": "local-process-json" },
+          "requestCommand": {
+            "const": ["theurgy-runtime", "run-request"]
+          },
           "surfaceSchema": { "const": "theurgy-desktop-surface-ir/v1" },
           "surfaceTarget": { "enum": ["desktop", "macos", "linux"] },
           "surfaceScreens": { "maxItems": 0 },

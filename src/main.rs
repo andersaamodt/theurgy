@@ -3040,6 +3040,13 @@ mod tests {
         );
         assert_eq!(
             schema
+                .pointer("/allOf/0/then/properties/requestCommand/const")
+                .and_then(Value::as_array)
+                .map(|values| values.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
+            Some(vec!["theurgy-runtime", "run-request"])
+        );
+        assert_eq!(
+            schema
                 .pointer("/allOf/0/then/required")
                 .and_then(Value::as_array)
                 .map(|values| values.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
