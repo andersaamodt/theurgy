@@ -62,7 +62,8 @@
     "actions": {
       "type": "array",
       "items": { "$ref": "#/$defs/action" },
-      "minItems": 1
+      "minItems": 1,
+      "uniqueItems": true
     },
     "state": {
       "type": "object",

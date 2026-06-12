@@ -1720,6 +1720,7 @@ pub mod product_runtime {
             action_ids.push(contract.id.clone());
             action_contracts.push(contract);
         }
+        validate_unique_ids(&action_ids, "product IR action.id")?;
         let state = value_object(value, "state")?;
         let state_snapshot_schema = value_string(state, "snapshotSchema")
             .filter(|schema| !schema.is_empty())
@@ -2808,6 +2809,7 @@ pub mod product_runtime {
             action_ids.push(contract.id.clone());
             action_contracts.push(contract);
         }
+        validate_unique_ids(&action_ids, "action IR action.id")?;
         Ok(ActionIr {
             actions: action_values.len(),
             action_ids,
@@ -5888,6 +5890,7 @@ struct TheurgyNativeApp: App {
             }
             action_ids.push(action_id.to_string());
         }
+        validate_unique_ids(&action_ids, "surface IR action")?;
         Ok(action_ids)
     }
 
@@ -5973,6 +5976,16 @@ struct TheurgyNativeApp: App {
                 }
             }
             _ => {}
+        }
+        Ok(())
+    }
+
+    fn validate_unique_ids(values: &[String], label: &str) -> ContractResult<()> {
+        let mut ids = BTreeSet::new();
+        for value in values {
+            if !ids.insert(value) {
+                return Err(ContractError::new(format!("{label} duplicated: {value}")));
+            }
         }
         Ok(())
     }
@@ -7398,6 +7411,23 @@ binary = "deployments-core"
             error,
             "desktop surface node.actions item not declared in surface actions: publish_changes"
         );
+
+        let invalid_desktop_duplicate_action = serde_json::json!({
+            "version": product_runtime::DESKTOP_SURFACE_IR_SCHEMA,
+            "format": "json",
+            "product": "deployments",
+            "target": "desktop",
+            "actions": ["refresh_state", "refresh_state"],
+            "window": {
+                "id": "window.main",
+                "type": "Window",
+                "role": "native-product-root"
+            }
+        });
+        let error = product_runtime::validate_surface_ir_value(&invalid_desktop_duplicate_action)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(error, "surface IR action duplicated: refresh_state");
 
         let invalid_desktop_role = serde_json::json!({
             "version": product_runtime::DESKTOP_SURFACE_IR_SCHEMA,

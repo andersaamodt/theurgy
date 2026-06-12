@@ -2375,6 +2375,12 @@ mod tests {
         );
         let error = validate_product_ir(&product).unwrap_err().to_string();
         assert!(error.contains("releaseTargets missing release target for app target: linux"));
+        let product = sample_product().replace(
+            "\"id\": \"publish_changes\", \"label\": \"Push to Production\"",
+            "\"id\": \"refresh_state\", \"label\": \"Push to Production\"",
+        );
+        let error = validate_product_ir(&product).unwrap_err().to_string();
+        assert!(error.contains("product IR action.id duplicated: refresh_state"));
     }
 
     #[test]
@@ -2394,6 +2400,12 @@ mod tests {
         let error = validate_action_ir(&actions).unwrap_err().to_string();
         assert!(error.contains("action.longRunning boolean required"));
         assert!(validate_action_ir("{\"version\":\"theurgy-action-ir/v1\",").is_err());
+        let actions = sample_action_ir().replace(
+            "\"id\": \"publish_changes\", \"label\": \"Push\"",
+            "\"id\": \"refresh_state\", \"label\": \"Push\"",
+        );
+        let error = validate_action_ir(&actions).unwrap_err().to_string();
+        assert!(error.contains("action IR action.id duplicated: refresh_state"));
     }
 
     #[test]
@@ -2583,6 +2595,12 @@ mod tests {
                 .pointer("/$defs/command/items/minLength")
                 .and_then(Value::as_u64),
             Some(1)
+        );
+        assert_eq!(
+            schema
+                .pointer("/properties/actions/uniqueItems")
+                .and_then(Value::as_bool),
+            Some(true)
         );
         assert_eq!(
             schema
@@ -2958,6 +2976,12 @@ mod tests {
                 .and_then(Value::as_str),
             Some("^[a-z][a-z0-9_.-]*$")
         );
+        assert_eq!(
+            desktop_schema
+                .pointer("/$defs/actionIdList/uniqueItems")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
         assert!(desktop_schema
             .pointer("/$defs/node/properties/type/enum")
             .and_then(Value::as_array)
@@ -2996,6 +3020,12 @@ mod tests {
                 .pointer("/$defs/screen/properties/actions/$ref")
                 .and_then(Value::as_str),
             Some("#/$defs/actionIdList")
+        );
+        assert_eq!(
+            mobile_schema
+                .pointer("/$defs/actionIdList/uniqueItems")
+                .and_then(Value::as_bool),
+            Some(true)
         );
         assert_eq!(
             mobile_schema
