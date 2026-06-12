@@ -3212,7 +3212,7 @@ pub mod product_runtime {
             .unwrap_or_default();
         let default_action_params_json = action_contracts
             .first()
-            .map(default_action_params_json)
+            .map(default_params_json_for_action)
             .unwrap_or_else(|| "{}".to_string());
         let action_text = runtime.action_command.join(" ");
         let subscribe_status_text = subscribe_status_command.join(" ");
@@ -3629,7 +3629,7 @@ int main(int argc, char **argv) {
             )
     }
 
-    fn default_action_params_json(contract: &ProductActionContract) -> String {
+    fn default_params_json_for_action(contract: &ProductActionContract) -> String {
         let mut params = serde_json::Map::new();
         for (key, descriptor) in &contract.input_shape {
             params.insert(key.clone(), default_shape_value(descriptor));

@@ -3103,18 +3103,26 @@ mod tests {
         assert!(main_c.contains("GtkWidget *action_button = gtk_button_new_with_label(\"Action\")"));
         assert!(main_c.contains("G_CALLBACK(run_action)"));
         let linux_action_root = test_root("compile-linux-action-defaults");
-        let publish_surface = surface_with_actions(&project_surface(&product, "linux").unwrap(), &["publish_changes"]);
+        let publish_product = sample_product();
+        let publish_summary = validate_product_ir(&publish_product).unwrap();
+        let publish_runtime = sample_full_runtime_contract();
+        let publish_surface = surface_with_actions(
+            &project_surface(&publish_product, "linux").unwrap(),
+            &["publish_changes"],
+        );
         compile_native_with_contract(
-            &summary,
+            &publish_summary,
             &publish_surface,
-            &runtime,
+            &publish_runtime,
             "linux",
             &linux_action_root,
             false,
         )
         .unwrap();
         let publish_main_c = fs::read_to_string(linux_action_root.join("src/main.c")).unwrap();
-        assert!(publish_main_c.contains("\"publish_changes\", \"{\\\"deployment\\\":\\\"\\\"}\", NULL"));
+        assert!(
+            publish_main_c.contains("\"publish_changes\", \"{\\\"deployment\\\":\\\"\\\"}\", NULL")
+        );
         fs::remove_dir_all(linux_action_root).unwrap();
         let meson = fs::read_to_string(root.join("meson.build")).unwrap();
         assert!(meson.contains("json-glib-1.0"));
