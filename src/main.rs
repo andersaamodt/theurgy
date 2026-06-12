@@ -2529,6 +2529,56 @@ mod tests {
     }
 
     #[test]
+    fn product_ir_schema_declares_platform_capability_requirements() {
+        let schema: Value =
+            serde_json::from_str(include_str!("../schemas/theurgy-product-ir-v1.json")).unwrap();
+        assert_eq!(
+            schema
+                .pointer("/properties/app/properties/capabilities/items/minLength")
+                .and_then(Value::as_u64),
+            Some(1)
+        );
+        assert_eq!(
+            schema
+                .pointer("/properties/app/allOf/0/if/properties/targets/contains/enum")
+                .and_then(Value::as_array)
+                .map(|values| { values.iter().filter_map(Value::as_str).collect::<Vec<_>>() }),
+            Some(vec!["macos", "linux"])
+        );
+        assert_eq!(
+            schema
+                .pointer("/properties/app/allOf/0/then/required/0")
+                .and_then(Value::as_str),
+            Some("capabilities")
+        );
+        assert_eq!(
+            schema
+                .pointer("/properties/app/allOf/0/then/properties/capabilities/contains/const")
+                .and_then(Value::as_str),
+            Some("native-desktop")
+        );
+        assert_eq!(
+            schema
+                .pointer("/properties/app/allOf/1/if/properties/targets/contains/enum")
+                .and_then(Value::as_array)
+                .map(|values| { values.iter().filter_map(Value::as_str).collect::<Vec<_>>() }),
+            Some(vec!["ios", "android"])
+        );
+        assert_eq!(
+            schema
+                .pointer("/properties/app/allOf/1/then/required/0")
+                .and_then(Value::as_str),
+            Some("capabilities")
+        );
+        assert_eq!(
+            schema
+                .pointer("/properties/app/allOf/1/then/properties/capabilities/contains/const")
+                .and_then(Value::as_str),
+            Some("native-mobile")
+        );
+    }
+
+    #[test]
     fn state_snapshot_schema_uses_product_app_slug() {
         let schema: Value =
             serde_json::from_str(include_str!("../schemas/theurgy-state-snapshot-v1.json"))

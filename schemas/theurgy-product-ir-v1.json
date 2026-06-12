@@ -19,9 +19,37 @@
           "uniqueItems": true,
           "minItems": 1
         },
-        "capabilities": { "type": "array", "items": { "type": "string" } },
+        "capabilities": { "type": "array", "items": { "type": "string", "minLength": 1 } },
         "permissions": { "type": "array", "items": { "type": "string" } }
       },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "targets": { "contains": { "enum": ["macos", "linux"] } }
+            }
+          },
+          "then": {
+            "required": ["capabilities"],
+            "properties": {
+              "capabilities": { "contains": { "const": "native-desktop" } }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "targets": { "contains": { "enum": ["ios", "android"] } }
+            }
+          },
+          "then": {
+            "required": ["capabilities"],
+            "properties": {
+              "capabilities": { "contains": { "const": "native-mobile" } }
+            }
+          }
+        }
+      ],
       "additionalProperties": true
     },
     "domain": {
