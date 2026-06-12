@@ -32,6 +32,9 @@ If `PATH` is omitted, the spell uses `NAME`. The generated desktop project is in
 `theurgy-runtime validate-product-ir PATH` validates the shared product contract.
 `theurgy-runtime validate-runtime-manifest PATH` validates the runtime bridge contract.
 `theurgy-runtime validate-surface-ir PATH` validates a desktop or mobile surface projection.
+`theurgy-runtime validate-runtime-state-request PATH` validates the typed request envelope for state hydration.
+`theurgy-runtime validate-runtime-status-request PATH` validates the typed request envelope for one-shot status hydration.
+`theurgy-runtime validate-runtime-subscribe-status-request PATH` validates the typed request envelope for status subscriptions.
 `theurgy-runtime validate-operation-status-request PATH` validates the typed request envelope for operation progress lookup.
 `theurgy-runtime validate-operation-history-request PATH` validates the typed request envelope for operation history lookup.
 `theurgy-runtime validate-operation-status PATH` validates the typed status record for a runtime operation.

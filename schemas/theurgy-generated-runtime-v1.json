@@ -15,6 +15,7 @@
     "protocol",
     "runtimeStateRequestSchema",
     "runtimeStatusRequestSchema",
+    "runtimeSubscribeStatusRequestSchema",
     "runtimeStatusSchema",
     "runtimeActionRequestSchema",
     "runtimeActionResultSchema",
@@ -63,6 +64,9 @@
     },
     "runtimeStatusRequestSchema": {
       "const": "theurgy-runtime-status-request/v1"
+    },
+    "runtimeSubscribeStatusRequestSchema": {
+      "const": "theurgy-runtime-subscribe-status-request/v1"
     },
     "runtimeStatusSchema": {
       "const": "theurgy-runtime-status/v1"
