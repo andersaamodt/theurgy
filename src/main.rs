@@ -1,10 +1,11 @@
+use std::collections::BTreeSet;
 use std::env;
 use std::error::Error;
 use std::fmt;
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 use serde_json::{json, Value};
@@ -103,6 +104,7 @@ fn run(args: Vec<String>) -> Result<()> {
         Some("project-surface") => command_project_surface(&args[2..]),
         Some("compile-native") => command_compile_native(&args[2..]),
         Some("compile-app") => command_compile_app(&args[2..]),
+        Some("stage-app-runtime") => command_stage_app_runtime(&args[2..]),
         Some("inspect-app") => command_inspect_app(&args[2..]),
         Some("run-state") => command_run_state(&args[2..]),
         Some("run-status") => command_run_status(&args[2..]),
@@ -569,7 +571,9 @@ fn command_compile_native(args: &[String]) -> Result<()> {
 fn command_compile_app(args: &[String]) -> Result<()> {
     let (app_dir, target, out_dir) = parse_compile_args(args)?;
     let contract = product_runtime::load_app_compile_contract(app_dir, target)?;
+    let product_text = read_json(&app_dir.join(&contract.product_ir_path))?;
     let runtime_manifest_text = read_json(&app_dir.join(&contract.runtime_manifest_path))?;
+    let surface_text = read_json(&app_dir.join(&contract.surface_ir_path))?;
     compile_native_with_contract(
         &contract.product,
         &contract.surface_text,
@@ -577,8 +581,29 @@ fn command_compile_app(args: &[String]) -> Result<()> {
         target,
         out_dir,
         contract.preserve_existing_legacy_desktop_adapter,
-        Some(runtime_manifest_text.as_str()),
+        &[
+            (&contract.product_ir_path, product_text.as_str()),
+            (
+                &contract.runtime_manifest_path,
+                runtime_manifest_text.as_str(),
+            ),
+            (&contract.surface_ir_path, surface_text.as_str()),
+        ],
     )?;
+    println!("status=ok");
+    println!("app={}", app_dir.display());
+    println!("target={target}");
+    println!("out={}", out_dir.display());
+    Ok(())
+}
+
+fn command_stage_app_runtime(args: &[String]) -> Result<()> {
+    let (app_dir, target, out_dir) = parse_compile_args(args)?;
+    if !product_runtime::is_desktop_target(target) {
+        return Err(TheurgyError::new("stage-app-runtime only supports macos and linux").into());
+    }
+    let contract = product_runtime::load_app_compile_contract(app_dir, target)?;
+    stage_app_runtime_binaries(app_dir, out_dir, target, &contract.runtime)?;
     println!("status=ok");
     println!("app={}", app_dir.display());
     println!("target={target}");
@@ -1417,7 +1442,7 @@ fn compile_native(product: &str, target: &str, out_dir: &Path) -> Result<()> {
     let summary = validate_product_ir(product)?;
     let surface = project_surface(product, target)?;
     let runtime = product_runtime::default_runtime_bridge_for_product(&summary);
-    compile_native_with_contract(&summary, &surface, &runtime, target, out_dir, false, None)
+    compile_native_with_contract(&summary, &surface, &runtime, target, out_dir, false, &[])
 }
 
 fn compile_native_with_contract(
@@ -1427,7 +1452,7 @@ fn compile_native_with_contract(
     target: &str,
     out_dir: &Path,
     preserve_existing_legacy_desktop_adapter: bool,
-    runtime_manifest_text: Option<&str>,
+    contract_resources: &[(&str, &str)],
 ) -> Result<()> {
     let surface_summary = validate_surface_ir(surface)?;
     fs::create_dir_all(out_dir)?;
@@ -1444,34 +1469,194 @@ fn compile_native_with_contract(
         }) {
             write_or_replace(&out_dir.join(file.path), &file.contents)?;
         }
-        write_runtime_manifest_resources(out_dir, target, runtime_manifest_text)?;
+        write_app_contract_resources(out_dir, target, contract_resources)?;
         return Ok(());
     }
     for file in files {
         write_or_replace(&out_dir.join(file.path), &file.contents)?;
     }
-    write_runtime_manifest_resources(out_dir, target, runtime_manifest_text)?;
+    write_app_contract_resources(out_dir, target, contract_resources)?;
     Ok(())
 }
 
-fn write_runtime_manifest_resources(
+fn write_app_contract_resources(
     out_dir: &Path,
     target: &str,
-    runtime_manifest_text: Option<&str>,
+    contract_resources: &[(&str, &str)],
 ) -> Result<()> {
-    let Some(runtime_manifest_text) = runtime_manifest_text else {
-        return Ok(());
-    };
     if !product_runtime::is_desktop_target(target) {
         return Ok(());
     }
-    let text = format!("{}\n", runtime_manifest_text.trim_end());
-    write_or_replace(&out_dir.join("runtime.manifest.json"), &text)?;
-    if target == "macos" {
-        write_or_replace(
-            &out_dir.join("Sources/App/Resources/runtime.manifest.json"),
-            &text,
-        )?;
+    for (relative_path, text) in contract_resources {
+        validate_generated_relative_path(relative_path)?;
+        let text = format!("{}\n", text.trim_end());
+        write_or_replace(&out_dir.join(relative_path), &text)?;
+        if target == "macos" {
+            write_or_replace(
+                &out_dir.join("Sources/App/Resources").join(relative_path),
+                &text,
+            )?;
+        }
+        if relative_path.ends_with("runtime.manifest.json") {
+            write_or_replace(&out_dir.join("runtime.manifest.json"), &text)?;
+            if target == "macos" {
+                write_or_replace(
+                    &out_dir.join("Sources/App/Resources/runtime.manifest.json"),
+                    &text,
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn stage_app_runtime_binaries(
+    app_dir: &Path,
+    out_dir: &Path,
+    target: &str,
+    runtime: &RuntimeContract,
+) -> Result<()> {
+    let mut app_binaries = BTreeSet::new();
+    collect_manifest_binary(&runtime.state_command, &mut app_binaries)?;
+    collect_manifest_binary(&runtime.status_command, &mut app_binaries)?;
+    collect_manifest_binary(&runtime.subscribe_status_command, &mut app_binaries)?;
+    collect_manifest_binary(&runtime.operation_status_command, &mut app_binaries)?;
+    collect_manifest_binary(&runtime.action_command, &mut app_binaries)?;
+    collect_manifest_binary(&runtime.history_command, &mut app_binaries)?;
+    collect_manifest_binary(&runtime.daemon_command, &mut app_binaries)?;
+
+    let cargo_manifest = app_dir.join("Cargo.toml");
+    if !cargo_manifest.is_file() {
+        return Err(TheurgyError::new(format!(
+            "stage-app-runtime requires Cargo.toml at {}",
+            cargo_manifest.display()
+        ))
+        .into());
+    }
+    for binary in &app_binaries {
+        let status = Command::new("cargo")
+            .arg("build")
+            .arg("--manifest-path")
+            .arg(&cargo_manifest)
+            .arg("--bin")
+            .arg(binary)
+            .status()
+            .map_err(|error| {
+                TheurgyError::new(format!("could not run cargo build for {binary}: {error}"))
+            })?;
+        if !status.success() {
+            return Err(TheurgyError::new(format!(
+                "cargo build failed for runtime binary: {binary}"
+            ))
+            .into());
+        }
+    }
+
+    let theurgy_runtime = env::current_exe()
+        .map_err(|error| TheurgyError::new(format!("could not locate theurgy-runtime: {error}")))?;
+    let mut binaries = vec![("theurgy-runtime".to_string(), theurgy_runtime)];
+    let cargo_debug_dir = cargo_debug_dir(app_dir);
+    for binary in app_binaries {
+        let binary_path = cargo_debug_dir.join(&binary);
+        if !binary_path.is_file() {
+            return Err(TheurgyError::new(format!(
+                "built runtime binary not found: {}",
+                binary_path.display()
+            ))
+            .into());
+        }
+        binaries.push((binary, binary_path));
+    }
+
+    for libexec_dir in runtime_libexec_dirs(out_dir, target)? {
+        fs::create_dir_all(&libexec_dir)?;
+        for (name, source) in &binaries {
+            let destination = libexec_dir.join(name);
+            fs::copy(source, &destination).map_err(|error| {
+                TheurgyError::new(format!(
+                    "could not copy {} to {}: {error}",
+                    source.display(),
+                    destination.display()
+                ))
+            })?;
+            mark_executable(&destination)?;
+        }
+    }
+    Ok(())
+}
+
+fn collect_manifest_binary(command: &[String], binaries: &mut BTreeSet<String>) -> Result<()> {
+    let Some(binary) = command.first() else {
+        return Ok(());
+    };
+    validate_bare_runtime_binary(binary)?;
+    binaries.insert(binary.clone());
+    Ok(())
+}
+
+fn validate_bare_runtime_binary(binary: &str) -> Result<()> {
+    let path = Path::new(binary);
+    if path.is_absolute() || path.components().count() != 1 {
+        return Err(TheurgyError::new(format!(
+            "stage-app-runtime only stages bare runtime binary names, got: {binary}"
+        ))
+        .into());
+    }
+    if binary == "theurgy-runtime" {
+        return Err(TheurgyError::new(
+            "runtime manifests should not declare theurgy-runtime as an app binary",
+        )
+        .into());
+    }
+    Ok(())
+}
+
+fn validate_generated_relative_path(relative_path: &str) -> Result<()> {
+    let path = Path::new(relative_path);
+    if path.is_absolute() {
+        return Err(TheurgyError::new(format!(
+            "generated resource path must be relative: {relative_path}"
+        ))
+        .into());
+    }
+    if path.components().any(|component| {
+        matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    }) {
+        return Err(TheurgyError::new(format!(
+            "generated resource path must stay inside artifact: {relative_path}"
+        ))
+        .into());
+    }
+    Ok(())
+}
+
+fn cargo_debug_dir(app_dir: &Path) -> PathBuf {
+    env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| app_dir.join("target"))
+        .join("debug")
+}
+
+fn runtime_libexec_dirs(out_dir: &Path, target: &str) -> Result<Vec<PathBuf>> {
+    match target {
+        "macos" => Ok(vec![
+            out_dir.join("libexec"),
+            out_dir.join("Sources/App/Resources/libexec"),
+        ]),
+        "linux" => Ok(vec![out_dir.join("libexec")]),
+        _ => Err(TheurgyError::new("stage-app-runtime only supports macos and linux").into()),
+    }
+}
+
+fn mark_executable(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        let mut permissions = fs::metadata(path)?.permissions();
+        permissions.set_mode(permissions.mode() | 0o755);
+        fs::set_permissions(path, permissions)?;
     }
     Ok(())
 }
@@ -4093,7 +4278,7 @@ mod tests {
             "linux",
             &linux_action_root,
             false,
-            None,
+            &[],
         )
         .unwrap();
         let publish_main_c = fs::read_to_string(linux_action_root.join("src/main.c")).unwrap();
@@ -4430,6 +4615,11 @@ mod tests {
         let runtime = fs::read_to_string(out.join("theurgy-runtime.json")).unwrap();
         let staged_manifest = fs::read_to_string(out.join("runtime.manifest.json")).unwrap();
         assert!(staged_manifest.contains("\"version\": \"theurgy-runtime-manifest/v1\""));
+        let staged_product = fs::read_to_string(out.join("app-blueprint/product.ir.json")).unwrap();
+        assert!(staged_product.contains("theurgy-product-ir/v1"));
+        let staged_surface =
+            fs::read_to_string(out.join("app-blueprint/desktop.surface.ir.json")).unwrap();
+        assert!(staged_surface.contains("theurgy-desktop-surface-ir/v1"));
         let runtime_json: Value = serde_json::from_str(&runtime).unwrap();
         let generated = validate_generated_runtime(&runtime).unwrap();
         assert_eq!(generated.adapter_runtime_transport, "local-process-json");
@@ -4648,6 +4838,16 @@ mod tests {
         assert!(runtime.contains("\"legacyNativeDesktopIr\": \"app-blueprint/app.ir.yaml\""));
         let staged_manifest = fs::read_to_string(out.join("runtime.manifest.json")).unwrap();
         assert!(staged_manifest.contains("\"version\": \"theurgy-runtime-manifest/v1\""));
+        assert!(
+            fs::read_to_string(out.join("app-blueprint/product.ir.json"))
+                .unwrap()
+                .contains("theurgy-product-ir/v1")
+        );
+        assert!(
+            fs::read_to_string(out.join("app-blueprint/desktop.surface.ir.json"))
+                .unwrap()
+                .contains("theurgy-desktop-surface-ir/v1")
+        );
         let surface = fs::read_to_string(out.join("theurgy-surface.json")).unwrap();
         assert!(surface.contains("\"role\": \"declared-reference-surface\""));
 
@@ -5089,7 +5289,7 @@ mod tests {
         let summary = validate_product_ir(&product).unwrap();
         let surface = project_surface(&product, "macos").unwrap();
         let runtime = sample_full_runtime_contract();
-        compile_native_with_contract(&summary, &surface, &runtime, "macos", &root, false, None)
+        compile_native_with_contract(&summary, &surface, &runtime, "macos", &root, false, &[])
             .unwrap();
 
         let swift = fs::read_to_string(root.join("Sources/App/App.swift")).unwrap();
@@ -5155,7 +5355,7 @@ mod tests {
             "ios",
             &ios_root,
             false,
-            None,
+            &[],
         )
         .unwrap();
         compile_native_with_contract(
@@ -5165,7 +5365,7 @@ mod tests {
             "android",
             &android_root,
             false,
-            None,
+            &[],
         )
         .unwrap();
 

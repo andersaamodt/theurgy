@@ -42,8 +42,9 @@ If `PATH` is omitted, the spell uses `NAME`. The generated desktop project is in
 `theurgy-runtime project-surface PATH --target macos|linux|ios|android` emits a target surface projection.
 `theurgy-runtime compile-native PATH --target macos|linux|ios|android --out OUT_DIR` emits a deterministic native adapter root.
 `theurgy-runtime compile-app APP_DIR --target macos|linux|ios|android --out OUT_DIR` reads `theurgy.project.toml` and compiles from the app's declared Product IR.
+`theurgy-runtime stage-app-runtime APP_DIR --target macos|linux --out OUT_DIR` builds manifest-declared Cargo binaries and stages them with `theurgy-runtime` in desktop artifact `libexec/` locations.
 `theurgy-runtime inspect-app APP_DIR` validates and summarizes the declared Product IR, target surfaces, runtime bridge commands, compatibility posture, and long-running action coverage.
 
-When dispatching a runtime manifest, bare command names are resolved next to the manifest, then in sibling `bin/` and `libexec/` directories, then through `PATH`. Packaged desktop adapters should bundle their compiled runtime in one of those manifest-relative locations.
+When dispatching a runtime manifest, bare command names are resolved next to the manifest, then in sibling `bin/` and `libexec/` directories, then through `PATH`. Packaged desktop adapters should bundle their compiled runtime in one of those manifest-relative locations; `stage-app-runtime` is the standard desktop staging path.
 
 This compiler track is opt-in. Shell-first wizardry-apps projects do not depend on it unless they choose the Theurgy native runtime path.
