@@ -3914,6 +3914,9 @@ mod tests {
         assert!(ios.contains("Surface schema: \\(contract.surfaceSchema)"));
         assert!(ios.contains("Surface target: \\(contract.surfaceTarget)"));
         assert!(ios.contains("Surface screens: \\(contract.surfaceScreens.joined"));
+        assert!(ios.contains("Section(\"Mobile Workflow\")"));
+        assert!(ios.contains("Text(\"status-overview\")"));
+        assert!(ios.contains("Text(\"focused-action-detail\")"));
         assert!(ios.contains("\"deployments-core\", \"runtime-state\""));
         assert!(ios.contains("\"deployments-core\", \"runtime-status\""));
         assert!(
@@ -4059,6 +4062,7 @@ mod tests {
         assert!(android.contains("Surface schema: "));
         assert!(android.contains("Surface target: "));
         assert!(android.contains("Surface screens: "));
+        assert!(android.contains("Mobile workflow: status-overview, focused-action-detail"));
         assert!(android.contains("new String[] {\"deployments-core\", \"runtime-action\"}"));
         assert!(android.contains("new String[] {\"deployments-core\", \"runtime-status\"}"));
         assert!(android.contains(
