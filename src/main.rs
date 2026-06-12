@@ -3053,6 +3053,12 @@ mod tests {
         );
         assert_eq!(
             schema
+                .pointer("/$defs/command/items/minLength")
+                .and_then(Value::as_u64),
+            Some(1)
+        );
+        assert_eq!(
+            schema
                 .pointer("/allOf/0/then/properties/requestCommand/const")
                 .and_then(Value::as_array)
                 .map(|values| values.iter().filter_map(Value::as_str).collect::<Vec<_>>()),

@@ -1325,6 +1325,7 @@ pub mod product_runtime {
         }
         let request_command =
             optional_string_array(value, "requestCommand", "generated runtime requestCommand")?;
+        validate_runtime_command_items(&request_command, "generated runtime requestCommand")?;
         let request_command_manifest = optional_nonempty_string(
             value,
             "requestCommandManifest",
@@ -1365,21 +1366,35 @@ pub mod product_runtime {
                 ContractError::new("generated runtime targetReleaseArtifact required")
             })?;
         for key in ["stateCommand", "subscribeStatusCommand", "actionCommand"] {
-            if value_string_array(value, key)?.is_empty() {
+            let command = value_string_array(value, key)?;
+            if command.is_empty() {
                 return Err(ContractError::new(format!(
                     "generated runtime {key} must be non-empty"
                 )));
             }
+            validate_runtime_command_items(&command, &format!("generated runtime {key}"))?;
         }
         let operation_status_command = optional_string_array(
             value,
             "operationStatusCommand",
             "generated runtime operationStatusCommand",
         )?;
+        validate_optional_runtime_command_items(
+            value,
+            "operationStatusCommand",
+            &operation_status_command,
+            "generated runtime operationStatusCommand",
+        )?;
+        for key in ["statusCommand", "historyCommand", "daemonCommand"] {
+            let command = optional_string_array(value, key, &format!("generated runtime {key}"))?;
+            validate_optional_runtime_command_items(
+                value,
+                key,
+                &command,
+                &format!("generated runtime {key}"),
+            )?;
+        }
         for key in [
-            "statusCommand",
-            "historyCommand",
-            "daemonCommand",
             "productTargets",
             "productActions",
             "productCapabilities",
@@ -6008,6 +6023,18 @@ struct TheurgyNativeApp: App {
         Ok(())
     }
 
+    fn validate_optional_runtime_command_items(
+        value: &Value,
+        key: &str,
+        command: &[String],
+        label: &str,
+    ) -> ContractResult<()> {
+        if value.get(key).is_some() && command.is_empty() {
+            return Err(ContractError::new(format!("{label} must be non-empty")));
+        }
+        validate_runtime_command_items(command, label)
+    }
+
     fn string_vec_value(values: &[String]) -> Value {
         Value::Array(values.iter().cloned().map(Value::String).collect())
     }
@@ -7704,6 +7731,42 @@ binary = "deployments-core"
         assert_eq!(
             error,
             "generated runtime requestCommandManifest must match runtimeManifest"
+        );
+
+        let mut invalid = runtime.clone();
+        invalid.as_object_mut().unwrap().insert(
+            "stateCommand".to_string(),
+            serde_json::json!(["deployments-core", ""]),
+        );
+        let error = product_runtime::validate_generated_runtime_value(&invalid)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            "generated runtime stateCommand must contain non-empty strings"
+        );
+
+        let mut invalid = runtime.clone();
+        invalid
+            .as_object_mut()
+            .unwrap()
+            .insert("statusCommand".to_string(), serde_json::json!([]));
+        let error = product_runtime::validate_generated_runtime_value(&invalid)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(error, "generated runtime statusCommand must be non-empty");
+
+        let mut invalid = runtime.clone();
+        invalid.as_object_mut().unwrap().insert(
+            "historyCommand".to_string(),
+            serde_json::json!(["deployments-core", ""]),
+        );
+        let error = product_runtime::validate_generated_runtime_value(&invalid)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            "generated runtime historyCommand must contain non-empty strings"
         );
     }
 
