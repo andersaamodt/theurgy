@@ -868,7 +868,7 @@ fn run_manifest_action(runtime: &RuntimeContract, action_id: &str, params: &str)
         }
     }
     if let Some(contracts) = &runtime.product_action_contracts {
-        validate_runtime_action_params(action_id, params, contracts)?;
+        product_runtime::validate_runtime_action_params_text(action_id, params, contracts)?;
     }
     let output = run_manifest_action_command(
         &runtime.action_command,
@@ -921,99 +921,30 @@ fn validate_manifest_action_output(
     output: &str,
     contracts: Option<&[ActionContract]>,
 ) -> Result<()> {
-    let value = parse_json(output)?;
-    let result = manifest_payload_or_raw(&value);
-    let summary = validate_runtime_action_result_value(result)?;
-    if summary.action_id != action_id {
-        return Err(TheurgyError::new(format!(
-            "runtime action result action mismatch: expected {action_id}, got {}",
-            summary.action_id
-        ))
-        .into());
-    }
-    if let Some(contracts) = contracts {
-        validate_runtime_action_operation_contract(action_id, summary.long_running, contracts)?;
-        validate_runtime_action_result_keys(action_id, result, contracts)?;
-    }
-    validate_runtime_output_app("runtime action result", expected_app, &summary.app_id)
-}
-
-fn validate_manifest_state_output(expected_app: &str, output: &str) -> Result<()> {
-    let value = parse_json(output)?;
-    let result = manifest_payload_or_raw(&value);
-    let summary = validate_state_snapshot_value(result)?;
-    validate_runtime_output_app("state snapshot", expected_app, &summary.app_id)
-}
-
-fn validate_manifest_status_output(expected_app: &str, output: &str) -> Result<()> {
-    let value = parse_json(output)?;
-    let result = manifest_payload_or_raw(&value);
-    let summary = validate_runtime_status_value(result)?;
-    validate_runtime_output_app("runtime status", expected_app, &summary.app_id)
-}
-
-fn validate_manifest_operation_status_output(expected_app: &str, output: &str) -> Result<()> {
-    let value = parse_json(output)?;
-    let result = manifest_payload_or_raw(&value);
-    let summary = validate_operation_status_value(result)?;
-    validate_runtime_output_app("operation status", expected_app, &summary.app_id)
-}
-
-fn validate_manifest_history_output(expected_app: &str, output: &str) -> Result<()> {
-    let value = parse_json(output)?;
-    let result = manifest_payload_or_raw(&value);
-    let summary = validate_operation_history_value(result)?;
-    validate_runtime_output_app("operation history", expected_app, &summary.app_id)
-}
-
-fn validate_runtime_output_app(label: &str, expected_app: &str, actual_app: &str) -> Result<()> {
-    if actual_app != expected_app {
-        return Err(TheurgyError::new(format!(
-            "{label} app mismatch: expected {expected_app}, got {actual_app}"
-        ))
-        .into());
-    }
-    Ok(())
-}
-
-fn manifest_payload_or_raw(value: &Value) -> &Value {
-    if value.get("success").is_some() {
-        if let Some(data) = value.get("data") {
-            return data;
-        }
-    }
-    value
-}
-
-fn validate_runtime_action_params(
-    action_id: &str,
-    params: &str,
-    contracts: &[ActionContract],
-) -> Result<()> {
-    product_runtime::validate_runtime_action_params_text(action_id, params, contracts)
-        .map_err(Into::into)
-}
-
-fn validate_runtime_action_result_keys(
-    action_id: &str,
-    result: &Value,
-    contracts: &[ActionContract],
-) -> Result<()> {
-    product_runtime::validate_runtime_action_result_contract_value(action_id, result, contracts)
-        .map_err(Into::into)
-}
-
-fn validate_runtime_action_operation_contract(
-    action_id: &str,
-    actual_long_running: bool,
-    contracts: &[ActionContract],
-) -> Result<()> {
-    product_runtime::validate_runtime_action_operation_contract(
+    product_runtime::validate_manifest_action_output_text(
+        expected_app,
         action_id,
-        actual_long_running,
+        output,
         contracts,
     )
     .map_err(Into::into)
+}
+
+fn validate_manifest_state_output(expected_app: &str, output: &str) -> Result<()> {
+    product_runtime::validate_manifest_state_output_text(expected_app, output).map_err(Into::into)
+}
+
+fn validate_manifest_status_output(expected_app: &str, output: &str) -> Result<()> {
+    product_runtime::validate_manifest_status_output_text(expected_app, output).map_err(Into::into)
+}
+
+fn validate_manifest_operation_status_output(expected_app: &str, output: &str) -> Result<()> {
+    product_runtime::validate_manifest_operation_status_output_text(expected_app, output)
+        .map_err(Into::into)
+}
+
+fn validate_manifest_history_output(expected_app: &str, output: &str) -> Result<()> {
+    product_runtime::validate_manifest_history_output_text(expected_app, output).map_err(Into::into)
 }
 
 fn validate_runtime_action_failure_keys(
@@ -1204,25 +1135,9 @@ fn validate_runtime_action_request_against_runtime(
     value: &Value,
     runtime: &RuntimeContract,
 ) -> Result<()> {
-    validate_runtime_output_app("runtime action request", &runtime.app_id, &summary.app_id)?;
-    if let Some(action_ids) = &runtime.product_action_ids {
-        if !action_ids
-            .iter()
-            .any(|declared| declared == &summary.action_id)
-        {
-            return Err(TheurgyError::new(format!(
-                "runtime action request not declared in Product IR: {}",
-                summary.action_id
-            ))
-            .into());
-        }
-    }
-    if let Some(contracts) = &runtime.product_action_contracts {
-        let params = serde_json::to_string(value_object(value, "params")?)
-            .map_err(|error| TheurgyError::new(format!("could not serialize params: {error}")))?;
-        validate_runtime_action_params(&summary.action_id, &params, contracts)?;
-    }
-    Ok(())
+    let _ = summary;
+    product_runtime::validate_runtime_action_request_against_bridge_value(value, runtime)
+        .map_err(Into::into)
 }
 
 fn validate_runtime_action_result_value(value: &Value) -> Result<RuntimeActionResultSummary> {
@@ -1267,13 +1182,6 @@ fn validate_json_params(raw: &str) -> Result<()> {
     } else {
         Err(TheurgyError::new("expected a JSON object or array literal").into())
     }
-}
-
-fn value_object<'a>(value: &'a Value, key: &str) -> Result<&'a Value> {
-    value
-        .get(key)
-        .filter(|candidate| candidate.is_object())
-        .ok_or_else(|| TheurgyError::new(format!("missing JSON object key: {key}")).into())
 }
 
 fn valid_action_id(value: &str) -> bool {

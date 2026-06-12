@@ -343,6 +343,33 @@ pub mod product_runtime {
         Ok(RuntimeActionRequest { app_id, action_id })
     }
 
+    pub fn validate_runtime_action_request_against_bridge_value(
+        value: &Value,
+        runtime: &RuntimeBridge,
+    ) -> ContractResult<()> {
+        let request = validate_runtime_action_request_value(value)?;
+        validate_runtime_output_app("runtime action request", &runtime.app_id, &request.app_id)?;
+        if let Some(action_ids) = &runtime.product_action_ids {
+            if !action_ids
+                .iter()
+                .any(|declared| declared == &request.action_id)
+            {
+                return Err(ContractError::new(format!(
+                    "runtime action request not declared in Product IR: {}",
+                    request.action_id
+                )));
+            }
+        }
+        if let Some(contracts) = &runtime.product_action_contracts {
+            validate_runtime_action_params_value(
+                &request.action_id,
+                value_object(value, "params")?,
+                contracts,
+            )?;
+        }
+        Ok(())
+    }
+
     pub fn validate_runtime_action_result_value(
         value: &Value,
     ) -> ContractResult<RuntimeActionResult> {
@@ -500,6 +527,82 @@ pub mod product_runtime {
             "runtime action failure",
             action_id,
         )
+    }
+
+    pub fn validate_manifest_action_output_text(
+        expected_app: &str,
+        action_id: &str,
+        output: &str,
+        contracts: Option<&[ProductActionContract]>,
+    ) -> ContractResult<()> {
+        let value: Value = serde_json::from_str(output)
+            .map_err(|error| ContractError::new(format!("invalid JSON: {error}")))?;
+        validate_manifest_action_output_value(expected_app, action_id, &value, contracts)
+    }
+
+    pub fn validate_manifest_action_output_value(
+        expected_app: &str,
+        action_id: &str,
+        output: &Value,
+        contracts: Option<&[ProductActionContract]>,
+    ) -> ContractResult<()> {
+        let result = manifest_payload_or_raw(output);
+        let summary = validate_runtime_action_result_value(result)?;
+        if summary.action_id != action_id {
+            return Err(ContractError::new(format!(
+                "runtime action result action mismatch: expected {action_id}, got {}",
+                summary.action_id
+            )));
+        }
+        if let Some(contracts) = contracts {
+            validate_runtime_action_operation_contract(action_id, summary.long_running, contracts)?;
+            validate_runtime_action_result_contract_value(action_id, result, contracts)?;
+        }
+        validate_runtime_output_app("runtime action result", expected_app, &summary.app_id)
+    }
+
+    pub fn validate_manifest_state_output_text(
+        expected_app: &str,
+        output: &str,
+    ) -> ContractResult<()> {
+        let value: Value = serde_json::from_str(output)
+            .map_err(|error| ContractError::new(format!("invalid JSON: {error}")))?;
+        let result = manifest_payload_or_raw(&value);
+        let summary = validate_state_snapshot_value(result)?;
+        validate_runtime_output_app("state snapshot", expected_app, &summary.app_id)
+    }
+
+    pub fn validate_manifest_status_output_text(
+        expected_app: &str,
+        output: &str,
+    ) -> ContractResult<()> {
+        let value: Value = serde_json::from_str(output)
+            .map_err(|error| ContractError::new(format!("invalid JSON: {error}")))?;
+        let result = manifest_payload_or_raw(&value);
+        let summary = validate_runtime_status_value(result)?;
+        validate_runtime_output_app("runtime status", expected_app, &summary.app_id)
+    }
+
+    pub fn validate_manifest_operation_status_output_text(
+        expected_app: &str,
+        output: &str,
+    ) -> ContractResult<()> {
+        let value: Value = serde_json::from_str(output)
+            .map_err(|error| ContractError::new(format!("invalid JSON: {error}")))?;
+        let result = manifest_payload_or_raw(&value);
+        let summary = validate_operation_status_value(result)?;
+        validate_runtime_output_app("operation status", expected_app, &summary.app_id)
+    }
+
+    pub fn validate_manifest_history_output_text(
+        expected_app: &str,
+        output: &str,
+    ) -> ContractResult<()> {
+        let value: Value = serde_json::from_str(output)
+            .map_err(|error| ContractError::new(format!("invalid JSON: {error}")))?;
+        let result = manifest_payload_or_raw(&value);
+        let summary = validate_operation_history_value(result)?;
+        validate_runtime_output_app("operation history", expected_app, &summary.app_id)
     }
 
     pub fn validate_operation_status_value(value: &Value) -> ContractResult<OperationStatus> {
@@ -3665,6 +3768,28 @@ struct TheurgyNativeApp: App {
             .ok_or_else(|| ContractError::new(format!("missing JSON object key: {key}")))
     }
 
+    fn manifest_payload_or_raw(value: &Value) -> &Value {
+        if value.get("success").is_some() {
+            if let Some(data) = value.get("data") {
+                return data;
+            }
+        }
+        value
+    }
+
+    fn validate_runtime_output_app(
+        label: &str,
+        expected_app: &str,
+        actual_app: &str,
+    ) -> ContractResult<()> {
+        if actual_app != expected_app {
+            return Err(ContractError::new(format!(
+                "{label} app mismatch: expected {expected_app}, got {actual_app}"
+            )));
+        }
+        Ok(())
+    }
+
     fn value_array<'a>(value: &'a Value, key: &str) -> ContractResult<&'a Vec<Value>> {
         value
             .get(key)
@@ -4227,6 +4352,86 @@ binary = "deployments-core"
             .unwrap_err()
             .to_string();
         assert_eq!(error, "runtime operation.progress must be 0..100");
+    }
+
+    #[test]
+    fn product_runtime_validates_manifest_runtime_outputs() {
+        let snapshot = serde_json::json!({
+            "success": true,
+            "data": {
+                "schema": product_runtime::STATE_SNAPSHOT_SCHEMA,
+                "app": "deployments",
+                "generatedAt": "2026-06-11T00:00:00Z",
+                "data": {}
+            }
+        })
+        .to_string();
+        product_runtime::validate_manifest_state_output_text("deployments", &snapshot).unwrap();
+        let error = product_runtime::validate_manifest_state_output_text("other", &snapshot)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            "state snapshot app mismatch: expected other, got deployments"
+        );
+
+        let contracts = vec![product_runtime::ProductActionContract {
+            id: "publish_changes".to_string(),
+            label: "Push to Production".to_string(),
+            effect: "release".to_string(),
+            safe: false,
+            mutating: true,
+            long_running: true,
+            privileged: true,
+            command: Vec::new(),
+            input_keys: vec!["deployment".to_string()],
+            output_keys: vec!["message".to_string()],
+            failure_keys: vec!["error".to_string()],
+            input_shape: [("deployment".to_string(), "string".to_string())]
+                .into_iter()
+                .collect(),
+            output_shape: [("message".to_string(), "string".to_string())]
+                .into_iter()
+                .collect(),
+            failure_shape: [("error".to_string(), "string".to_string())]
+                .into_iter()
+                .collect(),
+        }];
+        let action_result = serde_json::json!({
+            "success": true,
+            "data": {
+                "protocol": product_runtime::RUNTIME_ACTION_PROTOCOL,
+                "app": "deployments",
+                "action": "publish_changes",
+                "operation": {
+                    "id": "op-publish",
+                    "status": "completed",
+                    "progress": 100,
+                    "longRunning": true
+                },
+                "result": {"message": "published"}
+            }
+        })
+        .to_string();
+        product_runtime::validate_manifest_action_output_text(
+            "deployments",
+            "publish_changes",
+            &action_result,
+            Some(&contracts),
+        )
+        .unwrap();
+        let error = product_runtime::validate_manifest_action_output_text(
+            "deployments",
+            "refresh_state",
+            &action_result,
+            Some(&contracts),
+        )
+        .unwrap_err()
+        .to_string();
+        assert_eq!(
+            error,
+            "runtime action result action mismatch: expected refresh_state, got publish_changes"
+        );
     }
 
     #[test]
