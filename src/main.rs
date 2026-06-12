@@ -1168,50 +1168,13 @@ fn run_manifest_command_with_args(
 
 type ProductSummary = product_runtime::ProductIr;
 type ActionContract = product_runtime::ProductActionContract;
-
-#[derive(Debug, Eq, PartialEq)]
-struct ActionSummary {
-    action_ids: Vec<String>,
-    actions: usize,
-}
-
-#[derive(Debug, Eq, PartialEq)]
-struct StateSnapshotSummary {
-    app_id: String,
-}
-
-#[derive(Debug, Eq, PartialEq)]
-struct RuntimeStatusSummary {
-    app_id: String,
-}
-
-#[derive(Debug, Eq, PartialEq)]
-struct RuntimeActionRequestSummary {
-    app_id: String,
-    action_id: String,
-}
-
-#[derive(Debug, Eq, PartialEq)]
-struct RuntimeActionResultSummary {
-    app_id: String,
-    action_id: String,
-    operation_id: String,
-    long_running: bool,
-}
-
-#[derive(Debug, Eq, PartialEq)]
-struct OperationStatusSummary {
-    app_id: String,
-    operation_id: String,
-    long_running: bool,
-}
-
-#[derive(Debug, Eq, PartialEq)]
-struct OperationHistorySummary {
-    app_id: String,
-    entries: usize,
-}
-
+type ActionSummary = product_runtime::ActionIr;
+type StateSnapshotSummary = product_runtime::StateSnapshot;
+type RuntimeStatusSummary = product_runtime::RuntimeStatus;
+type RuntimeActionRequestSummary = product_runtime::RuntimeActionRequest;
+type RuntimeActionResultSummary = product_runtime::RuntimeActionResult;
+type OperationStatusSummary = product_runtime::OperationStatus;
+type OperationHistorySummary = product_runtime::OperationHistory;
 type RuntimeManifestSummary = product_runtime::RuntimeManifest;
 type GeneratedRuntimeSummary = product_runtime::GeneratedRuntime;
 type SurfaceSummary = product_runtime::SurfaceIr;
@@ -1273,11 +1236,7 @@ fn validate_product_ir(text: &str) -> Result<ProductSummary> {
 
 fn validate_action_ir(text: &str) -> Result<ActionSummary> {
     let value = parse_json(text)?;
-    let action_ir = product_runtime::validate_action_ir_value(&value)?;
-    Ok(ActionSummary {
-        actions: action_ir.actions,
-        action_ids: action_ir.action_ids,
-    })
+    product_runtime::validate_action_ir_value(&value).map_err(Into::into)
 }
 
 fn validate_state_snapshot(text: &str) -> Result<StateSnapshotSummary> {
@@ -1291,17 +1250,11 @@ fn validate_runtime_status(text: &str) -> Result<RuntimeStatusSummary> {
 }
 
 fn validate_state_snapshot_value(value: &Value) -> Result<StateSnapshotSummary> {
-    let snapshot = product_runtime::validate_state_snapshot_value(value)?;
-    Ok(StateSnapshotSummary {
-        app_id: snapshot.app_id,
-    })
+    product_runtime::validate_state_snapshot_value(value).map_err(Into::into)
 }
 
 fn validate_runtime_status_value(value: &Value) -> Result<RuntimeStatusSummary> {
-    let status = product_runtime::validate_runtime_status_value(value)?;
-    Ok(RuntimeStatusSummary {
-        app_id: status.app_id,
-    })
+    product_runtime::validate_runtime_status_value(value).map_err(Into::into)
 }
 
 fn validate_runtime_action_result(text: &str) -> Result<RuntimeActionResultSummary> {
@@ -1315,11 +1268,7 @@ fn validate_runtime_action_request(text: &str) -> Result<RuntimeActionRequestSum
 }
 
 fn validate_runtime_action_request_value(value: &Value) -> Result<RuntimeActionRequestSummary> {
-    let request = product_runtime::validate_runtime_action_request_value(value)?;
-    Ok(RuntimeActionRequestSummary {
-        app_id: request.app_id,
-        action_id: request.action_id,
-    })
+    product_runtime::validate_runtime_action_request_value(value).map_err(Into::into)
 }
 
 fn validate_runtime_action_request_against_runtime(
@@ -1349,13 +1298,7 @@ fn validate_runtime_action_request_against_runtime(
 }
 
 fn validate_runtime_action_result_value(value: &Value) -> Result<RuntimeActionResultSummary> {
-    let result = product_runtime::validate_runtime_action_result_value(value)?;
-    Ok(RuntimeActionResultSummary {
-        app_id: result.app_id,
-        action_id: result.action_id,
-        operation_id: result.operation_id,
-        long_running: result.long_running,
-    })
+    product_runtime::validate_runtime_action_result_value(value).map_err(Into::into)
 }
 
 fn validate_operation_status(text: &str) -> Result<OperationStatusSummary> {
@@ -1364,12 +1307,7 @@ fn validate_operation_status(text: &str) -> Result<OperationStatusSummary> {
 }
 
 fn validate_operation_status_value(value: &Value) -> Result<OperationStatusSummary> {
-    let status = product_runtime::validate_operation_status_value(value)?;
-    Ok(OperationStatusSummary {
-        app_id: status.app_id,
-        operation_id: status.operation_id,
-        long_running: status.long_running,
-    })
+    product_runtime::validate_operation_status_value(value).map_err(Into::into)
 }
 
 fn validate_operation_history(text: &str) -> Result<OperationHistorySummary> {
@@ -1378,11 +1316,7 @@ fn validate_operation_history(text: &str) -> Result<OperationHistorySummary> {
 }
 
 fn validate_operation_history_value(value: &Value) -> Result<OperationHistorySummary> {
-    let history = product_runtime::validate_operation_history_value(value)?;
-    Ok(OperationHistorySummary {
-        app_id: history.app_id,
-        entries: history.entries,
-    })
+    product_runtime::validate_operation_history_value(value).map_err(Into::into)
 }
 
 fn validate_product_ir_value(value: &Value) -> Result<ProductSummary> {
