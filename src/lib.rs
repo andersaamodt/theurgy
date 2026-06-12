@@ -3999,10 +3999,11 @@ static void activate(GtkApplication *app, gpointer user_data) {
   const char *release_fields[] = {"target", "surface", "artifact"};
   g_autofree char *product_state_projections = contract_string_array_summary(runtime_metadata, "productStateProjections");
   g_autofree char *surface_capabilities = contract_string_array_summary(runtime_metadata, "surfaceCapabilities");
+  g_autofree char *surface_roles = contract_string_array_summary(runtime_metadata, "surfaceRoles");
   g_autofree char *product_domain_objects = contract_object_array_summary(runtime_metadata, "productDomainObjectContracts", domain_fields, G_N_ELEMENTS(domain_fields));
   g_autofree char *product_persistence_roots = contract_object_array_summary(runtime_metadata, "productPersistenceRootContracts", persistence_fields, G_N_ELEMENTS(persistence_fields));
   g_autofree char *product_release_targets = contract_object_array_summary(runtime_metadata, "productReleaseTargetContracts", release_fields, G_N_ELEMENTS(release_fields));
-  g_autofree char *contract_text = g_strdup_printf("Runtime contract: %s\nSurface contract: %s\nState: __STATE_COMMAND_TEXT__\nStatus: __STATUS_COMMAND_TEXT__\nSubscribe: __SUBSCRIBE_STATUS_COMMAND_TEXT__\nOperation status: __OPERATION_STATUS_COMMAND_TEXT__\nAction: __ACTION_COMMAND_TEXT__\nHistory: __HISTORY_COMMAND_TEXT__\nDaemon: __DAEMON_COMMAND_TEXT__\nSurface capabilities: %s\nSurface action contracts: __ACTION_CONTRACT_IDS__\nProduct state projections: %s\nProduct domain objects: %s\nProduct persistence roots: %s\nProduct release targets: %s", runtime_contract, surface_contract, surface_capabilities, product_state_projections, product_domain_objects, product_persistence_roots, product_release_targets);
+  g_autofree char *contract_text = g_strdup_printf("Runtime contract: %s\nSurface contract: %s\nState: __STATE_COMMAND_TEXT__\nStatus: __STATUS_COMMAND_TEXT__\nSubscribe: __SUBSCRIBE_STATUS_COMMAND_TEXT__\nOperation status: __OPERATION_STATUS_COMMAND_TEXT__\nAction: __ACTION_COMMAND_TEXT__\nHistory: __HISTORY_COMMAND_TEXT__\nDaemon: __DAEMON_COMMAND_TEXT__\nSurface capabilities: %s\nSurface roles: %s\nSurface action contracts: __ACTION_CONTRACT_IDS__\nProduct state projections: %s\nProduct domain objects: %s\nProduct persistence roots: %s\nProduct release targets: %s", runtime_contract, surface_contract, surface_capabilities, surface_roles, product_state_projections, product_domain_objects, product_persistence_roots, product_release_targets);
   GtkWidget *contract = gtk_label_new(contract_text);
   GtkWidget *button_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
   GtkWidget *button = gtk_button_new_with_label("State");
@@ -5142,6 +5143,7 @@ let runtimeDaemonCommand = __DAEMON_COMMAND__
 let runtimeRequestCommand = ["theurgy-runtime", "run-request"]
 let runtimeRequestManifest = "__RUNTIME_MANIFEST__"
 let surfaceCapabilities = __SURFACE_CAPABILITIES__
+let surfaceRoles = __SURFACE_ROLES__
 let actionContracts = __ACTION_CONTRACTS__
 let defaultActionId = "__DEFAULT_ACTION_ID__"
 
@@ -5205,6 +5207,7 @@ __SURFACE_BODY__
         Text("History: \(runtimeHistoryCommand.joined(separator: " "))")
         Text("Daemon: \(runtimeDaemonCommand.joined(separator: " "))")
         Text("Surface capabilities: \(surfaceCapabilities.joined(separator: ", "))")
+        Text("Surface roles: \(surfaceRoles.joined(separator: ", "))")
         Text("Surface actions: \(actionContracts.map { $0.id }.joined(separator: ", "))")
       }
       .font(.system(.caption, design: .monospaced))
@@ -5424,6 +5427,10 @@ struct TheurgyNativeApp: App {
             .replace(
                 "__SURFACE_CAPABILITIES__",
                 &swift_string_array_literal(&surface.capabilities),
+            )
+            .replace(
+                "__SURFACE_ROLES__",
+                &swift_string_array_literal(&surface.roles),
             )
             .replace("__DEFAULT_ACTION_ID__", &swift_escape(&default_action_id))
             .replace("__SURFACE_BODY__", &surface_body)
@@ -8315,6 +8322,9 @@ binary = "deployments-core"
         assert!(linux_source.contains("\"schema\":\"theurgy-runtime-action-request/v1\""));
         assert!(linux_source.contains("resolve_contract_file(\"runtime.manifest.json\")"));
         assert!(linux_source.contains("Runtime contract: %s\\nSurface contract: %s"));
+        assert!(linux_source
+            .contains("contract_string_array_summary(runtime_metadata, \"surfaceRoles\")"));
+        assert!(linux_source.contains("Surface roles: %s"));
         assert!(!linux_source.contains("__APP_RESOURCE_ID__"));
         assert!(!linux_source.contains("__APP_GAPPLICATION_ID__"));
         assert!(!linux_source.contains("\"runtime-action\", \"refresh_state\", \"{}\", NULL"));
@@ -8345,6 +8355,10 @@ binary = "deployments-core"
         assert!(macos_source.contains("    operationsSplitView\n      .frame(minWidth: 960"));
         assert!(macos_source.contains("server-deployment-listbox"));
         assert!(macos_source.contains("deployment-detail-pane"));
+        assert!(macos_source.contains(
+            "let surfaceRoles = [\"deployment-detail-pane\", \"left-list-detail\", \"server-deployment-listbox\"]"
+        ));
+        assert!(macos_source.contains("Surface roles: \\(surfaceRoles.joined(separator: \", \"))"));
         let ios_surface = product_runtime::project_surface_from_product(&product, "ios").unwrap();
         let ios_surface = product_runtime::validate_surface_ir_value(&ios_surface).unwrap();
         let files = product_runtime::ios_adapter_files(&product, &ios_surface, &runtime);
