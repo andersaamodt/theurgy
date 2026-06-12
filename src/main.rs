@@ -1387,6 +1387,7 @@ mod tests {
         assert!(lines.contains(&"product_actions=2".to_string()));
         assert!(lines.contains(&"product_long_running_actions=1".to_string()));
         assert!(lines.contains(&"product_persistence_truth=file-first".to_string()));
+        assert!(lines.contains(&"product_state_projections=deployments".to_string()));
         assert!(lines.contains(&"product_domain_objects=server,deployment".to_string()));
         assert!(lines.contains(&"product_domain_object_server_label=Server".to_string()));
         assert!(lines.contains(&"product_domain_object_deployment_label=Deployment".to_string()));
@@ -2122,6 +2123,9 @@ mod tests {
         assert!(top_level_required
             .iter()
             .any(|value| value.as_str() == Some("productDomainObjectContracts")));
+        assert!(top_level_required
+            .iter()
+            .any(|value| value.as_str() == Some("productStateProjections")));
         assert!(top_level_required
             .iter()
             .any(|value| value.as_str() == Some("productIr")));
@@ -2970,6 +2974,10 @@ mod tests {
         assert_eq!(
             runtime_json.get("productDomainObjects").unwrap(),
             &serde_json::json!(["server", "deployment"])
+        );
+        assert_eq!(
+            runtime_json.get("productStateProjections").unwrap(),
+            &serde_json::json!(["deployments"])
         );
         assert_eq!(
             runtime_json.get("productDomainObjectContracts").unwrap(),
@@ -4435,7 +4443,7 @@ mod tests {
     }
 
     fn sample_product() -> String {
-        "{\n  \"version\": \"theurgy-product-ir/v1\",\n  \"format\": \"json\",\n  \"app\": {\n    \"id\": \"deployments\",\n    \"name\": \"Deployments\",\n    \"targets\": [\"macos\", \"linux\"],\n    \"capabilities\": [\"native-desktop\", \"runtime-actions\"],\n    \"permissions\": [\"files\"]\n  },\n  \"domain\": {\n    \"objects\": [\n      {\"id\": \"server\", \"label\": \"Server\"},\n      {\"id\": \"deployment\", \"label\": \"Deployment\"}\n    ]\n  },\n  \"actions\": [\n    {\"id\": \"refresh_state\", \"label\": \"Refresh\", \"input\": {}, \"output\": {\"params\": \"object\"}, \"effect\": \"read\", \"failure\": {}, \"safe\": true, \"mutating\": false, \"longRunning\": false, \"privileged\": false},\n    {\"id\": \"publish_changes\", \"label\": \"Push to Production\", \"input\": {\"deployment\": \"string\"}, \"output\": {\"params\": \"object\"}, \"effect\": \"release\", \"failure\": {}, \"safe\": false, \"mutating\": true, \"longRunning\": true, \"privileged\": true}\n  ],\n  \"state\": {\n    \"snapshotSchema\": \"deployments-state/v1\",\n    \"roots\": [{\"id\": \"headquarters-workspace\", \"kind\": \"xdg-state\", \"path\": \"${XDG_STATE_HOME:-$HOME/.local/state}/wizardry-apps/headquarters/workspaces/<workspace-key>\"}]\n  },\n  \"backgroundJobs\": [\n    {\"id\": \"server-queue\", \"label\": \"Server Queue\", \"command\": [\"deployments-daemon\"], \"state\": \"server.queue_mode\"}\n  ],\n  \"releaseTargets\": [\n    {\"id\": \"macos-app\", \"target\": \"macos\", \"surface\": \"desktop\", \"artifact\": \"generated/macos\"},\n    {\"id\": \"linux-app\", \"target\": \"linux\", \"surface\": \"desktop\", \"artifact\": \"generated/linux\"}\n  ],\n  \"persistence\": {\n    \"truth\": \"file-first\"\n  },\n  \"audit\": {\n    \"operationHistory\": true,\n    \"cliParity\": true\n  }\n}".to_string()
+        "{\n  \"version\": \"theurgy-product-ir/v1\",\n  \"format\": \"json\",\n  \"app\": {\n    \"id\": \"deployments\",\n    \"name\": \"Deployments\",\n    \"targets\": [\"macos\", \"linux\"],\n    \"capabilities\": [\"native-desktop\", \"runtime-actions\"],\n    \"permissions\": [\"files\"]\n  },\n  \"domain\": {\n    \"objects\": [\n      {\"id\": \"server\", \"label\": \"Server\"},\n      {\"id\": \"deployment\", \"label\": \"Deployment\"}\n    ]\n  },\n  \"actions\": [\n    {\"id\": \"refresh_state\", \"label\": \"Refresh\", \"input\": {}, \"output\": {\"params\": \"object\"}, \"effect\": \"read\", \"failure\": {}, \"safe\": true, \"mutating\": false, \"longRunning\": false, \"privileged\": false},\n    {\"id\": \"publish_changes\", \"label\": \"Push to Production\", \"input\": {\"deployment\": \"string\"}, \"output\": {\"params\": \"object\"}, \"effect\": \"release\", \"failure\": {}, \"safe\": false, \"mutating\": true, \"longRunning\": true, \"privileged\": true}\n  ],\n  \"state\": {\n    \"snapshotSchema\": \"deployments-state/v1\",\n    \"projections\": [\"deployments\"],\n    \"roots\": [{\"id\": \"headquarters-workspace\", \"kind\": \"xdg-state\", \"path\": \"${XDG_STATE_HOME:-$HOME/.local/state}/wizardry-apps/headquarters/workspaces/<workspace-key>\"}]\n  },\n  \"backgroundJobs\": [\n    {\"id\": \"server-queue\", \"label\": \"Server Queue\", \"command\": [\"deployments-daemon\"], \"state\": \"server.queue_mode\"}\n  ],\n  \"releaseTargets\": [\n    {\"id\": \"macos-app\", \"target\": \"macos\", \"surface\": \"desktop\", \"artifact\": \"generated/macos\"},\n    {\"id\": \"linux-app\", \"target\": \"linux\", \"surface\": \"desktop\", \"artifact\": \"generated/linux\"}\n  ],\n  \"persistence\": {\n    \"truth\": \"file-first\"\n  },\n  \"audit\": {\n    \"operationHistory\": true,\n    \"cliParity\": true\n  }\n}".to_string()
     }
 
     fn sample_mobile_product() -> String {

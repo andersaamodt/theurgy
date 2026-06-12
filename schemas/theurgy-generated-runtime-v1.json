@@ -27,6 +27,7 @@
     "productActions",
     "productActionContracts",
     "productStateSnapshotSchema",
+    "productStateProjections",
     "productPersistenceTruth",
     "adapterRuntimeTransport",
     "surface",
@@ -90,6 +91,7 @@
       "items": { "$ref": "#/$defs/domainObjectContract" }
     },
     "productStateSnapshotSchema": { "type": "string", "minLength": 1 },
+    "productStateProjections": { "$ref": "#/$defs/stringList" },
     "productPersistenceTruth": { "type": "string", "minLength": 1 },
     "adapterRuntimeTransport": {
       "enum": ["local-process-json", "external-json-abi"]

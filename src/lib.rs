@@ -221,6 +221,7 @@ pub mod product_runtime {
         pub domain_objects: Vec<DomainObject>,
         pub domain_object_ids: Vec<String>,
         pub state_snapshot_schema: String,
+        pub state_projections: Vec<String>,
         pub state_command: Vec<String>,
         pub state_status_command: Vec<String>,
         pub persistence_truth: String,
@@ -1166,6 +1167,11 @@ pub mod product_runtime {
                 "generated runtime productDomainObjectContracts order must match productDomainObjects",
             ));
         }
+        optional_string_array(
+            value,
+            "productStateProjections",
+            "generated runtime productStateProjections",
+        )?;
         let product_persistence_roots = value_string_array(value, "productPersistenceRoots")?;
         let persistence_root_contracts = value_array(value, "productPersistenceRootContracts")?;
         if persistence_root_contracts.len() != product_persistence_roots.len() {
@@ -1408,6 +1414,8 @@ pub mod product_runtime {
         let state_snapshot_schema = value_string(state, "snapshotSchema")
             .filter(|schema| !schema.is_empty())
             .ok_or_else(|| ContractError::new("product IR state.snapshotSchema required"))?;
+        let state_projections =
+            optional_string_array(state, "projections", "product IR state.projections")?;
         let state_command = optional_string_array(state, "command", "product IR state.command")?;
         let state_status_command =
             optional_string_array(state, "statusCommand", "product IR state.statusCommand")?;
@@ -1439,6 +1447,7 @@ pub mod product_runtime {
             domain_objects,
             domain_object_ids,
             state_snapshot_schema,
+            state_projections,
             state_command,
             state_status_command,
             persistence_truth,
@@ -1689,6 +1698,10 @@ pub mod product_runtime {
         object.insert(
             "productStateSnapshotSchema".to_string(),
             Value::String(product.state_snapshot_schema.clone()),
+        );
+        object.insert(
+            "productStateProjections".to_string(),
+            string_vec_value(&product.state_projections),
         );
         object.insert(
             "productPersistenceRoots".to_string(),
@@ -2093,6 +2106,10 @@ pub mod product_runtime {
         lines.push(format!(
             "product_persistence_truth={}",
             product.persistence_truth
+        ));
+        lines.push(format!(
+            "product_state_projections={}",
+            product.state_projections.join(",")
         ));
         lines.push(format!(
             "product_domain_objects={}",
@@ -5849,6 +5866,7 @@ binary = "deployments-core"
             ],
             "state": {
                 "snapshotSchema": "deployments-state/v1",
+                "projections": ["servers", "deployments"],
                 "command": ["deployments-core", "runtime-state"],
                 "statusCommand": ["deployments-core", "runtime-status"],
                 "roots": [{
@@ -5896,6 +5914,10 @@ binary = "deployments-core"
         assert_eq!(
             product.state_snapshot_schema,
             "deployments-state/v1".to_string()
+        );
+        assert_eq!(
+            product.state_projections,
+            vec!["servers".to_string(), "deployments".to_string()]
         );
         assert_eq!(
             product.persistence_truth,
@@ -6255,6 +6277,7 @@ binary = "deployments-core"
     "source": "fixture"
   }],
   "productStateSnapshotSchema": "deployments-state/v1",
+  "productStateProjections": ["deployments"],
   "productPersistenceRoots": ["headquarters-workspace"],
   "productPersistenceRootContracts": [{
     "id": "headquarters-workspace",
@@ -6580,6 +6603,7 @@ binary = "deployments-core"
             }],
             "state": {
                 "snapshotSchema": "deployments-state/v1",
+                "projections": ["deployments"],
                 "roots": [{
                     "id": "headquarters-workspace",
                     "kind": "xdg-state",
@@ -6642,6 +6666,10 @@ binary = "deployments-core"
         assert_eq!(summary.surface_actions, 1);
         assert!(metadata.contains("\"legacyNativeDesktopIr\": \"app-blueprint/app.ir.yaml\""));
         let runtime_json: serde_json::Value = serde_json::from_str(&metadata).unwrap();
+        assert_eq!(
+            runtime_json.get("productStateProjections").unwrap(),
+            &serde_json::json!(["deployments"])
+        );
         assert_eq!(
             runtime_json.get("productDomainObjectContracts").unwrap(),
             &serde_json::json!([{
