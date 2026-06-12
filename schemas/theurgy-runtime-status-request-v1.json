@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wizardry.app/schemas/theurgy-runtime-status-request-v1.json",
+  "title": "Theurgy Runtime Status Request v1",
+  "type": "object",
+  "required": ["schema", "protocol", "app", "kind"],
+  "properties": {
+    "schema": { "const": "theurgy-runtime-status-request/v1" },
+    "protocol": { "const": "theurgy-runtime-action/v1" },
+    "app": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "kind": { "const": "status" }
+  },
+  "additionalProperties": false
+}

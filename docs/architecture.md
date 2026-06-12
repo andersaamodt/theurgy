@@ -22,7 +22,7 @@ Theurgy is a higher-integration layer for wizardry-family apps.
 - Desktop Surface IR and Mobile Surface IR are separate projections from Product IR; do not force one universal widget tree across desktop and mobile.
 - Native adapters should be platform-owned and thin over the runtime protocol: `stateCommand`, `statusCommand`, `subscribeStatusCommand`, `operationStatusCommand`, `actionCommand`, `historyCommand`, and operation progress records.
 - Generated runtime metadata must declare the adapter transport boundary. Desktop adapters use `local-process-json`; mobile adapters use `external-json-abi` until generated Swift/Kotlin bindings or an equivalent mobile-safe bridge replaces the JSON ABI.
-- Mobile JSON ABI handoffs must carry Theurgy-owned request schema IDs for action, operation-status, and operation-history requests, so platform hosts are not coupled to undocumented envelope conventions.
+- Mobile JSON ABI handoffs must carry Theurgy-owned request schema IDs for state, status, action, operation-status, and operation-history requests, so platform hosts are not coupled to undocumented envelope conventions.
 - Long-running Product IR actions require a typed operation status bridge in generated runtimes so progress and terminal state are inspectable without platform-specific polling conventions.
 - Existing wizardry-apps shell-first builds remain valid without theurgy; theurgy is the higher-integration path, not a mandatory dependency for ordinary script-first apps.
 

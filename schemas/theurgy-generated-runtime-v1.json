@@ -13,6 +13,8 @@
     "compatibilityWizardryAppsShellFirstStillSupported",
     "compatibilityTheurgyRequiredForLegacyWizardryApps",
     "protocol",
+    "runtimeStateRequestSchema",
+    "runtimeStatusRequestSchema",
     "runtimeStatusSchema",
     "runtimeActionRequestSchema",
     "runtimeActionResultSchema",
@@ -56,6 +58,12 @@
     "compatibilityWizardryAppsShellFirstStillSupported": { "type": "boolean" },
     "compatibilityTheurgyRequiredForLegacyWizardryApps": { "type": "boolean" },
     "protocol": { "type": "string", "minLength": 1 },
+    "runtimeStateRequestSchema": {
+      "const": "theurgy-runtime-state-request/v1"
+    },
+    "runtimeStatusRequestSchema": {
+      "const": "theurgy-runtime-status-request/v1"
+    },
     "runtimeStatusSchema": {
       "const": "theurgy-runtime-status/v1"
     },

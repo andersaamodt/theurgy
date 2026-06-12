@@ -74,6 +74,12 @@ fn run(args: Vec<String>) -> Result<()> {
         Some("validate-action-ir") => command_validate_action_ir(&args[2..]),
         Some("validate-state-snapshot") => command_validate_state_snapshot(&args[2..]),
         Some("validate-runtime-status") => command_validate_runtime_status(&args[2..]),
+        Some("validate-runtime-state-request") => {
+            command_validate_runtime_state_request(&args[2..])
+        }
+        Some("validate-runtime-status-request") => {
+            command_validate_runtime_status_request(&args[2..])
+        }
         Some("validate-runtime-action-request") => {
             command_validate_runtime_action_request(&args[2..])
         }
@@ -334,6 +340,32 @@ fn command_validate_operation_status_request(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+fn command_validate_runtime_state_request(args: &[String]) -> Result<()> {
+    if args.len() != 1 {
+        return Err(TheurgyError::new("usage: validate-runtime-state-request PATH").into());
+    }
+    let value = read_json(Path::new(&args[0]))?;
+    let summary = validate_runtime_state_request(&value)?;
+    println!("status=ok");
+    println!("schema={}", product_runtime::RUNTIME_STATE_REQUEST_SCHEMA);
+    println!("protocol={}", product_runtime::RUNTIME_ACTION_PROTOCOL);
+    println!("app={}", summary.app_id);
+    Ok(())
+}
+
+fn command_validate_runtime_status_request(args: &[String]) -> Result<()> {
+    if args.len() != 1 {
+        return Err(TheurgyError::new("usage: validate-runtime-status-request PATH").into());
+    }
+    let value = read_json(Path::new(&args[0]))?;
+    let summary = validate_runtime_status_request(&value)?;
+    println!("status=ok");
+    println!("schema={}", product_runtime::RUNTIME_STATUS_REQUEST_SCHEMA);
+    println!("protocol={}", product_runtime::RUNTIME_ACTION_PROTOCOL);
+    println!("app={}", summary.app_id);
+    Ok(())
+}
+
 fn command_validate_operation_history(args: &[String]) -> Result<()> {
     if args.len() != 1 {
         return Err(TheurgyError::new("usage: validate-operation-history PATH").into());
@@ -417,6 +449,14 @@ fn command_validate_generated_runtime(args: &[String]) -> Result<()> {
     println!(
         "adapter_runtime_transport={}",
         summary.adapter_runtime_transport
+    );
+    println!(
+        "runtime_state_request_schema={}",
+        summary.runtime_state_request_schema
+    );
+    println!(
+        "runtime_status_request_schema={}",
+        summary.runtime_status_request_schema
     );
     println!("runtime_status_schema={}", summary.runtime_status_schema);
     println!(
@@ -914,6 +954,8 @@ type ActionContract = product_runtime::ProductActionContract;
 type ActionSummary = product_runtime::ActionIr;
 type StateSnapshotSummary = product_runtime::StateSnapshot;
 type RuntimeStatusSummary = product_runtime::RuntimeStatus;
+type RuntimeStateRequestSummary = product_runtime::RuntimeStateRequest;
+type RuntimeStatusRequestSummary = product_runtime::RuntimeStatusRequest;
 type RuntimeActionRequestSummary = product_runtime::RuntimeActionRequest;
 type RuntimeActionResultSummary = product_runtime::RuntimeActionResult;
 type OperationStatusRequestSummary = product_runtime::OperationStatusRequest;
@@ -1009,6 +1051,24 @@ fn validate_runtime_action_request_against_runtime(
 
 fn validate_runtime_action_result_value(value: &Value) -> Result<RuntimeActionResultSummary> {
     product_runtime::validate_runtime_action_result_value(value).map_err(Into::into)
+}
+
+fn validate_runtime_state_request(text: &str) -> Result<RuntimeStateRequestSummary> {
+    let value = parse_json(text)?;
+    validate_runtime_state_request_value(&value)
+}
+
+fn validate_runtime_state_request_value(value: &Value) -> Result<RuntimeStateRequestSummary> {
+    product_runtime::validate_runtime_state_request_value(value).map_err(Into::into)
+}
+
+fn validate_runtime_status_request(text: &str) -> Result<RuntimeStatusRequestSummary> {
+    let value = parse_json(text)?;
+    validate_runtime_status_request_value(&value)
+}
+
+fn validate_runtime_status_request_value(value: &Value) -> Result<RuntimeStatusRequestSummary> {
+    product_runtime::validate_runtime_status_request_value(value).map_err(Into::into)
 }
 
 fn validate_operation_status(text: &str) -> Result<OperationStatusSummary> {
@@ -2126,6 +2186,46 @@ mod tests {
 
     #[test]
     fn operation_request_schemas_declare_mobile_bridge_envelopes() {
+        let state_schema: Value = serde_json::from_str(include_str!(
+            "../schemas/theurgy-runtime-state-request-v1.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            state_schema
+                .pointer("/properties/schema/const")
+                .and_then(Value::as_str),
+            Some("theurgy-runtime-state-request/v1")
+        );
+        assert_eq!(
+            state_schema
+                .pointer("/properties/protocol/const")
+                .and_then(Value::as_str),
+            Some("theurgy-runtime-action/v1")
+        );
+        assert_eq!(
+            state_schema
+                .pointer("/properties/kind/const")
+                .and_then(Value::as_str),
+            Some("state")
+        );
+
+        let runtime_status_schema: Value = serde_json::from_str(include_str!(
+            "../schemas/theurgy-runtime-status-request-v1.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            runtime_status_schema
+                .pointer("/properties/schema/const")
+                .and_then(Value::as_str),
+            Some("theurgy-runtime-status-request/v1")
+        );
+        assert_eq!(
+            runtime_status_schema
+                .pointer("/properties/kind/const")
+                .and_then(Value::as_str),
+            Some("status")
+        );
+
         let status_schema: Value = serde_json::from_str(include_str!(
             "../schemas/theurgy-operation-status-request-v1.json"
         ))
@@ -2314,6 +2414,12 @@ mod tests {
             .any(|value| value.as_str() == Some("productIr")));
         assert!(top_level_required
             .iter()
+            .any(|value| value.as_str() == Some("runtimeStateRequestSchema")));
+        assert!(top_level_required
+            .iter()
+            .any(|value| value.as_str() == Some("runtimeStatusRequestSchema")));
+        assert!(top_level_required
+            .iter()
             .any(|value| value.as_str() == Some("runtimeManifest")));
         assert!(top_level_required
             .iter()
@@ -2341,6 +2447,18 @@ mod tests {
                 .pointer("/properties/legacyNativeDesktopIr/minLength")
                 .and_then(Value::as_i64),
             Some(1)
+        );
+        assert_eq!(
+            schema
+                .pointer("/properties/runtimeStateRequestSchema/const")
+                .and_then(Value::as_str),
+            Some("theurgy-runtime-state-request/v1")
+        );
+        assert_eq!(
+            schema
+                .pointer("/properties/runtimeStatusRequestSchema/const")
+                .and_then(Value::as_str),
+            Some("theurgy-runtime-status-request/v1")
         );
         assert_eq!(
             schema
@@ -2511,6 +2629,14 @@ mod tests {
 
     #[test]
     fn validates_operation_request_contracts() {
+        let state_request = "{\n  \"schema\": \"theurgy-runtime-state-request/v1\",\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments\",\n  \"kind\": \"state\"\n}";
+        let summary = validate_runtime_state_request(state_request).unwrap();
+        assert_eq!(summary.app_id, "deployments");
+
+        let status_request = "{\n  \"schema\": \"theurgy-runtime-status-request/v1\",\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments\",\n  \"kind\": \"status\"\n}";
+        let summary = validate_runtime_status_request(status_request).unwrap();
+        assert_eq!(summary.app_id, "deployments");
+
         let status_request = "{\n  \"schema\": \"theurgy-operation-status-request/v1\",\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments\",\n  \"kind\": \"operation-status\",\n  \"operation\": \"op-publish\"\n}";
         let summary = validate_operation_status_request(status_request).unwrap();
         assert_eq!(summary.app_id, "deployments");
@@ -2541,11 +2667,42 @@ mod tests {
             error,
             "operation history request limit must be a positive integer"
         );
+
+        let error = validate_runtime_state_request(
+            "{\n  \"schema\": \"theurgy-runtime-state-request/v1\",\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"Deployments\",\n  \"kind\": \"state\"\n}",
+        )
+        .unwrap_err()
+        .to_string();
+        assert_eq!(error, "runtime state request app must be a lowercase slug");
+
+        let error = validate_runtime_status_request(
+            "{\n  \"schema\": \"theurgy-runtime-status-request/v1\",\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments\",\n  \"kind\": \"state\"\n}",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("expected kind = status"));
     }
 
     #[test]
     fn command_validates_operation_request_files() {
         let root = runtime_fixture_root("validate-operation-requests");
+        let state_request = root.join("state-request.json");
+        write_or_replace(
+            &state_request,
+            "{\n  \"schema\": \"theurgy-runtime-state-request/v1\",\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments\",\n  \"kind\": \"state\"\n}",
+        )
+        .unwrap();
+        command_validate_runtime_state_request(&[state_request.display().to_string()]).unwrap();
+
+        let runtime_status_request = root.join("runtime-status-request.json");
+        write_or_replace(
+            &runtime_status_request,
+            "{\n  \"schema\": \"theurgy-runtime-status-request/v1\",\n  \"protocol\": \"theurgy-runtime-action/v1\",\n  \"app\": \"deployments\",\n  \"kind\": \"status\"\n}",
+        )
+        .unwrap();
+        command_validate_runtime_status_request(&[runtime_status_request.display().to_string()])
+            .unwrap();
+
         let status_request = root.join("status-request.json");
         write_or_replace(
             &status_request,
@@ -3082,6 +3239,14 @@ mod tests {
         );
         assert_eq!(generated.persistence_truth, "file-first");
         assert_eq!(generated.adapter_runtime_transport, "local-process-json");
+        assert_eq!(
+            generated.runtime_state_request_schema,
+            "theurgy-runtime-state-request/v1"
+        );
+        assert_eq!(
+            generated.runtime_status_request_schema,
+            "theurgy-runtime-status-request/v1"
+        );
         assert_eq!(generated.runtime_status_schema, "theurgy-runtime-status/v1");
         assert_eq!(
             generated.runtime_action_request_schema,
@@ -3142,6 +3307,18 @@ mod tests {
         assert_eq!(
             runtime_json.get("operationStatusCommand").unwrap(),
             &serde_json::json!(["deployments-core", "runtime-operation-status"])
+        );
+        assert_eq!(
+            runtime_json
+                .get("runtimeStateRequestSchema")
+                .and_then(Value::as_str),
+            Some("theurgy-runtime-state-request/v1")
+        );
+        assert_eq!(
+            runtime_json
+                .get("runtimeStatusRequestSchema")
+                .and_then(Value::as_str),
+            Some("theurgy-runtime-status-request/v1")
         );
         assert_eq!(
             runtime_json
@@ -3731,6 +3908,14 @@ mod tests {
         let runtime_json: Value = serde_json::from_str(&runtime).unwrap();
         let generated = validate_generated_runtime(&runtime).unwrap();
         assert_eq!(generated.adapter_runtime_transport, "local-process-json");
+        assert_eq!(
+            generated.runtime_state_request_schema,
+            "theurgy-runtime-state-request/v1"
+        );
+        assert_eq!(
+            generated.runtime_status_request_schema,
+            "theurgy-runtime-status-request/v1"
+        );
         assert_eq!(generated.runtime_status_schema, "theurgy-runtime-status/v1");
         assert_eq!(
             generated.runtime_action_request_schema,
@@ -3787,6 +3972,18 @@ mod tests {
         assert_eq!(
             runtime_json.get("operationStatusCommand").unwrap(),
             &serde_json::json!(["custom-core", "operation-status"])
+        );
+        assert_eq!(
+            runtime_json
+                .get("runtimeStateRequestSchema")
+                .and_then(Value::as_str),
+            Some("theurgy-runtime-state-request/v1")
+        );
+        assert_eq!(
+            runtime_json
+                .get("runtimeStatusRequestSchema")
+                .and_then(Value::as_str),
+            Some("theurgy-runtime-status-request/v1")
         );
         assert_eq!(
             runtime_json
@@ -4423,6 +4620,8 @@ mod tests {
         assert!(ios.contains("runtimeString(runtimeMetadata, key: \"app\")"));
         assert!(ios.contains("runtimeString(runtimeMetadata, key: \"target\")"));
         assert!(ios.contains("runtimeString(runtimeMetadata, key: \"adapterRuntimeTransport\")"));
+        assert!(ios.contains("runtimeString(runtimeMetadata, key: \"runtimeStateRequestSchema\")"));
+        assert!(ios.contains("runtimeString(runtimeMetadata, key: \"runtimeStatusRequestSchema\")"));
         assert!(ios.contains("runtimeString(runtimeMetadata, key: \"runtimeStatusSchema\")"));
         assert!(ios.contains("runtimeString(runtimeMetadata, key: \"runtimeActionRequestSchema\")"));
         assert!(ios.contains("runtimeString(runtimeMetadata, key: \"runtimeActionResultSchema\")"));
@@ -4454,6 +4653,12 @@ mod tests {
         assert!(ios.contains("Runtime app: \\(contract.runtimeApp)"));
         assert!(ios.contains("Runtime target: \\(contract.runtimeTarget)"));
         assert!(ios.contains("Runtime transport: \\(contract.runtimeTransport)"));
+        assert!(
+            ios.contains("Runtime state request schema: \\(contract.runtimeStateRequestSchema)")
+        );
+        assert!(
+            ios.contains("Runtime status request schema: \\(contract.runtimeStatusRequestSchema)")
+        );
         assert!(ios.contains("Runtime status schema: \\(contract.runtimeStatusSchema)"));
         assert!(
             ios.contains("Runtime action request schema: \\(contract.runtimeActionRequestSchema)")
@@ -4492,6 +4697,14 @@ mod tests {
         assert!(ios
             .contains("func command(for action: ProductActionContract, json: String) -> [String]"));
         assert!(ios.contains("actionCommand + [action.id, json]"));
+        assert!(ios.contains("func stateEnvelope() -> String"));
+        assert!(ios.contains("\"schema\": runtimeStateRequestSchema"));
+        assert!(ios.contains("\"kind\": \"state\""));
+        assert!(ios.contains("func statusEnvelope() -> String"));
+        assert!(ios.contains("\"schema\": runtimeStatusRequestSchema"));
+        assert!(ios.contains("\"kind\": \"status\""));
+        assert!(ios.contains("Text(contract.stateEnvelope())"));
+        assert!(ios.contains("Text(contract.statusEnvelope())"));
         assert!(ios.contains(
             "func actionEnvelope(for action: ProductActionContract, params: [String: Any]) -> String"
         ));
@@ -4539,6 +4752,14 @@ mod tests {
         .unwrap();
         assert_eq!(ios_generated.adapter_runtime_transport, "external-json-abi");
         assert_eq!(
+            ios_generated.runtime_state_request_schema,
+            "theurgy-runtime-state-request/v1"
+        );
+        assert_eq!(
+            ios_generated.runtime_status_request_schema,
+            "theurgy-runtime-status-request/v1"
+        );
+        assert_eq!(
             ios_generated.runtime_status_schema,
             "theurgy-runtime-status/v1"
         );
@@ -4560,6 +4781,18 @@ mod tests {
         );
         assert_eq!(ios_generated.surface_schema, "theurgy-mobile-surface-ir/v1");
         assert_eq!(ios_generated.surface_target, "ios");
+        assert_eq!(
+            ios_runtime
+                .get("runtimeStateRequestSchema")
+                .and_then(Value::as_str),
+            Some("theurgy-runtime-state-request/v1")
+        );
+        assert_eq!(
+            ios_runtime
+                .get("runtimeStatusRequestSchema")
+                .and_then(Value::as_str),
+            Some("theurgy-runtime-status-request/v1")
+        );
         assert_eq!(
             ios_runtime
                 .get("runtimeStatusSchema")
@@ -4609,6 +4842,8 @@ mod tests {
         assert!(android.contains("jsonString(runtimeMetadata, \"app\")"));
         assert!(android.contains("jsonString(runtimeMetadata, \"target\")"));
         assert!(android.contains("jsonString(runtimeMetadata, \"adapterRuntimeTransport\")"));
+        assert!(android.contains("jsonString(runtimeMetadata, \"runtimeStateRequestSchema\")"));
+        assert!(android.contains("jsonString(runtimeMetadata, \"runtimeStatusRequestSchema\")"));
         assert!(android.contains("jsonString(runtimeMetadata, \"runtimeStatusSchema\")"));
         assert!(android.contains("jsonString(runtimeMetadata, \"runtimeActionRequestSchema\")"));
         assert!(android.contains("jsonString(runtimeMetadata, \"runtimeActionResultSchema\")"));
@@ -4634,6 +4869,8 @@ mod tests {
         assert!(android.contains("Runtime app: "));
         assert!(android.contains("Runtime target: "));
         assert!(android.contains("Runtime transport: "));
+        assert!(android.contains("Runtime state request schema: "));
+        assert!(android.contains("Runtime status request schema: "));
         assert!(android.contains("Runtime status schema: "));
         assert!(android.contains("Runtime action request schema: "));
         assert!(android.contains("Runtime action result schema: "));
@@ -4663,6 +4900,14 @@ mod tests {
             "private static String[] commandFor(ProductActionContract action, String json)"
         ));
         assert!(android.contains("command[ACTION_COMMAND.length] = action.id;"));
+        assert!(android
+            .contains("private static String stateEnvelope(String app, String requestSchema)"));
+        assert!(android.contains("envelope.put(\"kind\", \"state\");"));
+        assert!(android
+            .contains("private static String statusEnvelope(String app, String requestSchema)"));
+        assert!(android.contains("envelope.put(\"kind\", \"status\");"));
+        assert!(android.contains("State envelope: "));
+        assert!(android.contains("Status envelope: "));
         assert!(android.contains(
             "private static String actionEnvelope(String app, String requestSchema, ProductActionContract action, JSONObject params)"
         ));
@@ -4726,6 +4971,14 @@ mod tests {
             "external-json-abi"
         );
         assert_eq!(
+            android_generated.runtime_state_request_schema,
+            "theurgy-runtime-state-request/v1"
+        );
+        assert_eq!(
+            android_generated.runtime_status_request_schema,
+            "theurgy-runtime-status-request/v1"
+        );
+        assert_eq!(
             android_generated.runtime_status_schema,
             "theurgy-runtime-status/v1"
         );
@@ -4750,6 +5003,18 @@ mod tests {
             "theurgy-mobile-surface-ir/v1"
         );
         assert_eq!(android_generated.surface_target, "android");
+        assert_eq!(
+            android_runtime
+                .get("runtimeStateRequestSchema")
+                .and_then(Value::as_str),
+            Some("theurgy-runtime-state-request/v1")
+        );
+        assert_eq!(
+            android_runtime
+                .get("runtimeStatusRequestSchema")
+                .and_then(Value::as_str),
+            Some("theurgy-runtime-status-request/v1")
+        );
         assert_eq!(
             android_runtime
                 .get("runtimeStatusSchema")

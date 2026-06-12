@@ -14,6 +14,8 @@ pub mod product_runtime {
     pub const STATE_SNAPSHOT_SCHEMA: &str = "theurgy-state-snapshot/v1";
     pub const RUNTIME_STATUS_SCHEMA: &str = "theurgy-runtime-status/v1";
     pub const RUNTIME_ACTION_PROTOCOL: &str = "theurgy-runtime-action/v1";
+    pub const RUNTIME_STATE_REQUEST_SCHEMA: &str = "theurgy-runtime-state-request/v1";
+    pub const RUNTIME_STATUS_REQUEST_SCHEMA: &str = "theurgy-runtime-status-request/v1";
     pub const RUNTIME_ACTION_REQUEST_SCHEMA: &str = "theurgy-runtime-action-request/v1";
     pub const RUNTIME_ACTION_RESULT_SCHEMA: &str = "theurgy-runtime-action-result/v1";
     pub const OPERATION_STATUS_REQUEST_SCHEMA: &str = "theurgy-operation-status-request/v1";
@@ -76,6 +78,16 @@ pub mod product_runtime {
     pub struct RuntimeActionRequest {
         pub app_id: String,
         pub action_id: String,
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct RuntimeStateRequest {
+        pub app_id: String,
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct RuntimeStatusRequest {
+        pub app_id: String,
     }
 
     #[derive(Clone, Debug, Eq, PartialEq)]
@@ -172,6 +184,8 @@ pub mod product_runtime {
         pub state_snapshot_schema: String,
         pub persistence_truth: String,
         pub adapter_runtime_transport: String,
+        pub runtime_state_request_schema: String,
+        pub runtime_status_request_schema: String,
         pub runtime_status_schema: String,
         pub runtime_action_request_schema: String,
         pub runtime_action_result_schema: String,
@@ -405,6 +419,34 @@ pub mod product_runtime {
             })?;
         value_object(value, "params")?;
         Ok(RuntimeActionRequest { app_id, action_id })
+    }
+
+    pub fn validate_runtime_state_request_value(
+        value: &Value,
+    ) -> ContractResult<RuntimeStateRequest> {
+        expect_value_string(value, "schema", RUNTIME_STATE_REQUEST_SCHEMA)?;
+        expect_value_string(value, "protocol", RUNTIME_ACTION_PROTOCOL)?;
+        let app_id = value_string(value, "app")
+            .filter(|id| valid_runtime_request_app_id(id))
+            .ok_or_else(|| {
+                ContractError::new("runtime state request app must be a lowercase slug")
+            })?;
+        expect_value_string(value, "kind", "state")?;
+        Ok(RuntimeStateRequest { app_id })
+    }
+
+    pub fn validate_runtime_status_request_value(
+        value: &Value,
+    ) -> ContractResult<RuntimeStatusRequest> {
+        expect_value_string(value, "schema", RUNTIME_STATUS_REQUEST_SCHEMA)?;
+        expect_value_string(value, "protocol", RUNTIME_ACTION_PROTOCOL)?;
+        let app_id = value_string(value, "app")
+            .filter(|id| valid_runtime_request_app_id(id))
+            .ok_or_else(|| {
+                ContractError::new("runtime status request app must be a lowercase slug")
+            })?;
+        expect_value_string(value, "kind", "status")?;
+        Ok(RuntimeStatusRequest { app_id })
     }
 
     pub fn validate_operation_status_request_value(
@@ -1126,6 +1168,16 @@ pub mod product_runtime {
         value_string(value, "protocol")
             .filter(|protocol| !protocol.is_empty())
             .ok_or_else(|| ContractError::new("generated runtime protocol required"))?;
+        let runtime_state_request_schema = expect_and_return_value_string(
+            value,
+            "runtimeStateRequestSchema",
+            RUNTIME_STATE_REQUEST_SCHEMA,
+        )?;
+        let runtime_status_request_schema = expect_and_return_value_string(
+            value,
+            "runtimeStatusRequestSchema",
+            RUNTIME_STATUS_REQUEST_SCHEMA,
+        )?;
         let runtime_status_schema =
             expect_and_return_value_string(value, "runtimeStatusSchema", RUNTIME_STATUS_SCHEMA)?;
         let runtime_action_request_schema = expect_and_return_value_string(
@@ -1467,6 +1519,8 @@ pub mod product_runtime {
             state_snapshot_schema,
             persistence_truth,
             adapter_runtime_transport,
+            runtime_state_request_schema,
+            runtime_status_request_schema,
             runtime_status_schema,
             runtime_action_request_schema,
             runtime_action_result_schema,
@@ -1873,6 +1927,14 @@ pub mod product_runtime {
         object.insert(
             "protocol".to_string(),
             Value::String(runtime.protocol.clone()),
+        );
+        object.insert(
+            "runtimeStateRequestSchema".to_string(),
+            Value::String(RUNTIME_STATE_REQUEST_SCHEMA.to_string()),
+        );
+        object.insert(
+            "runtimeStatusRequestSchema".to_string(),
+            Value::String(RUNTIME_STATUS_REQUEST_SCHEMA.to_string()),
         );
         object.insert(
             "runtimeStatusSchema".to_string(),
@@ -4032,6 +4094,8 @@ struct RuntimeContract {
   var runtimeApp: String { runtimeString(runtimeMetadata, key: "app") }
   var runtimeTarget: String { runtimeString(runtimeMetadata, key: "target") }
   var runtimeTransport: String { runtimeString(runtimeMetadata, key: "adapterRuntimeTransport") }
+  var runtimeStateRequestSchema: String { runtimeString(runtimeMetadata, key: "runtimeStateRequestSchema") }
+  var runtimeStatusRequestSchema: String { runtimeString(runtimeMetadata, key: "runtimeStatusRequestSchema") }
   var runtimeStatusSchema: String { runtimeString(runtimeMetadata, key: "runtimeStatusSchema") }
   var runtimeActionRequestSchema: String { runtimeString(runtimeMetadata, key: "runtimeActionRequestSchema") }
   var runtimeActionResultSchema: String { runtimeString(runtimeMetadata, key: "runtimeActionResultSchema") }
@@ -4108,6 +4172,32 @@ struct RuntimeContract {
     return String(data: data, encoding: .utf8) ?? "{}"
   }
 
+  func stateEnvelope() -> String {
+    let envelope: [String: Any] = [
+      "schema": runtimeStateRequestSchema,
+      "protocol": protocolName,
+      "app": runtimeApp,
+      "kind": "state"
+    ]
+    guard let data = try? JSONSerialization.data(withJSONObject: envelope, options: [.sortedKeys]) else {
+      return "{}"
+    }
+    return String(data: data, encoding: .utf8) ?? "{}"
+  }
+
+  func statusEnvelope() -> String {
+    let envelope: [String: Any] = [
+      "schema": runtimeStatusRequestSchema,
+      "protocol": protocolName,
+      "app": runtimeApp,
+      "kind": "status"
+    ]
+    guard let data = try? JSONSerialization.data(withJSONObject: envelope, options: [.sortedKeys]) else {
+      return "{}"
+    }
+    return String(data: data, encoding: .utf8) ?? "{}"
+  }
+
   func operationStatusEnvelope(for operationId: String) -> String {
     let envelope: [String: Any] = [
       "protocol": protocolName,
@@ -4171,6 +4261,8 @@ struct MobileSurfaceScreenView: View {
           Text("Runtime app: \(contract.runtimeApp)")
           Text("Runtime target: \(contract.runtimeTarget)")
           Text("Runtime transport: \(contract.runtimeTransport)")
+          Text("Runtime state request schema: \(contract.runtimeStateRequestSchema)")
+          Text("Runtime status request schema: \(contract.runtimeStatusRequestSchema)")
           Text("Runtime status schema: \(contract.runtimeStatusSchema)")
           Text("Runtime action request schema: \(contract.runtimeActionRequestSchema)")
           Text("Runtime action result schema: \(contract.runtimeActionResultSchema)")
@@ -4181,7 +4273,9 @@ struct MobileSurfaceScreenView: View {
           Text("Runtime surface actions: \(contract.runtimeSurfaceActions.joined(separator: ", "))")
           Text("Product state projections: \(contract.productStateProjections.joined(separator: ", "))")
           Text(contract.stateCommand.joined(separator: " "))
+          Text(contract.stateEnvelope())
           Text(contract.statusCommand.joined(separator: " "))
+          Text(contract.statusEnvelope())
           Text(contract.subscribeStatusCommand.joined(separator: " "))
           Text(contract.operationStatusCommand.joined(separator: " "))
           Text(contract.operationStatusEnvelope(for: "default"))
@@ -4452,6 +4546,32 @@ public final class MainActivity extends Activity {
     }
   }
 
+  private static String stateEnvelope(String app, String requestSchema) {
+    try {
+      JSONObject envelope = new JSONObject();
+      envelope.put("schema", requestSchema);
+      envelope.put("protocol", PROTOCOL);
+      envelope.put("app", app);
+      envelope.put("kind", "state");
+      return envelope.toString();
+    } catch (JSONException error) {
+      return "{}";
+    }
+  }
+
+  private static String statusEnvelope(String app, String requestSchema) {
+    try {
+      JSONObject envelope = new JSONObject();
+      envelope.put("schema", requestSchema);
+      envelope.put("protocol", PROTOCOL);
+      envelope.put("app", app);
+      envelope.put("kind", "status");
+      return envelope.toString();
+    } catch (JSONException error) {
+      return "{}";
+    }
+  }
+
   private static String operationStatusEnvelope(String app, String requestSchema, String operationId) {
     try {
       JSONObject envelope = new JSONObject();
@@ -4598,12 +4718,14 @@ public final class MainActivity extends Activity {
     String runtimeMetadata = loadBundledContract("theurgy-runtime.json");
     String surfaceMetadata = loadBundledContract("theurgy-surface.json");
     String runtimeApp = jsonString(runtimeMetadata, "app");
+    String runtimeStateRequestSchema = jsonString(runtimeMetadata, "runtimeStateRequestSchema");
+    String runtimeStatusRequestSchema = jsonString(runtimeMetadata, "runtimeStatusRequestSchema");
     String operationStatusRequestSchema = jsonString(runtimeMetadata, "operationStatusRequestSchema");
     String operationHistoryRequestSchema = jsonString(runtimeMetadata, "operationHistoryRequestSchema");
     for (MobileScreenContract screen : SCREEN_CONTRACTS) {
       Button button = new Button(this);
       button.setText(screen.title);
-      button.setOnClickListener((View clicked) -> view.setText(renderScreenText(screen, runtimeMetadata, surfaceMetadata, runtimeApp, operationStatusRequestSchema, operationHistoryRequestSchema)));
+      button.setOnClickListener((View clicked) -> view.setText(renderScreenText(screen, runtimeMetadata, surfaceMetadata, runtimeApp, runtimeStateRequestSchema, runtimeStatusRequestSchema, operationStatusRequestSchema, operationHistoryRequestSchema)));
       tabs.addView(button);
     }
     root.addView(tabs);
@@ -4611,11 +4733,11 @@ public final class MainActivity extends Activity {
     scroll.addView(view);
     root.addView(scroll);
     MobileScreenContract initialScreen = SCREEN_CONTRACTS.length > 0 ? SCREEN_CONTRACTS[0] : new MobileScreenContract("runtime", "__APP_NAME__", "runtime", "Screen", null, new String[] {});
-    view.setText(renderScreenText(initialScreen, runtimeMetadata, surfaceMetadata, runtimeApp, operationStatusRequestSchema, operationHistoryRequestSchema));
+    view.setText(renderScreenText(initialScreen, runtimeMetadata, surfaceMetadata, runtimeApp, runtimeStateRequestSchema, runtimeStatusRequestSchema, operationStatusRequestSchema, operationHistoryRequestSchema));
     setContentView(root);
   }
 
-  private static String renderScreenText(MobileScreenContract activeScreen, String runtimeMetadata, String surfaceMetadata, String runtimeApp, String operationStatusRequestSchema, String operationHistoryRequestSchema) {
+  private static String renderScreenText(MobileScreenContract activeScreen, String runtimeMetadata, String surfaceMetadata, String runtimeApp, String runtimeStateRequestSchema, String runtimeStatusRequestSchema, String operationStatusRequestSchema, String operationHistoryRequestSchema) {
     StringBuilder text = new StringBuilder();
     text.append(activeScreen.title).append("\nScreen: ").append(activeScreen.id)
       .append("\nScreen node: ").append(activeScreen.nodeId)
@@ -4625,6 +4747,8 @@ public final class MainActivity extends Activity {
       .append("\nRuntime app: ").append(runtimeApp)
       .append("\nRuntime target: ").append(jsonString(runtimeMetadata, "target"))
       .append("\nRuntime transport: ").append(jsonString(runtimeMetadata, "adapterRuntimeTransport"))
+      .append("\nRuntime state request schema: ").append(runtimeStateRequestSchema)
+      .append("\nRuntime status request schema: ").append(runtimeStatusRequestSchema)
       .append("\nRuntime status schema: ").append(jsonString(runtimeMetadata, "runtimeStatusSchema"))
       .append("\nRuntime action request schema: ").append(jsonString(runtimeMetadata, "runtimeActionRequestSchema"))
       .append("\nRuntime action result schema: ").append(jsonString(runtimeMetadata, "runtimeActionResultSchema"))
@@ -4650,7 +4774,9 @@ public final class MainActivity extends Activity {
     text
 __MOBILE_WORKFLOW_TEXT__
       .append("\nState: ").append(String.join(" ", STATE_COMMAND))
+      .append("\nState envelope: ").append(stateEnvelope(runtimeApp, runtimeStateRequestSchema))
       .append("\nStatus: ").append(String.join(" ", STATUS_COMMAND))
+      .append("\nStatus envelope: ").append(statusEnvelope(runtimeApp, runtimeStatusRequestSchema))
       .append("\nSubscribe: ").append(String.join(" ", SUBSCRIBE_STATUS_COMMAND))
       .append("\nOperation status: ").append(String.join(" ", OPERATION_STATUS_COMMAND))
       .append("\nOperation status envelope: ").append(operationStatusEnvelope(runtimeApp, operationStatusRequestSchema, "default"))
@@ -5942,6 +6068,14 @@ mod tests {
             "theurgy-runtime-action/v1"
         );
         assert_eq!(
+            product_runtime::RUNTIME_STATE_REQUEST_SCHEMA,
+            "theurgy-runtime-state-request/v1"
+        );
+        assert_eq!(
+            product_runtime::RUNTIME_STATUS_REQUEST_SCHEMA,
+            "theurgy-runtime-status-request/v1"
+        );
+        assert_eq!(
             product_runtime::OPERATION_STATUS_REQUEST_SCHEMA,
             "theurgy-operation-status-request/v1"
         );
@@ -7012,6 +7146,8 @@ binary = "deployments-core"
   "targetReleaseArtifact": "generated/macos",
   "productAuditKeys": ["cliParity"],
   "protocol": "theurgy-runtime-action/v1",
+  "runtimeStateRequestSchema": "theurgy-runtime-state-request/v1",
+  "runtimeStatusRequestSchema": "theurgy-runtime-status-request/v1",
   "runtimeStatusSchema": "theurgy-runtime-status/v1",
   "runtimeActionRequestSchema": "theurgy-runtime-action-request/v1",
   "runtimeActionResultSchema": "theurgy-runtime-action-result/v1",
@@ -7054,6 +7190,14 @@ binary = "deployments-core"
         assert_eq!(
             summary.adapter_runtime_transport,
             product_runtime::DESKTOP_ADAPTER_TRANSPORT
+        );
+        assert_eq!(
+            summary.runtime_state_request_schema,
+            product_runtime::RUNTIME_STATE_REQUEST_SCHEMA
+        );
+        assert_eq!(
+            summary.runtime_status_request_schema,
+            product_runtime::RUNTIME_STATUS_REQUEST_SCHEMA
         );
         assert_eq!(summary.surface_action_contracts, 1);
         assert_eq!(summary.surface_screens, 0);
@@ -7381,6 +7525,14 @@ binary = "deployments-core"
         assert_eq!(
             summary.adapter_runtime_transport,
             product_runtime::DESKTOP_ADAPTER_TRANSPORT
+        );
+        assert_eq!(
+            summary.runtime_state_request_schema,
+            product_runtime::RUNTIME_STATE_REQUEST_SCHEMA
+        );
+        assert_eq!(
+            summary.runtime_status_request_schema,
+            product_runtime::RUNTIME_STATUS_REQUEST_SCHEMA
         );
         assert_eq!(
             summary.operation_status_request_schema,
