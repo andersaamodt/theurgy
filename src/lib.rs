@@ -605,6 +605,70 @@ pub mod product_runtime {
         validate_runtime_output_app("operation history", expected_app, &summary.app_id)
     }
 
+    pub fn runtime_state_command(runtime: &RuntimeBridge) -> ContractResult<Vec<String>> {
+        require_runtime_command(&runtime.state_command, "state")
+    }
+
+    pub fn runtime_status_command(runtime: &RuntimeBridge) -> ContractResult<Vec<String>> {
+        require_runtime_command(&runtime.status_command, "statusCommand")
+    }
+
+    pub fn runtime_subscribe_status_command(
+        runtime: &RuntimeBridge,
+    ) -> ContractResult<Vec<String>> {
+        let command = effective_subscribe_status_command(runtime);
+        if command.is_empty() {
+            return Err(ContractError::new(
+                "runtime manifest subscribeStatusCommand or statusCommand required",
+            ));
+        }
+        Ok(command)
+    }
+
+    pub fn runtime_operation_status_command(
+        runtime: &RuntimeBridge,
+        operation_id: &str,
+    ) -> ContractResult<Vec<String>> {
+        let mut command =
+            require_runtime_command(&runtime.operation_status_command, "operationStatusCommand")?;
+        command.push(operation_id.to_string());
+        Ok(command)
+    }
+
+    pub fn runtime_history_command(
+        runtime: &RuntimeBridge,
+        subject: &str,
+        limit: Option<&str>,
+    ) -> ContractResult<Vec<String>> {
+        let mut command = require_runtime_command(&runtime.history_command, "historyCommand")?;
+        command.push(subject.to_string());
+        if let Some(limit) = limit {
+            command.push(limit.to_string());
+        }
+        Ok(command)
+    }
+
+    pub fn runtime_action_command(
+        runtime: &RuntimeBridge,
+        action_id: &str,
+        params: &str,
+    ) -> ContractResult<Vec<String>> {
+        let mut command = require_runtime_command(&runtime.action_command, "actionCommand")?;
+        if let Some(action_ids) = &runtime.product_action_ids {
+            if !action_ids.iter().any(|declared| declared == action_id) {
+                return Err(ContractError::new(format!(
+                    "runtime action not declared in Product IR: {action_id}"
+                )));
+            }
+        }
+        if let Some(contracts) = &runtime.product_action_contracts {
+            validate_runtime_action_params_text(action_id, params, contracts)?;
+        }
+        command.push(action_id.to_string());
+        command.push(params.to_string());
+        Ok(command)
+    }
+
     pub fn validate_operation_status_value(value: &Value) -> ContractResult<OperationStatus> {
         expect_value_string(value, "schema", OPERATION_STATUS_SCHEMA)?;
         let app_id = value_string(value, "app")
@@ -3841,6 +3905,15 @@ struct TheurgyNativeApp: App {
         path
     }
 
+    fn require_runtime_command(command: &[String], key: &str) -> ContractResult<Vec<String>> {
+        if command.is_empty() {
+            return Err(ContractError::new(format!(
+                "runtime manifest {key} required"
+            )));
+        }
+        Ok(command.to_vec())
+    }
+
     fn validate_runtime_output_app(
         label: &str,
         expected_app: &str,
@@ -5273,6 +5346,102 @@ binary = "deployments-core"
         assert_eq!(
             error,
             "runtime action failure type mismatch for publish_changes.error: expected string"
+        );
+    }
+
+    #[test]
+    fn product_runtime_builds_runtime_command_invocations() {
+        let contract = product_runtime::ProductActionContract {
+            id: "publish_changes".to_string(),
+            label: "Push to Production".to_string(),
+            effect: "release".to_string(),
+            safe: false,
+            mutating: true,
+            long_running: true,
+            privileged: true,
+            command: Vec::new(),
+            input_keys: vec!["deployment".to_string()],
+            output_keys: vec!["message".to_string()],
+            failure_keys: vec!["error".to_string()],
+            input_shape: [("deployment".to_string(), "string".to_string())]
+                .into_iter()
+                .collect(),
+            output_shape: [("message".to_string(), "string".to_string())]
+                .into_iter()
+                .collect(),
+            failure_shape: [("error".to_string(), "string".to_string())]
+                .into_iter()
+                .collect(),
+        };
+        let runtime = product_runtime::RuntimeBridge {
+            app_id: "deployments".to_string(),
+            protocol: product_runtime::RUNTIME_ACTION_PROTOCOL.to_string(),
+            product_ir: "product.ir.json".to_string(),
+            runtime_manifest: "runtime.manifest.json".to_string(),
+            source_surface_ir: "desktop.surface.ir.json".to_string(),
+            legacy_native_desktop_ir: None,
+            compatibility: product_runtime::RuntimeCompatibility::shell_first_default(),
+            state_command: vec!["deployments-core".to_string(), "runtime-state".to_string()],
+            status_command: vec!["deployments-core".to_string(), "runtime-status".to_string()],
+            subscribe_status_command: Vec::new(),
+            operation_status_command: vec![
+                "deployments-core".to_string(),
+                "runtime-operation-status".to_string(),
+            ],
+            action_command: vec!["deployments-core".to_string(), "runtime-action".to_string()],
+            history_command: vec![
+                "deployments-core".to_string(),
+                "runtime-history".to_string(),
+            ],
+            daemon_command: Vec::new(),
+            product_action_ids: Some(vec!["publish_changes".to_string()]),
+            product_action_contracts: Some(vec![contract]),
+        };
+        assert_eq!(
+            product_runtime::runtime_subscribe_status_command(&runtime).unwrap(),
+            vec!["deployments-core".to_string(), "runtime-status".to_string()]
+        );
+        assert_eq!(
+            product_runtime::runtime_operation_status_command(&runtime, "op-one").unwrap(),
+            vec![
+                "deployments-core".to_string(),
+                "runtime-operation-status".to_string(),
+                "op-one".to_string()
+            ]
+        );
+        assert_eq!(
+            product_runtime::runtime_history_command(&runtime, "site-one", Some("12")).unwrap(),
+            vec![
+                "deployments-core".to_string(),
+                "runtime-history".to_string(),
+                "site-one".to_string(),
+                "12".to_string()
+            ]
+        );
+        assert_eq!(
+            product_runtime::runtime_action_command(
+                &runtime,
+                "publish_changes",
+                "{\"deployment\":\"site-one\"}"
+            )
+            .unwrap(),
+            vec![
+                "deployments-core".to_string(),
+                "runtime-action".to_string(),
+                "publish_changes".to_string(),
+                "{\"deployment\":\"site-one\"}".to_string()
+            ]
+        );
+        let error = product_runtime::runtime_action_command(
+            &runtime,
+            "publish_changes",
+            "{\"deployment\":false}",
+        )
+        .unwrap_err()
+        .to_string();
+        assert_eq!(
+            error,
+            "runtime action param type mismatch for publish_changes.deployment: expected string"
         );
     }
 

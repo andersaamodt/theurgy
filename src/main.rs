@@ -775,63 +775,40 @@ fn parse_manifest_only_args(args: &[String], usage: &str) -> Result<PathBuf> {
 
 fn run_state_output(manifest_path: &Path) -> Result<String> {
     let runtime = runtime_contract_from_path(manifest_path)?;
-    let output = run_manifest_command(&runtime.state_command, "state")?;
+    let command = product_runtime::runtime_state_command(&runtime)?;
+    let output = run_manifest_command(&command, "state")?;
     validate_manifest_state_output(&runtime.app_id, &output)?;
     Ok(output)
 }
 
 fn run_status_output(manifest_path: &Path) -> Result<String> {
     let runtime = runtime_contract_from_path(manifest_path)?;
-    if runtime.status_command.is_empty() {
-        return Err(TheurgyError::new("runtime manifest statusCommand required").into());
-    }
-    let output = run_manifest_command(&runtime.status_command, "status")?;
+    let command = product_runtime::runtime_status_command(&runtime)?;
+    let output = run_manifest_command(&command, "status")?;
     validate_manifest_status_output(&runtime.app_id, &output)?;
     Ok(output)
 }
 
 fn run_operation_status_output(manifest_path: &Path, operation_id: &str) -> Result<String> {
     let runtime = runtime_contract_from_path(manifest_path)?;
-    if runtime.operation_status_command.is_empty() {
-        return Err(TheurgyError::new("runtime manifest operationStatusCommand required").into());
-    }
-    let output = run_manifest_command_with_args(
-        &runtime.operation_status_command,
-        &[operation_id.to_string()],
-        "operation status",
-    )?;
+    let command = product_runtime::runtime_operation_status_command(&runtime, operation_id)?;
+    let output = run_manifest_command(&command, "operation status")?;
     validate_manifest_operation_status_output(&runtime.app_id, &output)?;
     Ok(output)
 }
 
 fn subscribe_status_output(manifest_path: &Path) -> Result<String> {
     let runtime = runtime_contract_from_path(manifest_path)?;
-    let command = if runtime.subscribe_status_command.is_empty() {
-        &runtime.status_command
-    } else {
-        &runtime.subscribe_status_command
-    };
-    if command.is_empty() {
-        return Err(TheurgyError::new(
-            "runtime manifest subscribeStatusCommand or statusCommand required",
-        )
-        .into());
-    }
-    let output = run_manifest_command(command, "status")?;
+    let command = product_runtime::runtime_subscribe_status_command(&runtime)?;
+    let output = run_manifest_command(&command, "status")?;
     validate_manifest_status_output(&runtime.app_id, &output)?;
     Ok(output)
 }
 
 fn run_history_output(manifest_path: &Path, subject: &str, limit: Option<&str>) -> Result<String> {
     let runtime = runtime_contract_from_path(manifest_path)?;
-    if runtime.history_command.is_empty() {
-        return Err(TheurgyError::new("runtime manifest historyCommand required").into());
-    }
-    let mut args = vec![subject.to_string()];
-    if let Some(limit) = limit {
-        args.push(limit.to_string());
-    }
-    let output = run_manifest_command_with_args(&runtime.history_command, &args, "history")?;
+    let command = product_runtime::runtime_history_command(&runtime, subject, limit)?;
+    let output = run_manifest_command(&command, "history")?;
     validate_manifest_history_output(&runtime.app_id, &output)?;
     Ok(output)
 }
@@ -856,23 +833,9 @@ fn run_action_output(
 }
 
 fn run_manifest_action(runtime: &RuntimeContract, action_id: &str, params: &str) -> Result<String> {
-    if runtime.action_command.is_empty() {
-        return Err(TheurgyError::new("runtime manifest actionCommand required").into());
-    }
-    if let Some(action_ids) = &runtime.product_action_ids {
-        if !action_ids.iter().any(|declared| declared == action_id) {
-            return Err(TheurgyError::new(format!(
-                "runtime action not declared in Product IR: {action_id}"
-            ))
-            .into());
-        }
-    }
-    if let Some(contracts) = &runtime.product_action_contracts {
-        product_runtime::validate_runtime_action_params_text(action_id, params, contracts)?;
-    }
+    let command = product_runtime::runtime_action_command(runtime, action_id, params)?;
     let output = run_manifest_action_command(
-        &runtime.action_command,
-        &[action_id.to_string(), params.to_string()],
+        &command,
         action_id,
         runtime.product_action_contracts.as_deref(),
     )?;
@@ -887,7 +850,6 @@ fn run_manifest_action(runtime: &RuntimeContract, action_id: &str, params: &str)
 
 fn run_manifest_action_command(
     command: &[String],
-    extra_args: &[String],
     action_id: &str,
     contracts: Option<&[ActionContract]>,
 ) -> Result<String> {
@@ -896,7 +858,6 @@ fn run_manifest_action_command(
     };
     let output = Command::new(executable)
         .args(&command[1..])
-        .args(extra_args)
         .output()
         .map_err(|error| TheurgyError::new(format!("could not run action command: {error}")))?;
     let stdout = String::from_utf8(output.stdout).map_err(|error| {
@@ -977,20 +938,11 @@ fn runtime_contract_from_path_with_product_actions(path: &Path) -> Result<Runtim
 }
 
 fn run_manifest_command(command: &[String], label: &str) -> Result<String> {
-    run_manifest_command_with_args(command, &[], label)
-}
-
-fn run_manifest_command_with_args(
-    command: &[String],
-    extra_args: &[String],
-    label: &str,
-) -> Result<String> {
     let Some(executable) = command.first() else {
         return Err(TheurgyError::new(format!("runtime manifest {label} command required")).into());
     };
     let output = Command::new(executable)
         .args(&command[1..])
-        .args(extra_args)
         .output()
         .map_err(|error| TheurgyError::new(format!("could not run {label} command: {error}")))?;
     if !output.status.success() {
