@@ -2323,6 +2323,12 @@ mod tests {
         );
         let error = validate_product_ir(&product).unwrap_err().to_string();
         assert!(error.contains("app.capabilities must contain non-empty strings"));
+        let product = sample_product().replace(
+            "\"permissions\": [\"files\", \"network\"]",
+            "\"permissions\": [\"files\", \"\"]",
+        );
+        let error = validate_product_ir(&product).unwrap_err().to_string();
+        assert!(error.contains("app.permissions must contain non-empty strings"));
         let product = sample_product().replace("\"id\": \"server\"", "\"id\": \"\"");
         let error = validate_product_ir(&product).unwrap_err().to_string();
         assert!(error.contains("domain.objects object.id must be stable"));
@@ -2630,6 +2636,12 @@ mod tests {
         assert_eq!(
             schema
                 .pointer("/properties/app/properties/capabilities/items/minLength")
+                .and_then(Value::as_u64),
+            Some(1)
+        );
+        assert_eq!(
+            schema
+                .pointer("/properties/app/properties/permissions/items/minLength")
                 .and_then(Value::as_u64),
             Some(1)
         );
@@ -3023,6 +3035,12 @@ mod tests {
                 .pointer("/properties/surfaceCapabilities/$ref")
                 .and_then(Value::as_str),
             Some("#/$defs/stringList")
+        );
+        assert_eq!(
+            schema
+                .pointer("/$defs/stringList/items/minLength")
+                .and_then(Value::as_u64),
+            Some(1)
         );
         assert!(schema
             .pointer("/required")

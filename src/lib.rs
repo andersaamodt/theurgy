@@ -6004,9 +6004,9 @@ struct TheurgyNativeApp: App {
         let array = value_array(value, key)?;
         let mut values = Vec::new();
         for item in array {
-            let Some(string) = item.as_str() else {
+            let Some(string) = item.as_str().filter(|string| !string.is_empty()) else {
                 return Err(ContractError::new(format!(
-                    "JSON array key {key} must contain strings"
+                    "JSON array key {key} must contain non-empty strings"
                 )));
             };
             values.push(string.to_string());
@@ -7767,6 +7767,19 @@ binary = "deployments-core"
         assert_eq!(
             error,
             "generated runtime historyCommand must contain non-empty strings"
+        );
+
+        let mut invalid = runtime.clone();
+        invalid.as_object_mut().unwrap().insert(
+            "surfaceCapabilities".to_string(),
+            serde_json::json!(["drawer-contracts", ""]),
+        );
+        let error = product_runtime::validate_generated_runtime_value(&invalid)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            "generated runtime surfaceCapabilities must contain non-empty strings"
         );
     }
 

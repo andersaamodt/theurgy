@@ -202,7 +202,7 @@
     },
     "stringList": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": { "type": "string", "minLength": 1 }
     },
     "actionIdList": {
       "type": "array",
