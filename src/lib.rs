@@ -2125,8 +2125,8 @@ pub mod product_runtime {
             GeneratedNativeFile {
                 path: "meson.build".to_string(),
                 contents: format!(
-                    "project('{}', 'c', version: '0.1.0')\ngtk = dependency('gtk4')\njson_glib = dependency('json-glib-1.0')\nexecutable('{}', 'src/main.c', dependencies: [gtk, json_glib], install: true)\n",
-                    product.app_id, product.app_id
+                    "project('{}', 'c', version: '0.1.0')\ngtk = dependency('gtk4')\njson_glib = dependency('json-glib-1.0')\nexecutable('{}', 'src/main.c', dependencies: [gtk, json_glib], install: true)\ninstall_data('theurgy-runtime.json', 'theurgy-surface.json', install_dir: get_option('datadir') / 'theurgy' / '{}')\n",
+                    product.app_id, product.app_id, product.app_id
                 ),
             },
             GeneratedNativeFile {
@@ -2994,6 +2994,56 @@ static char *resolve_executable(const char *name) {
   return g_strdup(name);
 }
 
+static char *resolve_contract_file(const char *name) {
+  const char *override_dir = g_getenv("THEURGY_CONTRACT_DIR");
+  if (override_dir != NULL && override_dir[0] != '\0') {
+    g_autofree char *override_path = g_build_filename(override_dir, name, NULL);
+    if (g_file_test(override_path, G_FILE_TEST_IS_REGULAR)) {
+      return g_strdup(override_path);
+    }
+  }
+
+  g_autofree char *self_path = g_file_read_link("/proc/self/exe", NULL);
+  if (self_path != NULL) {
+    g_autofree char *self_dir = g_path_get_dirname(self_path);
+    g_autofree char *beside_exe = g_build_filename(self_dir, name, NULL);
+    if (g_file_test(beside_exe, G_FILE_TEST_IS_REGULAR)) {
+      return g_strdup(beside_exe);
+    }
+    g_autofree char *share_path = g_build_filename(self_dir, "..", "share", "theurgy", "__APP_RESOURCE_ID__", name, NULL);
+    if (g_file_test(share_path, G_FILE_TEST_IS_REGULAR)) {
+      return g_canonicalize_filename(share_path, NULL);
+    }
+  }
+
+  const char * const *data_dirs = g_get_system_data_dirs();
+  for (guint index = 0; data_dirs[index] != NULL; index++) {
+    g_autofree char *data_path = g_build_filename(data_dirs[index], "theurgy", "__APP_RESOURCE_ID__", name, NULL);
+    if (g_file_test(data_path, G_FILE_TEST_IS_REGULAR)) {
+      return g_strdup(data_path);
+    }
+  }
+
+  if (g_file_test(name, G_FILE_TEST_IS_REGULAR)) {
+    return g_strdup(name);
+  }
+  return NULL;
+}
+
+static char *load_contract_file(const char *name) {
+  g_autofree char *path = resolve_contract_file(name);
+  if (path == NULL) {
+    return g_strdup_printf("%s missing from installed resources", name);
+  }
+  g_autofree char *contents = NULL;
+  gsize length = 0;
+  g_autoptr(GError) error = NULL;
+  if (!g_file_get_contents(path, &contents, &length, &error)) {
+    return g_strdup(error != NULL ? error->message : "could not read contract file");
+  }
+  return g_strdup_printf("%s (%zu bytes)", path, (size_t)length);
+}
+
 static char *run_runtime_command(const char *argv[]);
 
 static char *load_runtime_state(void) {
@@ -3102,7 +3152,10 @@ static void activate(GtkApplication *app, gpointer user_data) {
   (void)user_data;
   GtkWidget *window = gtk_application_window_new(app);
   GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
-  GtkWidget *contract = gtk_label_new("State: __STATE_COMMAND_TEXT__\nStatus: __STATUS_COMMAND_TEXT__\nSubscribe: __SUBSCRIBE_STATUS_COMMAND_TEXT__\nOperation status: __OPERATION_STATUS_COMMAND_TEXT__\nAction: __ACTION_COMMAND_TEXT__\nHistory: __HISTORY_COMMAND_TEXT__\nDaemon: __DAEMON_COMMAND_TEXT__\nSurface action contracts: __ACTION_CONTRACT_IDS__");
+  g_autofree char *runtime_contract = load_contract_file("theurgy-runtime.json");
+  g_autofree char *surface_contract = load_contract_file("theurgy-surface.json");
+  g_autofree char *contract_text = g_strdup_printf("Runtime contract: %s\nSurface contract: %s\nState: __STATE_COMMAND_TEXT__\nStatus: __STATUS_COMMAND_TEXT__\nSubscribe: __SUBSCRIBE_STATUS_COMMAND_TEXT__\nOperation status: __OPERATION_STATUS_COMMAND_TEXT__\nAction: __ACTION_COMMAND_TEXT__\nHistory: __HISTORY_COMMAND_TEXT__\nDaemon: __DAEMON_COMMAND_TEXT__\nSurface action contracts: __ACTION_CONTRACT_IDS__", runtime_contract, surface_contract);
+  GtkWidget *contract = gtk_label_new(contract_text);
   GtkWidget *button_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
   GtkWidget *button = gtk_button_new_with_label("State");
   GtkWidget *status_button = gtk_button_new_with_label("Status");
@@ -3136,7 +3189,7 @@ __SURFACE_LAYOUT__
 }
 
 int main(int argc, char **argv) {
-  GtkApplication *app = gtk_application_new("app.theurgy.__APP_ID__", G_APPLICATION_DEFAULT_FLAGS);
+  GtkApplication *app = gtk_application_new("app.theurgy.__APP_GAPPLICATION_ID__", G_APPLICATION_DEFAULT_FLAGS);
   g_signal_connect(app, "activate", G_CALLBACK(activate), NULL);
   int status = g_application_run(G_APPLICATION(app), argc, argv);
   g_object_unref(app);
@@ -3145,7 +3198,11 @@ int main(int argc, char **argv) {
 "#;
         template
             .replace("__APP_NAME__", &c_escape(&product.app_name))
-            .replace("__APP_ID__", &c_escape(&product.app_id.replace('-', "_")))
+            .replace(
+                "__APP_GAPPLICATION_ID__",
+                &c_escape(&product.app_id.replace('-', "_")),
+            )
+            .replace("__APP_RESOURCE_ID__", &c_escape(&product.app_id))
             .replace("__STATE_EXECUTABLE__", &c_escape(&executable))
             .replace("__STATE_ARGUMENTS__", &arguments)
             .replace("__STATUS_EXECUTABLE__", &c_escape(&status_executable))
@@ -6251,9 +6308,14 @@ binary = "deployments-core"
         let linux_surface = product_runtime::validate_surface_ir_value(&linux_surface).unwrap();
         let files = product_runtime::linux_adapter_files(&product, &linux_surface, &runtime);
         assert_eq!(files.len(), 2);
-        assert!(files
+        let meson = files
             .iter()
-            .any(|file| file.path == "meson.build" && file.contents.contains("gtk4")));
+            .find(|file| file.path == "meson.build")
+            .map(|file| file.contents.as_str())
+            .unwrap();
+        assert!(meson.contains("gtk4"));
+        assert!(meson.contains("install_data('theurgy-runtime.json', 'theurgy-surface.json'"));
+        assert!(meson.contains("get_option('datadir') / 'theurgy' / 'deployments'"));
         assert!(files.iter().any(|file| file.path == "src/main.c"
             && file.contents.contains("surface_action_contracts_json")
             && file.contents.contains("resolve_executable")));
@@ -6262,6 +6324,14 @@ binary = "deployments-core"
             .find(|file| file.path == "src/main.c")
             .map(|file| file.contents.as_str())
             .unwrap();
+        assert!(linux_source.contains("static char *resolve_contract_file(const char *name)"));
+        assert!(linux_source.contains("THEURGY_CONTRACT_DIR"));
+        assert!(linux_source.contains("\"share\", \"theurgy\", \"deployments\""));
+        assert!(linux_source.contains("g_get_system_data_dirs()"));
+        assert!(linux_source.contains("static char *load_contract_file(const char *name)"));
+        assert!(linux_source.contains("Runtime contract: %s\\nSurface contract: %s"));
+        assert!(!linux_source.contains("__APP_RESOURCE_ID__"));
+        assert!(!linux_source.contains("__APP_GAPPLICATION_ID__"));
         assert!(!linux_source.contains("gtk_paned_new(GTK_ORIENTATION_HORIZONTAL)"));
         let mut operations_surface = linux_surface.clone();
         operations_surface.roles = vec![
