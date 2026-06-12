@@ -4335,6 +4335,7 @@ struct RuntimeContract {
   var operationHistorySchema: String { runtimeString(runtimeMetadata, key: "operationHistorySchema") }
   var runtimeSurfaceActions: [String] { runtimeStringArray(runtimeMetadata, key: "surfaceActions") }
   var surfaceCapabilities: [String] { runtimeStringArray(runtimeMetadata, key: "surfaceCapabilities") }
+  var surfaceRoles: [String] { runtimeStringArray(runtimeMetadata, key: "surfaceRoles") }
   var productStateProjections: [String] { runtimeStringArray(runtimeMetadata, key: "productStateProjections") }
   var productDomainObjects: [String] { runtimeObjectSummaries(runtimeMetadata, key: "productDomainObjectContracts", fields: ["label", "source"]) }
   var productPersistenceRoots: [String] { runtimeObjectSummaries(runtimeMetadata, key: "productPersistenceRootContracts", fields: ["kind", "path"]) }
@@ -4557,6 +4558,7 @@ struct MobileSurfaceScreenView: View {
           Text("Operation status schema: \(contract.operationStatusSchema)")
           Text("Operation history schema: \(contract.operationHistorySchema)")
           Text("Surface capabilities: \(contract.surfaceCapabilities.joined(separator: ", "))")
+          Text("Surface roles: \(contract.surfaceRoles.joined(separator: ", "))")
           Text("Runtime surface actions: \(contract.runtimeSurfaceActions.joined(separator: ", "))")
           Text("Product state projections: \(contract.productStateProjections.joined(separator: ", "))")
           Text(contract.stateEnvelope())
@@ -5028,6 +5030,7 @@ public final class MainActivity extends Activity {
       .append("\nOperation status schema: ").append(jsonString(runtimeMetadata, "operationStatusSchema"))
       .append("\nOperation history schema: ").append(jsonString(runtimeMetadata, "operationHistorySchema"))
       .append("\nSurface capabilities: ").append(jsonStringArray(runtimeMetadata, "surfaceCapabilities"))
+      .append("\nSurface roles: ").append(jsonStringArray(runtimeMetadata, "surfaceRoles"))
       .append("\nRuntime surface actions: ").append(jsonStringArray(runtimeMetadata, "surfaceActions"))
       .append("\nProduct state projections: ").append(jsonStringArray(runtimeMetadata, "productStateProjections"))
       .append("\nProduct domain objects: ").append(jsonObjectArraySummary(runtimeMetadata, "productDomainObjectContracts", new String[] {"label", "source"}))

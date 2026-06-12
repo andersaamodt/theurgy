@@ -5735,6 +5735,7 @@ mod tests {
         assert!(ios.contains("runtimeString(runtimeMetadata, key: \"operationHistorySchema\")"));
         assert!(ios.contains("runtimeStringArray(runtimeMetadata, key: \"surfaceActions\")"));
         assert!(ios.contains("runtimeStringArray(runtimeMetadata, key: \"surfaceCapabilities\")"));
+        assert!(ios.contains("runtimeStringArray(runtimeMetadata, key: \"surfaceRoles\")"));
         assert!(
             ios.contains("runtimeStringArray(runtimeMetadata, key: \"productStateProjections\")")
         );
@@ -5780,6 +5781,7 @@ mod tests {
         assert!(ios.contains("Operation status schema: \\(contract.operationStatusSchema)"));
         assert!(ios.contains("Operation history schema: \\(contract.operationHistorySchema)"));
         assert!(ios.contains("Surface capabilities: \\(contract.surfaceCapabilities.joined"));
+        assert!(ios.contains("Surface roles: \\(contract.surfaceRoles.joined"));
         assert!(ios.contains("Runtime surface actions: \\(contract.runtimeSurfaceActions.joined"));
         assert!(
             ios.contains("Product state projections: \\(contract.productStateProjections.joined")
@@ -6003,6 +6005,7 @@ mod tests {
         assert!(android.contains("jsonString(runtimeMetadata, \"operationStatusSchema\")"));
         assert!(android.contains("jsonString(runtimeMetadata, \"operationHistorySchema\")"));
         assert!(android.contains("jsonStringArray(runtimeMetadata, \"surfaceCapabilities\")"));
+        assert!(android.contains("jsonStringArray(runtimeMetadata, \"surfaceRoles\")"));
         assert!(android.contains("jsonStringArray(runtimeMetadata, \"surfaceActions\")"));
         assert!(android.contains("jsonStringArray(runtimeMetadata, \"productStateProjections\")"));
         assert!(android.contains(
@@ -6032,6 +6035,7 @@ mod tests {
         assert!(android.contains("Operation status schema: "));
         assert!(android.contains("Operation history schema: "));
         assert!(android.contains("Surface capabilities: "));
+        assert!(android.contains("Surface roles: "));
         assert!(android.contains("Runtime surface actions: "));
         assert!(android.contains("Product state projections: "));
         assert!(android.contains("Product domain objects: "));
