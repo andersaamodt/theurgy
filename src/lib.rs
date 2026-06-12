@@ -3912,10 +3912,11 @@ static void activate(GtkApplication *app, gpointer user_data) {
   const char *persistence_fields[] = {"kind", "path"};
   const char *release_fields[] = {"target", "surface", "artifact"};
   g_autofree char *product_state_projections = contract_string_array_summary(runtime_metadata, "productStateProjections");
+  g_autofree char *surface_capabilities = contract_string_array_summary(runtime_metadata, "surfaceCapabilities");
   g_autofree char *product_domain_objects = contract_object_array_summary(runtime_metadata, "productDomainObjectContracts", domain_fields, G_N_ELEMENTS(domain_fields));
   g_autofree char *product_persistence_roots = contract_object_array_summary(runtime_metadata, "productPersistenceRootContracts", persistence_fields, G_N_ELEMENTS(persistence_fields));
   g_autofree char *product_release_targets = contract_object_array_summary(runtime_metadata, "productReleaseTargetContracts", release_fields, G_N_ELEMENTS(release_fields));
-  g_autofree char *contract_text = g_strdup_printf("Runtime contract: %s\nSurface contract: %s\nState: __STATE_COMMAND_TEXT__\nStatus: __STATUS_COMMAND_TEXT__\nSubscribe: __SUBSCRIBE_STATUS_COMMAND_TEXT__\nOperation status: __OPERATION_STATUS_COMMAND_TEXT__\nAction: __ACTION_COMMAND_TEXT__\nHistory: __HISTORY_COMMAND_TEXT__\nDaemon: __DAEMON_COMMAND_TEXT__\nSurface action contracts: __ACTION_CONTRACT_IDS__\nProduct state projections: %s\nProduct domain objects: %s\nProduct persistence roots: %s\nProduct release targets: %s", runtime_contract, surface_contract, product_state_projections, product_domain_objects, product_persistence_roots, product_release_targets);
+  g_autofree char *contract_text = g_strdup_printf("Runtime contract: %s\nSurface contract: %s\nState: __STATE_COMMAND_TEXT__\nStatus: __STATUS_COMMAND_TEXT__\nSubscribe: __SUBSCRIBE_STATUS_COMMAND_TEXT__\nOperation status: __OPERATION_STATUS_COMMAND_TEXT__\nAction: __ACTION_COMMAND_TEXT__\nHistory: __HISTORY_COMMAND_TEXT__\nDaemon: __DAEMON_COMMAND_TEXT__\nSurface capabilities: %s\nSurface action contracts: __ACTION_CONTRACT_IDS__\nProduct state projections: %s\nProduct domain objects: %s\nProduct persistence roots: %s\nProduct release targets: %s", runtime_contract, surface_contract, surface_capabilities, product_state_projections, product_domain_objects, product_persistence_roots, product_release_targets);
   GtkWidget *contract = gtk_label_new(contract_text);
   GtkWidget *button_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
   GtkWidget *button = gtk_button_new_with_label("State");
@@ -4244,6 +4245,7 @@ struct RuntimeContract {
   var operationStatusSchema: String { runtimeString(runtimeMetadata, key: "operationStatusSchema") }
   var operationHistorySchema: String { runtimeString(runtimeMetadata, key: "operationHistorySchema") }
   var runtimeSurfaceActions: [String] { runtimeStringArray(runtimeMetadata, key: "surfaceActions") }
+  var surfaceCapabilities: [String] { runtimeStringArray(runtimeMetadata, key: "surfaceCapabilities") }
   var productStateProjections: [String] { runtimeStringArray(runtimeMetadata, key: "productStateProjections") }
   var productDomainObjects: [String] { runtimeObjectSummaries(runtimeMetadata, key: "productDomainObjectContracts", fields: ["label", "source"]) }
   var productPersistenceRoots: [String] { runtimeObjectSummaries(runtimeMetadata, key: "productPersistenceRootContracts", fields: ["kind", "path"]) }
@@ -4461,6 +4463,7 @@ struct MobileSurfaceScreenView: View {
           Text("Operation history request schema: \(contract.operationHistoryRequestSchema)")
           Text("Operation status schema: \(contract.operationStatusSchema)")
           Text("Operation history schema: \(contract.operationHistorySchema)")
+          Text("Surface capabilities: \(contract.surfaceCapabilities.joined(separator: ", "))")
           Text("Runtime surface actions: \(contract.runtimeSurfaceActions.joined(separator: ", "))")
           Text("Product state projections: \(contract.productStateProjections.joined(separator: ", "))")
           Text(contract.stateEnvelope())
@@ -4931,6 +4934,7 @@ public final class MainActivity extends Activity {
       .append("\nOperation history request schema: ").append(operationHistoryRequestSchema)
       .append("\nOperation status schema: ").append(jsonString(runtimeMetadata, "operationStatusSchema"))
       .append("\nOperation history schema: ").append(jsonString(runtimeMetadata, "operationHistorySchema"))
+      .append("\nSurface capabilities: ").append(jsonStringArray(runtimeMetadata, "surfaceCapabilities"))
       .append("\nRuntime surface actions: ").append(jsonStringArray(runtimeMetadata, "surfaceActions"))
       .append("\nProduct state projections: ").append(jsonStringArray(runtimeMetadata, "productStateProjections"))
       .append("\nProduct domain objects: ").append(jsonObjectArraySummary(runtimeMetadata, "productDomainObjectContracts", new String[] {"label", "source"}))
@@ -5043,6 +5047,7 @@ let runtimeOperationStatusCommand = __OPERATION_STATUS_COMMAND__
 let runtimeActionCommand = __ACTION_COMMAND__
 let runtimeHistoryCommand = __HISTORY_COMMAND__
 let runtimeDaemonCommand = __DAEMON_COMMAND__
+let surfaceCapabilities = __SURFACE_CAPABILITIES__
 let actionContracts = __ACTION_CONTRACTS__
 let defaultActionId = "__DEFAULT_ACTION_ID__"
 
@@ -5104,6 +5109,7 @@ __SURFACE_BODY__
         Text("Action: \(runtimeActionCommand.joined(separator: " "))")
         Text("History: \(runtimeHistoryCommand.joined(separator: " "))")
         Text("Daemon: \(runtimeDaemonCommand.joined(separator: " "))")
+        Text("Surface capabilities: \(surfaceCapabilities.joined(separator: ", "))")
         Text("Surface actions: \(actionContracts.map { $0.id }.joined(separator: ", "))")
       }
       .font(.system(.caption, design: .monospaced))
@@ -5252,6 +5258,10 @@ struct TheurgyNativeApp: App {
             .replace(
                 "__ACTION_CONTRACTS__",
                 &swift_action_contracts_literal(&action_contracts),
+            )
+            .replace(
+                "__SURFACE_CAPABILITIES__",
+                &swift_string_array_literal(&surface.capabilities),
             )
             .replace("__DEFAULT_ACTION_ID__", &swift_escape(&default_action_id))
             .replace("__SURFACE_BODY__", &surface_body)

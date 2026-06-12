@@ -4305,6 +4305,9 @@ mod tests {
         assert!(main_c.contains("\\\"inputShape\\\""));
         assert!(main_c.contains("\\\"deployment\\\":\\\"string\\\""));
         assert!(main_c.contains("Surface action contracts: refresh_state, publish_changes"));
+        assert!(main_c
+            .contains("contract_string_array_summary(runtime_metadata, \"surfaceCapabilities\")"));
+        assert!(main_c.contains("Surface capabilities: %s"));
         assert!(main_c.contains("static char *load_contract_text(const char *name)"));
         assert!(main_c.contains("static char *contract_string_array_summary"));
         assert!(main_c.contains("static char *contract_object_array_summary"));
@@ -5398,6 +5401,8 @@ mod tests {
         assert!(swift.contains("command(for: action, json: defaultParamsJson(for: action))"));
         assert!(swift.contains("inputShape: [\"deployment\": \"string\"]"));
         assert!(swift.contains("outputShape: [\"params\": \"object\"]"));
+        assert!(swift.contains("let surfaceCapabilities = []"));
+        assert!(swift.contains("Surface capabilities: \\(surfaceCapabilities.joined"));
         assert!(swift.contains("Surface actions:"));
 
         fs::remove_dir_all(root).unwrap();
@@ -5460,6 +5465,7 @@ mod tests {
         assert!(ios.contains("runtimeString(runtimeMetadata, key: \"operationStatusSchema\")"));
         assert!(ios.contains("runtimeString(runtimeMetadata, key: \"operationHistorySchema\")"));
         assert!(ios.contains("runtimeStringArray(runtimeMetadata, key: \"surfaceActions\")"));
+        assert!(ios.contains("runtimeStringArray(runtimeMetadata, key: \"surfaceCapabilities\")"));
         assert!(
             ios.contains("runtimeStringArray(runtimeMetadata, key: \"productStateProjections\")")
         );
@@ -5504,6 +5510,7 @@ mod tests {
         );
         assert!(ios.contains("Operation status schema: \\(contract.operationStatusSchema)"));
         assert!(ios.contains("Operation history schema: \\(contract.operationHistorySchema)"));
+        assert!(ios.contains("Surface capabilities: \\(contract.surfaceCapabilities.joined"));
         assert!(ios.contains("Runtime surface actions: \\(contract.runtimeSurfaceActions.joined"));
         assert!(
             ios.contains("Product state projections: \\(contract.productStateProjections.joined")
@@ -5702,6 +5709,7 @@ mod tests {
         assert!(android.contains("jsonString(runtimeMetadata, \"runtimeActionResultSchema\")"));
         assert!(android.contains("jsonString(runtimeMetadata, \"operationStatusSchema\")"));
         assert!(android.contains("jsonString(runtimeMetadata, \"operationHistorySchema\")"));
+        assert!(android.contains("jsonStringArray(runtimeMetadata, \"surfaceCapabilities\")"));
         assert!(android.contains("jsonStringArray(runtimeMetadata, \"surfaceActions\")"));
         assert!(android.contains("jsonStringArray(runtimeMetadata, \"productStateProjections\")"));
         assert!(android.contains(
@@ -5730,6 +5738,7 @@ mod tests {
         assert!(android.contains("Runtime action result schema: "));
         assert!(android.contains("Operation status schema: "));
         assert!(android.contains("Operation history schema: "));
+        assert!(android.contains("Surface capabilities: "));
         assert!(android.contains("Runtime surface actions: "));
         assert!(android.contains("Product state projections: "));
         assert!(android.contains("Product domain objects: "));
