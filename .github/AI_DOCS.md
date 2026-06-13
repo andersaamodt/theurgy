@@ -46,7 +46,7 @@
 - A web migration is not complete until the managed deployment path builds the Linux runtime normally, promotes it, live endpoints use the compiled binary, obsolete interpreted backends are absent from the active release, and browser-level behavior is verified.
 
 ## Validation
-- Run `cargo fmt --check`.
-- Run `cargo test`.
+- Run `sh scripts/theurgy-cargo fmt --check`.
+- Run `sh scripts/theurgy-cargo test`.
 - Run `spells/assay-theurgy`.
 - Run at least one conjure spell into a temporary directory and inspect it with `spells/inspect-theurgy-project`.

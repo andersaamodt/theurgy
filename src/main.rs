@@ -1655,6 +1655,8 @@ fn stage_app_runtime_binaries(
         ))
         .into());
     }
+    let cargo_target_dir = cargo_target_dir(app_dir);
+    fs::create_dir_all(&cargo_target_dir)?;
     for binary in &app_binaries {
         let status = Command::new("cargo")
             .arg("build")
@@ -1662,6 +1664,7 @@ fn stage_app_runtime_binaries(
             .arg(&cargo_manifest)
             .arg("--bin")
             .arg(binary)
+            .env("CARGO_TARGET_DIR", &cargo_target_dir)
             .status()
             .map_err(|error| {
                 TheurgyError::new(format!("could not run cargo build for {binary}: {error}"))
@@ -1816,10 +1819,41 @@ fn validate_generated_relative_path(relative_path: &str) -> Result<()> {
 }
 
 fn cargo_debug_dir(app_dir: &Path) -> PathBuf {
+    cargo_target_dir(app_dir).join("debug")
+}
+
+fn cargo_target_dir(app_dir: &Path) -> PathBuf {
     env::var_os("CARGO_TARGET_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| app_dir.join("target"))
-        .join("debug")
+        .unwrap_or_else(|| default_cargo_target_dir(app_dir))
+}
+
+fn default_cargo_target_dir(app_dir: &Path) -> PathBuf {
+    let state_root = env::var_os("THEURGY_STATE_DIR")
+        .map(PathBuf::from)
+        .or_else(|| {
+            env::var_os("XDG_STATE_HOME")
+                .map(PathBuf::from)
+                .map(|path| path.join("theurgy"))
+        })
+        .or_else(|| {
+            env::var_os("HOME")
+                .map(PathBuf::from)
+                .map(|path| path.join(".local/state/theurgy"))
+        })
+        .unwrap_or_else(|| env::temp_dir().join("theurgy"));
+    state_root
+        .join("cargo-targets")
+        .join(stable_path_key(app_dir))
+}
+
+fn stable_path_key(path: &Path) -> String {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in path.as_os_str().to_string_lossy().as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
 }
 
 fn runtime_libexec_dirs(out_dir: &Path, target: &str) -> Result<Vec<PathBuf>> {

@@ -39,31 +39,31 @@ spells/capture-theurgy-cgi-context
 spells/conjure-native-desktop sample-desktop
 spells/conjure-enterprise-website sample-website
 spells/inspect-theurgy-project sample-desktop
-cargo run --bin theurgy-runtime -- validate-product-ir product.ir.json
-cargo run --bin theurgy-runtime -- validate-action-ir action.ir.json
-cargo run --bin theurgy-runtime -- validate-state-snapshot state.snapshot.json
-cargo run --bin theurgy-runtime -- validate-runtime-status runtime-status.json
-cargo run --bin theurgy-runtime -- validate-runtime-state-request state-request.json
-cargo run --bin theurgy-runtime -- validate-runtime-status-request status-request.json
-cargo run --bin theurgy-runtime -- validate-runtime-subscribe-status-request subscribe-status-request.json
-cargo run --bin theurgy-runtime -- validate-runtime-action-request action-request.json --manifest runtime.manifest.json
-cargo run --bin theurgy-runtime -- validate-runtime-action-result action-result.json
-cargo run --bin theurgy-runtime -- validate-operation-status operation-status.json
-cargo run --bin theurgy-runtime -- validate-operation-history operation-history.json
-cargo run --bin theurgy-runtime -- validate-runtime-manifest runtime.manifest.json
-cargo run --bin theurgy-runtime -- validate-generated-runtime theurgy-runtime.json
-cargo run --bin theurgy-runtime -- validate-surface-ir desktop.surface.ir.json
-cargo run --bin theurgy-runtime -- project-surface product.ir.json --target macos
-cargo run --bin theurgy-runtime -- compile-native product.ir.json --target linux --out /tmp/theurgy-linux
-cargo run --bin theurgy-runtime -- compile-app /path/to/app --target macos --out /tmp/theurgy-macos
-cargo run --bin theurgy-runtime -- stage-app-runtime /path/to/app --target macos --out /tmp/theurgy-macos
-cargo run --bin theurgy-runtime -- run-state --manifest runtime.manifest.json
-cargo run --bin theurgy-runtime -- run-status --manifest runtime.manifest.json
-cargo run --bin theurgy-runtime -- subscribe-status --manifest runtime.manifest.json --once
-cargo run --bin theurgy-runtime -- run-request state-request.json --manifest runtime.manifest.json
-cargo run --bin theurgy-runtime -- run-operation-status operation-id --manifest runtime.manifest.json
-cargo run --bin theurgy-runtime -- run-history deployment-slug 40 --manifest runtime.manifest.json
-cargo run --bin theurgy-runtime -- run-action refresh_state --json '{}' --manifest runtime.manifest.json
+sh scripts/theurgy-cargo run --bin theurgy-runtime -- validate-product-ir product.ir.json
+sh scripts/theurgy-cargo run --bin theurgy-runtime -- validate-action-ir action.ir.json
+sh scripts/theurgy-cargo run --bin theurgy-runtime -- validate-state-snapshot state.snapshot.json
+sh scripts/theurgy-cargo run --bin theurgy-runtime -- validate-runtime-status runtime-status.json
+sh scripts/theurgy-cargo run --bin theurgy-runtime -- validate-runtime-state-request state-request.json
+sh scripts/theurgy-cargo run --bin theurgy-runtime -- validate-runtime-status-request status-request.json
+sh scripts/theurgy-cargo run --bin theurgy-runtime -- validate-runtime-subscribe-status-request subscribe-status-request.json
+sh scripts/theurgy-cargo run --bin theurgy-runtime -- validate-runtime-action-request action-request.json --manifest runtime.manifest.json
+sh scripts/theurgy-cargo run --bin theurgy-runtime -- validate-runtime-action-result action-result.json
+sh scripts/theurgy-cargo run --bin theurgy-runtime -- validate-operation-status operation-status.json
+sh scripts/theurgy-cargo run --bin theurgy-runtime -- validate-operation-history operation-history.json
+sh scripts/theurgy-cargo run --bin theurgy-runtime -- validate-runtime-manifest runtime.manifest.json
+sh scripts/theurgy-cargo run --bin theurgy-runtime -- validate-generated-runtime theurgy-runtime.json
+sh scripts/theurgy-cargo run --bin theurgy-runtime -- validate-surface-ir desktop.surface.ir.json
+sh scripts/theurgy-cargo run --bin theurgy-runtime -- project-surface product.ir.json --target macos
+sh scripts/theurgy-cargo run --bin theurgy-runtime -- compile-native product.ir.json --target linux --out /tmp/theurgy-linux
+sh scripts/theurgy-cargo run --bin theurgy-runtime -- compile-app /path/to/app --target macos --out /tmp/theurgy-macos
+sh scripts/theurgy-cargo run --bin theurgy-runtime -- stage-app-runtime /path/to/app --target macos --out /tmp/theurgy-macos
+sh scripts/theurgy-cargo run --bin theurgy-runtime -- run-state --manifest runtime.manifest.json
+sh scripts/theurgy-cargo run --bin theurgy-runtime -- run-status --manifest runtime.manifest.json
+sh scripts/theurgy-cargo run --bin theurgy-runtime -- subscribe-status --manifest runtime.manifest.json --once
+sh scripts/theurgy-cargo run --bin theurgy-runtime -- run-request state-request.json --manifest runtime.manifest.json
+sh scripts/theurgy-cargo run --bin theurgy-runtime -- run-operation-status operation-id --manifest runtime.manifest.json
+sh scripts/theurgy-cargo run --bin theurgy-runtime -- run-history deployment-slug 40 --manifest runtime.manifest.json
+sh scripts/theurgy-cargo run --bin theurgy-runtime -- run-action refresh_state --json '{}' --manifest runtime.manifest.json
 ```
 
 `compile-native` is the raw Product IR entrypoint and may project default surfaces and runtime command names from the product contract; it also bundles generated Product IR, Surface IR, and Runtime Manifest resources so emitted adapters have real runtime contract files to load. `compile-app` is the real application compiler entrypoint: it reads `theurgy.project.toml`, validates the declared Product IR, Runtime Manifest, and target-appropriate Surface IR, rejects manifest path drift between those contracts, then emits adapter metadata and staged app-contract resources from the declared app contracts. Runtime manifests may also declare `surfaces.legacyNativeDesktop` while a migrated app still carries a wizardry-apps native desktop IR; Theurgy validates and propagates that compatibility input without making shell-first wizardry-apps depend on Theurgy. Generated runtime metadata exposes the bridge as `stateCommand`, `statusCommand`, `subscribeStatusCommand`, `operationStatusCommand`, `actionCommand`, and `historyCommand`, with typed action contracts beside the commands. It also declares `adapterRuntimeTransport`: desktop adapters use `local-process-json`; mobile adapters use `external-json-abi` so generated iOS/Android hosts do not pretend they can execute desktop shell commands directly. Desktop generated runtimes must expose `requestCommand` as `["theurgy-runtime", "run-request"]` and `requestCommandManifest` equal to `runtimeManifest` so local-process adapters dispatch typed envelopes through one runtime protocol. Runtime manifest command dispatch resolves bare executable names relative to the manifest, then adjacent `bin/` and `libexec/`, before falling back to `PATH`, so installed desktop adapters can bundle their compiled runtime without relying on a source checkout. `stage-app-runtime` builds manifest-declared Cargo binaries and stages them with `theurgy-runtime` under desktop artifact `libexec/` directories so packaged adapters can resolve the compiled core beside the staged manifest and Product IR. Long-running generated runtimes must expose `operationStatusCommand` so native adapters can track progress/final state through a typed operation status contract. Mobile generated runtimes publish `runtimeStateRequestSchema`, `runtimeStatusRequestSchema`, `runtimeSubscribeStatusRequestSchema`, `runtimeActionRequestSchema`, `operationStatusRequestSchema`, and `operationHistoryRequestSchema`, so external mobile hosts can hydrate state/status, subscribe to status updates, and hand off action/history/progress requests through a stable JSON ABI instead of informal command strings. `run-request` accepts those same typed envelopes and dispatches them through the manifest bridge for state, status, subscribe-status, action, operation-status, and operation-history. Runtime manifests may declare `subscribeStatusCommand`; if they omit it, Theurgy falls back to `statusCommand`. That keeps professional apps explicit while preserving the opt-in boundary for shell-first wizardry-apps.
