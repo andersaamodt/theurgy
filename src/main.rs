@@ -1073,11 +1073,15 @@ fn run_manifest_action_command(
         TheurgyError::new(format!("action command output was not UTF-8: {error}"))
     })?;
     if !output.status.success() {
-        if let Some(contracts) = contracts {
-            validate_runtime_action_failure_keys(action_id, stdout.trim(), contracts)?;
-        }
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let message = structured_failure_message(&stdout)
+        let failure_output = structured_failure_payload(&stdout, &stderr);
+        if let Some(contracts) = contracts {
+            if let Some(failure_output) = failure_output {
+                validate_runtime_action_failure_keys(action_id, failure_output, contracts)?;
+            }
+        }
+        let message = failure_output
+            .and_then(structured_failure_message)
             .or_else(|| (!stderr.is_empty()).then_some(stderr))
             .unwrap_or_else(|| format!("action command exited with {}", output.status));
         return Err(TheurgyError::new(message).into());
@@ -1136,6 +1140,26 @@ fn structured_failure_message(output: &str) -> Option<String> {
         .and_then(Value::as_str)
         .filter(|error| !error.is_empty())
         .map(String::from)
+}
+
+fn structured_failure_payload<'a>(stdout: &'a str, stderr: &'a str) -> Option<&'a str> {
+    if structured_failure_message(stdout).is_some()
+        || parse_json(stdout)
+            .ok()
+            .and_then(|value| value.get("success").and_then(Value::as_bool))
+            == Some(false)
+    {
+        return Some(stdout);
+    }
+    if structured_failure_message(stderr).is_some()
+        || parse_json(stderr)
+            .ok()
+            .and_then(|value| value.get("success").and_then(Value::as_bool))
+            == Some(false)
+    {
+        return Some(stderr);
+    }
+    None
 }
 
 fn runtime_contract_from_path(path: &Path) -> Result<RuntimeContract> {
@@ -3950,6 +3974,51 @@ mod tests {
             error.to_string(),
             "runtime action failure type mismatch for refresh_state.error: expected string"
         );
+    }
+
+    #[test]
+    fn run_action_with_manifest_validates_stderr_failure_contract() {
+        let root = runtime_fixture_root("run-action-stderr-failure-contract");
+        write_or_replace(
+            &root.join("app-blueprint/product.ir.json"),
+            &sample_product().replace("\"failure\": {}", "\"failure\": {\"error\": \"string\"}"),
+        )
+        .unwrap();
+        write_executable(
+            &root.join("runtime-fixture"),
+            "#!/bin/sh\nset -eu\ncase \"${1-}\" in\n  action) printf '{\"success\":false,\"error\":false}\\n' >&2; exit 9 ;;\n  *) exit 2 ;;\nesac\n",
+        )
+        .unwrap();
+        let manifest = root.join("runtime.manifest.json");
+
+        let error = run_action_output("refresh_state", "{}", Some(&manifest)).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "runtime action failure type mismatch for refresh_state.error: expected string"
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn run_action_with_manifest_uses_stderr_structured_failure_message() {
+        let root = runtime_fixture_root("run-action-stderr-failure-message");
+        write_or_replace(
+            &root.join("app-blueprint/product.ir.json"),
+            &sample_product().replace("\"failure\": {}", "\"failure\": {\"error\": \"string\"}"),
+        )
+        .unwrap();
+        write_executable(
+            &root.join("runtime-fixture"),
+            "#!/bin/sh\nset -eu\ncase \"${1-}\" in\n  action) printf '{\"success\":false,\"error\":\"fixture failed\"}\\n' >&2; exit 9 ;;\n  *) exit 2 ;;\nesac\n",
+        )
+        .unwrap();
+        let manifest = root.join("runtime.manifest.json");
+
+        let error = run_action_output("refresh_state", "{}", Some(&manifest)).unwrap_err();
+        assert_eq!(error.to_string(), "fixture failed");
+
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
