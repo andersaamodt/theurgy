@@ -3291,6 +3291,16 @@ pub mod product_runtime {
                 &runtime.daemon_command,
             )?;
         }
+        if product
+            .action_contracts
+            .iter()
+            .any(|contract| contract.long_running)
+            && runtime.operation_status_command.is_empty()
+        {
+            return Err(ContractError::new(
+                "product IR long-running actions require runtime manifest operationStatusCommand",
+            ));
+        }
         for contract in &product.action_contracts {
             if contract.command.is_empty() {
                 continue;
@@ -7738,6 +7748,18 @@ binary = "deployments-core"
             vec!["refresh_state".to_string()]
         );
         assert!(!contract.preserve_existing_legacy_desktop_adapter);
+
+        let long_running_product = std::fs::read_to_string(blueprint.join("product.ir.json"))
+            .unwrap()
+            .replace("\"longRunning\":false", "\"longRunning\":true");
+        std::fs::write(blueprint.join("product.ir.json"), long_running_product).unwrap();
+        let error = product_runtime::load_app_compile_contract(&root, "macos")
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            "product IR long-running actions require runtime manifest operationStatusCommand"
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 
