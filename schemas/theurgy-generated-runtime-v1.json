@@ -35,6 +35,8 @@
     "productStateProjections",
     "productPersistenceTruth",
     "adapterRuntimeTransport",
+    "desktopRuntimeToolLookup",
+    "desktopRuntimeBinaries",
     "surface",
     "surfaceSchema",
     "surfaceTarget",
@@ -124,6 +126,8 @@
     "adapterRuntimeTransport": {
       "enum": ["local-process-json", "external-json-abi"]
     },
+    "desktopRuntimeToolLookup": { "$ref": "#/$defs/stringList" },
+    "desktopRuntimeBinaries": { "$ref": "#/$defs/stringList" },
     "productPersistenceRoots": { "$ref": "#/$defs/stringList" },
     "productPersistenceRootContracts": {
       "type": "array",
@@ -174,6 +178,15 @@
           "requestCommand": {
             "const": ["theurgy-runtime", "run-request"]
           },
+          "desktopRuntimeToolLookup": {
+            "allOf": [
+              { "contains": { "const": "bundle-resources/libexec" } },
+              { "contains": { "const": "artifact-libexec" } }
+            ]
+          },
+          "desktopRuntimeBinaries": {
+            "contains": { "const": "theurgy-runtime" }
+          },
           "surfaceSchema": { "const": "theurgy-desktop-surface-ir/v1" },
           "surfaceTarget": { "enum": ["desktop", "macos", "linux"] },
           "surfaceMobilePermissions": { "maxItems": 0 },
@@ -195,6 +208,8 @@
           "adapterRuntimeTransport": { "const": "external-json-abi" },
           "requestCommand": false,
           "requestCommandManifest": false,
+          "desktopRuntimeToolLookup": { "maxItems": 0 },
+          "desktopRuntimeBinaries": { "maxItems": 0 },
           "surfaceSchema": { "const": "theurgy-mobile-surface-ir/v1" },
           "surfaceTarget": { "enum": ["mobile", "ios", "android"] },
           "surfaceScreens": { "minItems": 1 },

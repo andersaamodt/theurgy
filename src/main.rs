@@ -474,6 +474,14 @@ fn command_validate_generated_runtime(args: &[String]) -> Result<()> {
         "adapter_runtime_transport={}",
         summary.adapter_runtime_transport
     );
+    println!(
+        "desktop_runtime_tool_lookup={}",
+        summary.desktop_runtime_tool_lookup.join(",")
+    );
+    println!(
+        "desktop_runtime_binaries={}",
+        summary.desktop_runtime_binaries.join(",")
+    );
     if let Some(command) = &summary.request_command {
         println!("request_command={}", command.join(" "));
     }

@@ -38,6 +38,38 @@ pub mod product_runtime {
         }
     }
 
+    pub fn desktop_runtime_tool_lookup(target: &str) -> Vec<String> {
+        if !is_desktop_target(target) {
+            return Vec::new();
+        }
+        vec![
+            "bundle-resources/libexec".to_string(),
+            "artifact-libexec".to_string(),
+            "manifest-dir/libexec".to_string(),
+            "PATH".to_string(),
+        ]
+    }
+
+    pub fn desktop_runtime_binaries(runtime: &RuntimeBridge) -> Vec<String> {
+        let mut binaries = vec!["theurgy-runtime".to_string()];
+        for command in [
+            &runtime.state_command,
+            &runtime.status_command,
+            &effective_subscribe_status_command(runtime),
+            &runtime.operation_status_command,
+            &runtime.action_command,
+            &runtime.history_command,
+            &runtime.daemon_command,
+        ] {
+            if let Some(binary) = command.first().filter(|binary| bare_runtime_binary(binary)) {
+                if !binaries.iter().any(|known| known == binary) {
+                    binaries.push(binary.clone());
+                }
+            }
+        }
+        binaries
+    }
+
     pub fn is_desktop_target(target: &str) -> bool {
         matches!(target, "macos" | "linux")
     }
@@ -191,6 +223,8 @@ pub mod product_runtime {
         pub state_snapshot_schema: String,
         pub persistence_truth: String,
         pub adapter_runtime_transport: String,
+        pub desktop_runtime_tool_lookup: Vec<String>,
+        pub desktop_runtime_binaries: Vec<String>,
         pub request_command: Option<Vec<String>>,
         pub request_command_manifest: Option<String>,
         pub runtime_state_request_schema: String,
@@ -1395,15 +1429,30 @@ pub mod product_runtime {
             .ok_or_else(|| {
                 ContractError::new("generated runtime targetReleaseArtifact required")
             })?;
-        for key in ["stateCommand", "subscribeStatusCommand", "actionCommand"] {
-            let command = value_string_array(value, key)?;
-            if command.is_empty() {
-                return Err(ContractError::new(format!(
-                    "generated runtime {key} must be non-empty"
-                )));
-            }
-            validate_runtime_command_items(&command, &format!("generated runtime {key}"))?;
+        let state_command = value_string_array(value, "stateCommand")?;
+        if state_command.is_empty() {
+            return Err(ContractError::new(
+                "generated runtime stateCommand must be non-empty",
+            ));
         }
+        validate_runtime_command_items(&state_command, "generated runtime stateCommand")?;
+        let subscribe_status_command = value_string_array(value, "subscribeStatusCommand")?;
+        if subscribe_status_command.is_empty() {
+            return Err(ContractError::new(
+                "generated runtime subscribeStatusCommand must be non-empty",
+            ));
+        }
+        validate_runtime_command_items(
+            &subscribe_status_command,
+            "generated runtime subscribeStatusCommand",
+        )?;
+        let action_command = value_string_array(value, "actionCommand")?;
+        if action_command.is_empty() {
+            return Err(ContractError::new(
+                "generated runtime actionCommand must be non-empty",
+            ));
+        }
+        validate_runtime_command_items(&action_command, "generated runtime actionCommand")?;
         let operation_status_command = optional_string_array(
             value,
             "operationStatusCommand",
@@ -1415,14 +1464,75 @@ pub mod product_runtime {
             &operation_status_command,
             "generated runtime operationStatusCommand",
         )?;
-        for key in ["statusCommand", "historyCommand", "daemonCommand"] {
-            let command = optional_string_array(value, key, &format!("generated runtime {key}"))?;
-            validate_optional_runtime_command_items(
-                value,
-                key,
-                &command,
-                &format!("generated runtime {key}"),
-            )?;
+        let status_command =
+            optional_string_array(value, "statusCommand", "generated runtime statusCommand")?;
+        validate_optional_runtime_command_items(
+            value,
+            "statusCommand",
+            &status_command,
+            "generated runtime statusCommand",
+        )?;
+        let history_command =
+            optional_string_array(value, "historyCommand", "generated runtime historyCommand")?;
+        validate_optional_runtime_command_items(
+            value,
+            "historyCommand",
+            &history_command,
+            "generated runtime historyCommand",
+        )?;
+        let daemon_command =
+            optional_string_array(value, "daemonCommand", "generated runtime daemonCommand")?;
+        validate_optional_runtime_command_items(
+            value,
+            "daemonCommand",
+            &daemon_command,
+            "generated runtime daemonCommand",
+        )?;
+        let desktop_runtime_tool_lookup = value_string_array(value, "desktopRuntimeToolLookup")?;
+        let desktop_runtime_binaries = value_string_array(value, "desktopRuntimeBinaries")?;
+        if matches!(target.as_str(), "macos" | "linux") {
+            if !desktop_runtime_tool_lookup
+                .iter()
+                .any(|entry| entry == "bundle-resources/libexec")
+                || !desktop_runtime_tool_lookup
+                    .iter()
+                    .any(|entry| entry == "artifact-libexec")
+            {
+                return Err(ContractError::new(
+                    "generated runtime desktopRuntimeToolLookup must include bundled libexec locations",
+                ));
+            }
+            let runtime_commands = [
+                &state_command,
+                &status_command,
+                &subscribe_status_command,
+                &operation_status_command,
+                &action_command,
+                &history_command,
+                &daemon_command,
+            ];
+            let mut required_binaries = vec!["theurgy-runtime".to_string()];
+            for command in runtime_commands {
+                if let Some(binary) = command.first().filter(|binary| bare_runtime_binary(binary)) {
+                    if !required_binaries.iter().any(|known| known == binary) {
+                        required_binaries.push(binary.clone());
+                    }
+                }
+            }
+            for binary in required_binaries {
+                if !desktop_runtime_binaries
+                    .iter()
+                    .any(|declared| declared == &binary)
+                {
+                    return Err(ContractError::new(format!(
+                        "generated runtime desktopRuntimeBinaries missing staged binary: {binary}"
+                    )));
+                }
+            }
+        } else if !desktop_runtime_tool_lookup.is_empty() || !desktop_runtime_binaries.is_empty() {
+            return Err(ContractError::new(
+                "generated runtime mobile targets must not declare desktop runtime tools",
+            ));
         }
         for key in [
             "productTargets",
@@ -1693,6 +1803,8 @@ pub mod product_runtime {
             state_snapshot_schema,
             persistence_truth,
             adapter_runtime_transport,
+            desktop_runtime_tool_lookup,
+            desktop_runtime_binaries,
             request_command: if request_command.is_empty() {
                 None
             } else {
@@ -2125,6 +2237,19 @@ pub mod product_runtime {
             "adapterRuntimeTransport".to_string(),
             Value::String(adapter_runtime_transport(target).to_string()),
         );
+        if adapter_runtime_transport(target) == DESKTOP_ADAPTER_TRANSPORT {
+            object.insert(
+                "desktopRuntimeToolLookup".to_string(),
+                string_vec_value(&desktop_runtime_tool_lookup(target)),
+            );
+            object.insert(
+                "desktopRuntimeBinaries".to_string(),
+                string_vec_value(&desktop_runtime_binaries(runtime)),
+            );
+        } else {
+            object.insert("desktopRuntimeToolLookup".to_string(), Value::Array(Vec::new()));
+            object.insert("desktopRuntimeBinaries".to_string(), Value::Array(Vec::new()));
+        }
         object.insert(
             "productBackgroundJobs".to_string(),
             string_vec_value(&product.background_job_ids),
@@ -6297,6 +6422,14 @@ struct TheurgyNativeApp: App {
         Ok(values)
     }
 
+    fn bare_runtime_binary(value: &str) -> bool {
+        !value.is_empty()
+            && !value.contains('/')
+            && !value.contains('\\')
+            && value != "env"
+            && value != "/usr/bin/env"
+    }
+
     fn optional_nonempty_string(
         value: &Value,
         key: &str,
@@ -8002,6 +8135,8 @@ binary = "deployments-core"
   }],
   "productPersistenceTruth": "file-first",
   "adapterRuntimeTransport": "local-process-json",
+  "desktopRuntimeToolLookup": ["bundle-resources/libexec", "artifact-libexec", "manifest-dir/libexec", "PATH"],
+  "desktopRuntimeBinaries": ["theurgy-runtime", "deployments-core"],
   "productBackgroundJobs": [],
   "productBackgroundJobContracts": [],
   "productReleaseTargets": ["macos-app"],
@@ -8073,6 +8208,19 @@ binary = "deployments-core"
             Some("app-blueprint/runtime.manifest.json")
         );
         assert_eq!(
+            summary.desktop_runtime_tool_lookup,
+            vec![
+                "bundle-resources/libexec".to_string(),
+                "artifact-libexec".to_string(),
+                "manifest-dir/libexec".to_string(),
+                "PATH".to_string()
+            ]
+        );
+        assert_eq!(
+            summary.desktop_runtime_binaries,
+            vec!["theurgy-runtime".to_string(), "deployments-core".to_string()]
+        );
+        assert_eq!(
             summary.runtime_state_request_schema,
             product_runtime::RUNTIME_STATE_REQUEST_SCHEMA
         );
@@ -8125,6 +8273,19 @@ binary = "deployments-core"
         assert_eq!(
             error,
             "generated runtime requestCommandManifest must match runtimeManifest"
+        );
+
+        let mut invalid = runtime.clone();
+        invalid.as_object_mut().unwrap().insert(
+            "desktopRuntimeBinaries".to_string(),
+            serde_json::json!(["theurgy-runtime"]),
+        );
+        let error = product_runtime::validate_generated_runtime_value(&invalid)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            "generated runtime desktopRuntimeBinaries missing staged binary: deployments-core"
         );
 
         let mut invalid = runtime.clone();
@@ -8547,6 +8708,18 @@ binary = "deployments-core"
         assert_eq!(
             summary.request_command_manifest.as_deref(),
             Some("app-blueprint/runtime.manifest.json")
+        );
+        assert_eq!(
+            summary.desktop_runtime_tool_lookup,
+            product_runtime::desktop_runtime_tool_lookup("macos")
+        );
+        assert_eq!(
+            summary.desktop_runtime_binaries,
+            vec![
+                "theurgy-runtime".to_string(),
+                "deployments-core".to_string(),
+                "deployments-daemon".to_string()
+            ]
         );
         assert_eq!(
             summary.runtime_state_request_schema,
