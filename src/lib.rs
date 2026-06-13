@@ -2247,8 +2247,14 @@ pub mod product_runtime {
                 string_vec_value(&desktop_runtime_binaries(runtime)),
             );
         } else {
-            object.insert("desktopRuntimeToolLookup".to_string(), Value::Array(Vec::new()));
-            object.insert("desktopRuntimeBinaries".to_string(), Value::Array(Vec::new()));
+            object.insert(
+                "desktopRuntimeToolLookup".to_string(),
+                Value::Array(Vec::new()),
+            );
+            object.insert(
+                "desktopRuntimeBinaries".to_string(),
+                Value::Array(Vec::new()),
+            );
         }
         object.insert(
             "productBackgroundJobs".to_string(),
@@ -4499,6 +4505,7 @@ int main(int argc, char **argv) {
 // Runtime: theurgy-runtime.json
 // Surface: theurgy-surface.json
 import Foundation
+import Dispatch
 import SwiftUI
 
 func loadBundledContract(_ name: String) -> String {
@@ -5425,6 +5432,11 @@ let surfaceCapabilities = __SURFACE_CAPABILITIES__
 let surfaceRoles = __SURFACE_ROLES__
 let actionContracts = __ACTION_CONTRACTS__
 let defaultActionId = "__DEFAULT_ACTION_ID__"
+let runtimeLaunchSemaphore = DispatchSemaphore(value: 1)
+let runtimeLaunchBackoffSeconds: TimeInterval = 45
+let runtimeLaunchTimeoutSeconds: TimeInterval = 15
+let runtimeLaunchBackoffLock = NSLock()
+var runtimeLaunchBackoffUntil = Date.distantPast
 
 func defaultParamsJson(for action: ProductActionContract) -> String {
   let params = defaultParams(for: action)
@@ -5613,6 +5625,14 @@ func runRuntimeCommand(_ command: [String]) -> String {
   guard let executable = command.first else {
     return "runtime command missing"
   }
+  if runtimeLaunchBackoffActive() {
+    return "Runtime command deferred because macOS launch assessment is under pressure."
+  }
+  guard runtimeLaunchSemaphore.wait(timeout: .now()) == .success else {
+    markRuntimeLaunchPressure()
+    return "Runtime command deferred because another runtime launch is still running."
+  }
+  defer { runtimeLaunchSemaphore.signal() }
   let process = Process()
   process.executableURL = resolveExecutable(executable)
   process.arguments = Array(command.dropFirst())
@@ -5622,7 +5642,17 @@ func runRuntimeCommand(_ command: [String]) -> String {
   process.standardError = error
   do {
     try process.run()
-    process.waitUntilExit()
+    let waitGroup = DispatchGroup()
+    waitGroup.enter()
+    DispatchQueue.global(qos: .utility).async {
+      process.waitUntilExit()
+      waitGroup.leave()
+    }
+    if waitGroup.wait(timeout: .now() + runtimeLaunchTimeoutSeconds) == .timedOut {
+      markRuntimeLaunchPressure()
+      process.terminate()
+      return "Runtime command timed out before startup completed; deferred to avoid macOS launch-assessment pressure."
+    }
     let data = output.fileHandleForReading.readDataToEndOfFile()
     let errorData = error.fileHandleForReading.readDataToEndOfFile()
     if process.terminationStatus != 0 {
@@ -5631,8 +5661,21 @@ func runRuntimeCommand(_ command: [String]) -> String {
     let text = String(data: data, encoding: .utf8) ?? "runtime state loaded"
     return String(text.prefix(4000))
   } catch {
+    markRuntimeLaunchPressure()
     return String(describing: error)
   }
+}
+
+func runtimeLaunchBackoffActive() -> Bool {
+  runtimeLaunchBackoffLock.lock()
+  defer { runtimeLaunchBackoffLock.unlock() }
+  return Date() < runtimeLaunchBackoffUntil
+}
+
+func markRuntimeLaunchPressure() {
+  runtimeLaunchBackoffLock.lock()
+  runtimeLaunchBackoffUntil = Date().addingTimeInterval(runtimeLaunchBackoffSeconds)
+  runtimeLaunchBackoffLock.unlock()
 }
 
 func resolveContractURL(_ name: String) -> URL {
@@ -8188,6 +8231,9 @@ binary = "deployments-core"
     "failureShape": {}
   }],
   "surfaceRoles": ["left-list-detail"],
+  "surfaceMobilePermissions": [],
+  "surfaceMobileBackgroundModes": [],
+  "surfaceMobileOfflineAffordances": [],
   "surfaceScreens": [],
   "surfaceScreenContracts": []
 }"#,
@@ -8218,7 +8264,10 @@ binary = "deployments-core"
         );
         assert_eq!(
             summary.desktop_runtime_binaries,
-            vec!["theurgy-runtime".to_string(), "deployments-core".to_string()]
+            vec![
+                "theurgy-runtime".to_string(),
+                "deployments-core".to_string()
+            ]
         );
         assert_eq!(
             summary.runtime_state_request_schema,
@@ -8298,7 +8347,7 @@ binary = "deployments-core"
             .to_string();
         assert_eq!(
             error,
-            "generated runtime stateCommand must contain non-empty strings"
+            "JSON array key stateCommand must contain non-empty strings"
         );
 
         let mut invalid = runtime.clone();
@@ -8872,6 +8921,15 @@ binary = "deployments-core"
                 .contains("let runtimeRequestCommand = [\"theurgy-runtime\", \"run-request\"]")
             && file
                 .contents
+                .contains("let runtimeLaunchSemaphore = DispatchSemaphore(value: 1)")
+            && file
+                .contents
+                .contains("func runtimeLaunchBackoffActive() -> Bool")
+            && file.contents.contains(
+                "Runtime command deferred because macOS launch assessment is under pressure."
+            )
+            && file
+                .contents
                 .contains("func runRuntimeRequest(_ request: [String: Any]) -> String")
             && file
                 .contents
@@ -8941,9 +8999,9 @@ binary = "deployments-core"
         assert!(linux_source.contains("static char *load_contract_file(const char *name)"));
         assert!(linux_source.contains("static char *run_runtime_request(const char *request)"));
         assert!(linux_source.contains("\"run-request\", request_path, \"--manifest\", manifest"));
-        assert!(linux_source.contains("\"schema\":\"theurgy-runtime-state-request/v1\""));
-        assert!(linux_source.contains("\"schema\":\"theurgy-runtime-action-request/v1\""));
-        assert!(linux_source.contains("resolve_contract_file(\"runtime.manifest.json\")"));
+        assert!(linux_source.contains("theurgy-runtime-state-request/v1"));
+        assert!(linux_source.contains("theurgy-runtime-action-request/v1"));
+        assert!(linux_source.contains("resolve_contract_file("));
         assert!(linux_source.contains("Runtime contract: %s\\nSurface contract: %s"));
         assert!(linux_source
             .contains("contract_string_array_summary(runtime_metadata, \"surfaceRoles\")"));

@@ -3,10 +3,11 @@ use std::env;
 use std::error::Error;
 use std::fmt;
 use std::fs;
+use std::io;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use serde_json::{json, Value};
 use theurgy::product_runtime;
@@ -1701,9 +1702,69 @@ fn stage_app_runtime_binaries(
                 ))
             })?;
             mark_executable(&destination)?;
+            prepare_staged_runtime_binary(&destination, target)?;
         }
     }
     Ok(())
+}
+
+fn prepare_staged_runtime_binary(path: &Path, target: &str) -> Result<()> {
+    if target != "macos" {
+        return Ok(());
+    }
+    remove_macos_quarantine(path)?;
+    ensure_macos_staged_binary_signature(path)
+}
+
+fn remove_macos_quarantine(path: &Path) -> Result<()> {
+    let status = Command::new("xattr")
+        .arg("-d")
+        .arg("com.apple.quarantine")
+        .arg(path)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    match status {
+        Ok(status) if status.success() => Ok(()),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(TheurgyError::new(format!(
+            "could not remove quarantine from {}: {error}",
+            path.display()
+        ))
+        .into()),
+    }
+}
+
+fn ensure_macos_staged_binary_signature(path: &Path) -> Result<()> {
+    if env::var_os("THEURGY_SKIP_MACOS_ADHOC_SIGN").is_some()
+        || env::var_os("THEURGY_MACOS_SIGN_IDENTITY").is_some()
+        || env::var_os("APPLE_DEVELOPER_ID_APP").is_some()
+    {
+        return Ok(());
+    }
+    let status = Command::new("codesign")
+        .arg("--force")
+        .arg("--sign")
+        .arg("-")
+        .arg(path)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    match status {
+        Ok(status) if status.success() => Ok(()),
+        Ok(status) => Err(TheurgyError::new(format!(
+            "ad-hoc codesign failed for {} with status {status}",
+            path.display()
+        ))
+        .into()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(TheurgyError::new(format!(
+            "could not run codesign for {}: {error}",
+            path.display()
+        ))
+        .into()),
+    }
 }
 
 fn collect_manifest_binary(command: &[String], binaries: &mut BTreeSet<String>) -> Result<()> {
