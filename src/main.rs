@@ -2512,6 +2512,16 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("generatedAt required"));
+        let history = sample_operation_history().replace("\"progress\": 100", "\"progress\": 101");
+        let error = validate_operation_history(&history)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("progress must be 0..100"));
+        let history = sample_operation_history().replace("\"operation\": {", "\"legacy\": {");
+        let error = validate_operation_history(&history)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("operation history data[0].operation required"));
     }
 
     #[test]
@@ -3082,6 +3092,18 @@ mod tests {
                 .pointer("/properties/data/type")
                 .and_then(Value::as_str),
             Some("array")
+        );
+        assert_eq!(
+            schema
+                .pointer("/properties/data/items/$ref")
+                .and_then(Value::as_str),
+            Some("#/$defs/operationHistoryEntry")
+        );
+        assert_eq!(
+            schema
+                .pointer("/$defs/operation/properties/progress/maximum")
+                .and_then(Value::as_u64),
+            Some(100)
         );
     }
 
@@ -6417,7 +6439,7 @@ mod tests {
     }
 
     fn sample_operation_history() -> String {
-        "{\n  \"schema\": \"theurgy-operation-history/v1\",\n  \"app\": \"deployments\",\n  \"generatedAt\": \"2026-06-11T00:00:00Z\",\n  \"data\": [\n    {\"action\": \"publish\", \"status\": \"completed\"}\n  ]\n}".to_string()
+        "{\n  \"schema\": \"theurgy-operation-history/v1\",\n  \"app\": \"deployments\",\n  \"generatedAt\": \"2026-06-11T00:00:00Z\",\n  \"data\": [\n    {\"action\": \"publish_changes\", \"operation\": {\"id\": \"deployments-publish_changes-123\", \"status\": \"completed\", \"progress\": 100, \"longRunning\": true}}\n  ]\n}".to_string()
     }
 
     fn runtime_fixture_root(label: &str) -> PathBuf {

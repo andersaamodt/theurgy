@@ -879,6 +879,33 @@ pub mod product_runtime {
             .filter(|generated_at| !generated_at.is_empty())
             .ok_or_else(|| ContractError::new("operation history generatedAt required"))?;
         let entries = value_array(value, "data")?;
+        for (index, entry) in entries.iter().enumerate() {
+            let entry = entry.as_object().ok_or_else(|| {
+                ContractError::new(format!(
+                    "operation history data[{index}] must be a JSON object"
+                ))
+            })?;
+            let action = entry
+                .get("action")
+                .and_then(Value::as_str)
+                .filter(|action| valid_action_id(action))
+                .ok_or_else(|| {
+                    ContractError::new(format!(
+                        "operation history data[{index}].action must be a stable action id"
+                    ))
+                })?;
+            let operation = entry.get("operation").ok_or_else(|| {
+                ContractError::new(format!(
+                    "operation history data[{index}].operation required"
+                ))
+            })?;
+            validate_operation_record(operation).map_err(|error| {
+                ContractError::new(format!(
+                    "operation history data[{index}] for {action}: {}",
+                    error.message
+                ))
+            })?;
+        }
         Ok(OperationHistory {
             app_id,
             entries: entries.len(),
@@ -6990,8 +7017,24 @@ binary = "deployments-core"
             "app": "deployments",
             "generatedAt": "2026-06-11T00:00:00Z",
             "data": [
-                {"id": "op-one"},
-                {"id": "op-two"}
+                {
+                    "action": "publish_changes",
+                    "operation": {
+                        "id": "op-one",
+                        "status": "completed",
+                        "progress": 100,
+                        "longRunning": true
+                    }
+                },
+                {
+                    "action": "run_checks",
+                    "operation": {
+                        "id": "op-two",
+                        "status": "failed",
+                        "progress": 100,
+                        "longRunning": true
+                    }
+                }
             ]
         });
         let history = product_runtime::validate_operation_history_value(&history).unwrap();
@@ -7008,6 +7051,18 @@ binary = "deployments-core"
             .unwrap_err()
             .to_string();
         assert_eq!(error, "missing JSON array key: data");
+        let invalid_entry = serde_json::json!({
+            "schema": product_runtime::OPERATION_HISTORY_SCHEMA,
+            "app": "deployments",
+            "generatedAt": "2026-06-11T00:00:00Z",
+            "data": [
+                {"action": "publish_changes"}
+            ]
+        });
+        let error = product_runtime::validate_operation_history_value(&invalid_entry)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("operation history data[0].operation required"));
     }
 
     #[test]

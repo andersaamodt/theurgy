@@ -8,7 +8,35 @@
     "schema": { "const": "theurgy-operation-history/v1" },
     "app": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
     "generatedAt": { "type": "string", "minLength": 1 },
-    "data": { "type": "array" }
+    "data": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/operationHistoryEntry" }
+    }
   },
-  "additionalProperties": true
+  "additionalProperties": true,
+  "$defs": {
+    "operation": {
+      "type": "object",
+      "required": ["id", "status", "progress", "longRunning"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "status": {
+          "type": "string",
+          "enum": ["accepted", "running", "completed", "failed", "cancelled"]
+        },
+        "progress": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "longRunning": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "operationHistoryEntry": {
+      "type": "object",
+      "required": ["action", "operation"],
+      "properties": {
+        "action": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "operation": { "$ref": "#/$defs/operation" }
+      },
+      "additionalProperties": true
+    }
+  }
 }
