@@ -37,6 +37,13 @@
 - Compiled core reasoning context should include exact mediated command affordances for governed tools when the host controller uses mediated shell commands as its tool protocol.
 - Resident worker migrations should attach to the app's existing daemon or scheduled worker lifecycle before introducing another scheduler.
 - Structured desktop-control adapters may call platform tools internally, but they must not expose freeform shell, AppleScript, or automation strings as the capability contract.
+- For web migrations, work in the exact source checkout and branch that the deployment system watches. Do not prove a Theurgy port in a parallel checkout while production still deploys an older shell or Python backend.
+- Keep CGI front doors as small compatibility wrappers during migration, but make them dispatch into allowlisted compiled runtimes instead of retaining large shell bodies.
+- Split web runtimes by risk domain. Public reads, cache rebuilds, admin reads, admin mutations, payments, Nostr publishing, and secure chat controls should not be casually merged into one action surface.
+- Add replay fixtures before switching endpoints. Captured environment, query, body, and file-state assertions are the basic proof that a CGI route survived the boundary change.
+- Test and package against the deployment server's real Rust/Cargo constraints. Prefer small pinned free-software dependencies and vendor them when the server cannot reliably resolve the registry during deploy.
+- Keep build outputs, dependency caches, and generated publish artifacts out of watched source commits. Deployment tooling should ignore `target/`, `node_modules/`, and other local build products even when staging ignored files.
+- A web migration is not complete until the managed deployment path builds the Linux runtime normally, promotes it, live endpoints use the compiled binary, obsolete interpreted backends are absent from the active release, and browser-level behavior is verified.
 
 ## Validation
 - Run `cargo fmt --check`.

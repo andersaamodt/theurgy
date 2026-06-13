@@ -57,3 +57,32 @@ Desk should become the first site module because it is narrow and file-backed:
 
 The harness replaces shell in hot request paths. It does not replace Wizardry
 spells, Deployments actuation, file-first state, or site-local configuration.
+
+## Conversion Lessons
+
+Use the Desk and Gazeta conversions as the baseline pattern for future
+Wizardry-site ports:
+
+- Convert public reads first. They prove request normalization, file path
+  resolution, response compatibility, cache use, and deploy-time runtime
+  installation without risking payments, publishing, admin writes, or chat
+  controls.
+- Keep each runtime action surface narrow. A site may have one public read
+  binary, one Nostr read binary, one commerce read binary, and later separate
+  mutation binaries. Do not grow one monolithic all-site backend by accident.
+- Keep the CGI names stable while changing their bodies. Compatibility wrappers
+  should parse the old request shape, set explicit environment variables or a
+  normalized request envelope, and exec the compiled runtime.
+- Capture replay fixtures before each route switch. The fixture should include
+  CGI environment, query string, request body, expected response shape, and
+  relevant file-state before/after checks for mutations.
+- Build for the deployment host, not only the development laptop. Confirm the
+  server Rust/Cargo versions, pin or vendor dependencies when needed, and avoid
+  proc-macro or registry-heavy dependency trees on low-resource servers unless
+  there is a clear benefit.
+- Treat generated artifacts as publish hazards. `target/`, dependency caches,
+  local build stamps, and generated output should be ignored or produced by the
+  normal deployment hook, not committed as source truth.
+- Verify the active release. A successful source patch is not enough; check the
+  watched checkout, managed publish status, promoted release path, binary type,
+  absence of obsolete interpreted backends, and live browser behavior.
