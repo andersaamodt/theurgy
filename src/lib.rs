@@ -2377,6 +2377,7 @@ pub mod product_runtime {
         }
         validate_product_action_commands(product, runtime)?;
         validate_surface_contract(product, surface)?;
+        validate_surface_runtime_bridge(surface, runtime)?;
         validate_native_compile_contract(product, surface, target)?;
         Ok(())
     }
@@ -3301,6 +3302,16 @@ pub mod product_runtime {
                 "product IR long-running actions require runtime manifest operationStatusCommand",
             ));
         }
+        if product
+            .state_projections
+            .iter()
+            .any(|projection| projection == "operation_history")
+            && runtime.history_command.is_empty()
+        {
+            return Err(ContractError::new(
+                "product IR operation_history projection requires runtime manifest historyCommand",
+            ));
+        }
         for contract in &product.action_contracts {
             if contract.command.is_empty() {
                 continue;
@@ -3432,6 +3443,28 @@ pub mod product_runtime {
                     )));
                 }
             }
+        }
+        Ok(())
+    }
+
+    fn validate_surface_runtime_bridge(
+        surface: &SurfaceIr,
+        runtime: &RuntimeBridge,
+    ) -> ContractResult<()> {
+        let has_operation_history_role = surface
+            .roles
+            .iter()
+            .any(|role| role == "operation-history" || role == "recent-operation-history")
+            || surface.mobile_screens.iter().any(|screen| {
+                screen
+                    .roles
+                    .iter()
+                    .any(|role| role == "operation-history" || role == "recent-operation-history")
+            });
+        if has_operation_history_role && runtime.history_command.is_empty() {
+            return Err(ContractError::new(
+                "surface IR operation history roles require runtime manifest historyCommand",
+            ));
         }
         Ok(())
     }
@@ -7669,37 +7702,33 @@ binary = "deployments-core"
             "name = \"deployments\"\nkind = \"desktop\"\nsource_root = \"src\"\nproduct_ir = \"app-blueprint/product.ir.json\"\ndesktop_surface_ir = \"app-blueprint/desktop.surface.ir.json\"\nruntime_manifest = \"app-blueprint/runtime.manifest.json\"\n",
         )
         .unwrap();
-        std::fs::write(
-            blueprint.join("product.ir.json"),
-            serde_json::json!({
-                "version": product_runtime::PRODUCT_IR_SCHEMA,
-                "format": "json",
-                "app": {"id": "deployments", "name": "Deployments", "targets": ["macos"], "capabilities": ["native-desktop"]},
-                "surfaces": {"desktop": "app-blueprint/desktop.surface.ir.json"},
-                "state": {"snapshotSchema": "deployments-state/v1"},
-                "actions": [{
-                    "id": "refresh_state",
-                    "label": "Refresh",
-                    "input": {},
-                    "output": {"schema": "string"},
-                    "effect": "read",
-                    "failure": {"error": "string"},
-                    "safe": true,
-                    "mutating": false,
-                    "longRunning": false,
-                    "privileged": false,
-                    "command": ["deployments-core", "runtime-action", "refresh_state", "{}"]
-                }],
-                "releaseTargets": [{
-                    "id": "macos-native",
-                    "target": "macos",
-                    "surface": "desktop",
-                    "artifact": "generated/macos"
-                }]
-            })
-            .to_string(),
-        )
-        .unwrap();
+        let product_json = serde_json::json!({
+            "version": product_runtime::PRODUCT_IR_SCHEMA,
+            "format": "json",
+            "app": {"id": "deployments", "name": "Deployments", "targets": ["macos"], "capabilities": ["native-desktop"]},
+            "surfaces": {"desktop": "app-blueprint/desktop.surface.ir.json"},
+            "state": {"snapshotSchema": "deployments-state/v1"},
+            "actions": [{
+                "id": "refresh_state",
+                "label": "Refresh",
+                "input": {},
+                "output": {"schema": "string"},
+                "effect": "read",
+                "failure": {"error": "string"},
+                "safe": true,
+                "mutating": false,
+                "longRunning": false,
+                "privileged": false,
+                "command": ["deployments-core", "runtime-action", "refresh_state", "{}"]
+            }],
+            "releaseTargets": [{
+                "id": "macos-native",
+                "target": "macos",
+                "surface": "desktop",
+                "artifact": "generated/macos"
+            }]
+        });
+        std::fs::write(blueprint.join("product.ir.json"), product_json.to_string()).unwrap();
         std::fs::write(
             blueprint.join("runtime.manifest.json"),
             serde_json::json!({
@@ -7718,21 +7747,21 @@ binary = "deployments-core"
             .to_string(),
         )
         .unwrap();
+        let surface_json = serde_json::json!({
+            "version": product_runtime::DESKTOP_SURFACE_IR_SCHEMA,
+            "format": "json",
+            "product": "deployments",
+            "target": "desktop",
+            "actions": ["refresh_state"],
+            "window": {
+                "id": "window.main",
+                "type": "Window",
+                "role": "left-list-detail"
+            }
+        });
         std::fs::write(
             blueprint.join("desktop.surface.ir.json"),
-            serde_json::json!({
-                "version": product_runtime::DESKTOP_SURFACE_IR_SCHEMA,
-                "format": "json",
-                "product": "deployments",
-                "target": "desktop",
-                "actions": ["refresh_state"],
-                "window": {
-                    "id": "window.main",
-                    "type": "Window",
-                    "role": "left-list-detail"
-                }
-            })
-            .to_string(),
+            surface_json.to_string(),
         )
         .unwrap();
 
@@ -7759,6 +7788,37 @@ binary = "deployments-core"
         assert_eq!(
             error,
             "product IR long-running actions require runtime manifest operationStatusCommand"
+        );
+
+        let mut history_product = product_json.clone();
+        history_product["state"]["projections"] = serde_json::json!(["operation_history"]);
+        std::fs::write(
+            blueprint.join("product.ir.json"),
+            history_product.to_string(),
+        )
+        .unwrap();
+        let error = product_runtime::load_app_compile_contract(&root, "macos")
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            "product IR operation_history projection requires runtime manifest historyCommand"
+        );
+
+        std::fs::write(blueprint.join("product.ir.json"), product_json.to_string()).unwrap();
+        let mut history_surface = surface_json.clone();
+        history_surface["window"]["role"] = serde_json::json!("operation-history");
+        std::fs::write(
+            blueprint.join("desktop.surface.ir.json"),
+            history_surface.to_string(),
+        )
+        .unwrap();
+        let error = product_runtime::load_app_compile_contract(&root, "macos")
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            "surface IR operation history roles require runtime manifest historyCommand"
         );
         std::fs::remove_dir_all(root).unwrap();
     }
