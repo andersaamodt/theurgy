@@ -46,6 +46,9 @@
     "surfaceCapabilities",
     "surfaceActionContracts",
     "surfaceRoles",
+    "surfaceMobilePermissions",
+    "surfaceMobileBackgroundModes",
+    "surfaceMobileOfflineAffordances",
     "surfaceScreens",
     "surfaceScreenContracts"
   ],
@@ -150,6 +153,9 @@
       "items": { "$ref": "#/$defs/actionContract" }
     },
     "surfaceRoles": { "$ref": "#/$defs/stringList" },
+    "surfaceMobilePermissions": { "$ref": "#/$defs/stringList" },
+    "surfaceMobileBackgroundModes": { "$ref": "#/$defs/stringList" },
+    "surfaceMobileOfflineAffordances": { "$ref": "#/$defs/stringList" },
     "surfaceScreens": { "$ref": "#/$defs/actionIdList" },
     "surfaceScreenContracts": {
       "type": "array",
@@ -170,6 +176,9 @@
           },
           "surfaceSchema": { "const": "theurgy-desktop-surface-ir/v1" },
           "surfaceTarget": { "enum": ["desktop", "macos", "linux"] },
+          "surfaceMobilePermissions": { "maxItems": 0 },
+          "surfaceMobileBackgroundModes": { "maxItems": 0 },
+          "surfaceMobileOfflineAffordances": { "maxItems": 0 },
           "surfaceScreens": { "maxItems": 0 },
           "surfaceScreenContracts": { "maxItems": 0 }
         },

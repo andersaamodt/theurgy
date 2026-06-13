@@ -336,6 +336,9 @@ pub mod product_runtime {
         pub action_ids: Vec<String>,
         pub capabilities: Vec<String>,
         pub roles: Vec<String>,
+        pub mobile_permissions: Vec<String>,
+        pub mobile_background_modes: Vec<String>,
+        pub mobile_offline_affordances: Vec<String>,
         pub mobile_screens: Vec<MobileScreenContract>,
     }
 
@@ -1404,6 +1407,9 @@ pub mod product_runtime {
             "surfaceActions",
             "surfaceCapabilities",
             "surfaceRoles",
+            "surfaceMobilePermissions",
+            "surfaceMobileBackgroundModes",
+            "surfaceMobileOfflineAffordances",
             "surfaceScreens",
         ] {
             optional_string_array(value, key, &format!("generated runtime {key}"))?;
@@ -1570,6 +1576,11 @@ pub mod product_runtime {
             }
         }
         let surface_screens = value_string_array(value, "surfaceScreens")?;
+        let surface_mobile_permissions = value_string_array(value, "surfaceMobilePermissions")?;
+        let surface_mobile_background_modes =
+            value_string_array(value, "surfaceMobileBackgroundModes")?;
+        let surface_mobile_offline_affordances =
+            value_string_array(value, "surfaceMobileOfflineAffordances")?;
         let surface_screen_contracts = value_array(value, "surfaceScreenContracts")?;
         if surface_screen_contracts.len() != surface_screens.len() {
             return Err(ContractError::new(
@@ -1636,6 +1647,15 @@ pub mod product_runtime {
         if matches!(target.as_str(), "macos" | "linux") && !surface_screens.is_empty() {
             return Err(ContractError::new(
                 "generated runtime desktop targets must not declare mobile surfaceScreens",
+            ));
+        }
+        if matches!(target.as_str(), "macos" | "linux")
+            && (!surface_mobile_permissions.is_empty()
+                || !surface_mobile_background_modes.is_empty()
+                || !surface_mobile_offline_affordances.is_empty())
+        {
+            return Err(ContractError::new(
+                "generated runtime desktop targets must not declare mobile surface contracts",
             ));
         }
         Ok(GeneratedRuntime {
@@ -1803,6 +1823,9 @@ pub mod product_runtime {
         capabilities.dedup();
         let mut roles = Vec::new();
         let mut mobile_screens = Vec::new();
+        let mut mobile_permissions = Vec::new();
+        let mut mobile_background_modes = Vec::new();
+        let mut mobile_offline_affordances = Vec::new();
         if schema == DESKTOP_SURFACE_IR_SCHEMA {
             if !matches!(target.as_str(), "desktop" | "macos" | "linux") {
                 return Err(ContractError::new("desktop surface IR target invalid"));
@@ -1814,6 +1837,24 @@ pub mod product_runtime {
             if !matches!(target.as_str(), "mobile" | "ios" | "android") {
                 return Err(ContractError::new("mobile surface IR target invalid"));
             }
+            mobile_permissions =
+                optional_string_array(value, "permissions", "mobile surface IR permissions")?;
+            validate_unique_ids(&mobile_permissions, "mobile surface permission")?;
+            mobile_background_modes = optional_string_array(
+                value,
+                "backgroundModes",
+                "mobile surface IR backgroundModes",
+            )?;
+            validate_unique_ids(&mobile_background_modes, "mobile surface background mode")?;
+            mobile_offline_affordances = optional_string_array(
+                value,
+                "offlineAffordances",
+                "mobile surface IR offlineAffordances",
+            )?;
+            validate_unique_ids(
+                &mobile_offline_affordances,
+                "mobile surface offline affordance",
+            )?;
             for screen in value_array(value, "screens")? {
                 mobile_screens.push(validate_mobile_screen_contract(screen)?);
                 if let Ok(node) = value_object(screen, "node") {
@@ -1831,6 +1872,9 @@ pub mod product_runtime {
             action_ids,
             capabilities,
             roles,
+            mobile_permissions,
+            mobile_background_modes,
+            mobile_offline_affordances,
             mobile_screens,
         })
     }
@@ -2197,6 +2241,18 @@ pub mod product_runtime {
             action_contracts_value(&surface_action_contracts(product, surface)),
         );
         object.insert("surfaceRoles".to_string(), string_vec_value(&surface.roles));
+        object.insert(
+            "surfaceMobilePermissions".to_string(),
+            string_vec_value(&surface.mobile_permissions),
+        );
+        object.insert(
+            "surfaceMobileBackgroundModes".to_string(),
+            string_vec_value(&surface.mobile_background_modes),
+        );
+        object.insert(
+            "surfaceMobileOfflineAffordances".to_string(),
+            string_vec_value(&surface.mobile_offline_affordances),
+        );
         object.insert(
             "surfaceScreens".to_string(),
             string_vec_value(
@@ -2631,6 +2687,18 @@ pub mod product_runtime {
                 surface.capabilities.join(",")
             ));
             lines.push(format!("mobile_surface_roles={}", surface.roles.join(",")));
+            lines.push(format!(
+                "mobile_surface_permissions={}",
+                surface.mobile_permissions.join(",")
+            ));
+            lines.push(format!(
+                "mobile_surface_background_modes={}",
+                surface.mobile_background_modes.join(",")
+            ));
+            lines.push(format!(
+                "mobile_surface_offline_affordances={}",
+                surface.mobile_offline_affordances.join(",")
+            ));
             lines.push(format!(
                 "mobile_surface_screens={}",
                 surface
@@ -4383,6 +4451,9 @@ struct RuntimeContract {
   var runtimeSurfaceActions: [String] { runtimeStringArray(runtimeMetadata, key: "surfaceActions") }
   var surfaceCapabilities: [String] { runtimeStringArray(runtimeMetadata, key: "surfaceCapabilities") }
   var surfaceRoles: [String] { runtimeStringArray(runtimeMetadata, key: "surfaceRoles") }
+  var surfaceMobilePermissions: [String] { runtimeStringArray(runtimeMetadata, key: "surfaceMobilePermissions") }
+  var surfaceMobileBackgroundModes: [String] { runtimeStringArray(runtimeMetadata, key: "surfaceMobileBackgroundModes") }
+  var surfaceMobileOfflineAffordances: [String] { runtimeStringArray(runtimeMetadata, key: "surfaceMobileOfflineAffordances") }
   var productStateProjections: [String] { runtimeStringArray(runtimeMetadata, key: "productStateProjections") }
   var productDomainObjects: [String] { runtimeObjectSummaries(runtimeMetadata, key: "productDomainObjectContracts", fields: ["label", "source"]) }
   var productPersistenceRoots: [String] { runtimeObjectSummaries(runtimeMetadata, key: "productPersistenceRootContracts", fields: ["kind", "path"]) }
@@ -4606,6 +4677,9 @@ struct MobileSurfaceScreenView: View {
           Text("Operation history schema: \(contract.operationHistorySchema)")
           Text("Surface capabilities: \(contract.surfaceCapabilities.joined(separator: ", "))")
           Text("Surface roles: \(contract.surfaceRoles.joined(separator: ", "))")
+          Text("Mobile permissions: \(contract.surfaceMobilePermissions.joined(separator: ", "))")
+          Text("Mobile background modes: \(contract.surfaceMobileBackgroundModes.joined(separator: ", "))")
+          Text("Mobile offline affordances: \(contract.surfaceMobileOfflineAffordances.joined(separator: ", "))")
           Text("Runtime surface actions: \(contract.runtimeSurfaceActions.joined(separator: ", "))")
           Text("Product state projections: \(contract.productStateProjections.joined(separator: ", "))")
           Text(contract.stateEnvelope())
@@ -5078,6 +5152,9 @@ public final class MainActivity extends Activity {
       .append("\nOperation history schema: ").append(jsonString(runtimeMetadata, "operationHistorySchema"))
       .append("\nSurface capabilities: ").append(jsonStringArray(runtimeMetadata, "surfaceCapabilities"))
       .append("\nSurface roles: ").append(jsonStringArray(runtimeMetadata, "surfaceRoles"))
+      .append("\nMobile permissions: ").append(jsonStringArray(runtimeMetadata, "surfaceMobilePermissions"))
+      .append("\nMobile background modes: ").append(jsonStringArray(runtimeMetadata, "surfaceMobileBackgroundModes"))
+      .append("\nMobile offline affordances: ").append(jsonStringArray(runtimeMetadata, "surfaceMobileOfflineAffordances"))
       .append("\nRuntime surface actions: ").append(jsonStringArray(runtimeMetadata, "surfaceActions"))
       .append("\nProduct state projections: ").append(jsonStringArray(runtimeMetadata, "productStateProjections"))
       .append("\nProduct domain objects: ").append(jsonObjectArraySummary(runtimeMetadata, "productDomainObjectContracts", new String[] {"label", "source"}))
@@ -8269,6 +8346,57 @@ binary = "deployments-core"
     }
 
     #[test]
+    fn product_runtime_validates_mobile_surface_runtime_contracts() {
+        let surface_value = serde_json::json!({
+            "version": product_runtime::MOBILE_SURFACE_IR_SCHEMA,
+            "format": "json",
+            "product": "deployments",
+            "target": "mobile",
+            "actions": ["refresh_state"],
+            "capabilities": ["status-overview"],
+            "permissions": ["network", "notifications"],
+            "backgroundModes": ["status-refresh"],
+            "offlineAffordances": ["cached-status-overview", "recent-history-cache"],
+            "screens": [{
+                "id": "overview",
+                "title": "Deployments",
+                "actions": ["refresh_state"],
+                "node": {
+                    "id": "screen.overview",
+                    "type": "NavigationStack",
+                    "role": "status-overview"
+                }
+            }]
+        });
+        let surface = product_runtime::validate_surface_ir_value(&surface_value).unwrap();
+        assert_eq!(
+            surface.mobile_permissions,
+            vec!["network".to_string(), "notifications".to_string()]
+        );
+        assert_eq!(
+            surface.mobile_background_modes,
+            vec!["status-refresh".to_string()]
+        );
+        assert_eq!(
+            surface.mobile_offline_affordances,
+            vec![
+                "cached-status-overview".to_string(),
+                "recent-history-cache".to_string()
+            ]
+        );
+
+        let mut invalid = surface_value.clone();
+        invalid.as_object_mut().unwrap().insert(
+            "permissions".to_string(),
+            serde_json::json!(["network", "network"]),
+        );
+        let error = product_runtime::validate_surface_ir_value(&invalid)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(error, "mobile surface permission duplicated: network");
+    }
+
+    #[test]
     fn product_runtime_builds_generated_runtime_metadata() {
         let product = serde_json::json!({
             "version": product_runtime::PRODUCT_IR_SCHEMA,
@@ -8403,6 +8531,18 @@ binary = "deployments-core"
         assert_eq!(
             runtime_json.get("productStateProjections").unwrap(),
             &serde_json::json!(["deployments"])
+        );
+        assert_eq!(
+            runtime_json.get("surfaceMobilePermissions").unwrap(),
+            &serde_json::json!([])
+        );
+        assert_eq!(
+            runtime_json.get("surfaceMobileBackgroundModes").unwrap(),
+            &serde_json::json!([])
+        );
+        assert_eq!(
+            runtime_json.get("surfaceMobileOfflineAffordances").unwrap(),
+            &serde_json::json!([])
         );
         assert_eq!(
             runtime_json.get("productDomainObjectContracts").unwrap(),

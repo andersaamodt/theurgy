@@ -11,7 +11,10 @@
     "target": { "enum": ["mobile", "ios", "android"] },
     "screens": { "type": "array", "items": { "$ref": "#/$defs/screen" }, "minItems": 1 },
     "actions": { "$ref": "#/$defs/actionIdList" },
-    "capabilities": { "$ref": "#/$defs/capabilityList" }
+    "capabilities": { "$ref": "#/$defs/capabilityList" },
+    "permissions": { "$ref": "#/$defs/capabilityList" },
+    "backgroundModes": { "$ref": "#/$defs/capabilityList" },
+    "offlineAffordances": { "$ref": "#/$defs/capabilityList" }
   },
   "$defs": {
     "capabilityList": {
