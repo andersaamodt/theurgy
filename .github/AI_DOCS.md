@@ -29,6 +29,7 @@
 - The normal desktop artifact should launch one solid compiled app executable and one primary compiled runtime. Separate daemons are appropriate only when they have an independent lifecycle; ordinary state, status, action, history, and operation-status calls must not be split across several helper binaries.
 - On macOS, generated adapters should dispatch declared runtime contracts directly through one deliberately staged app-owned binary; avoid app -> generic wrapper -> helper subprocess chains and avoid splitting interactive commands across several executables, both of which multiply Gatekeeper assessment work.
 - macOS staging must not auto-discover arbitrary local signing identities, stage theurgy's generic wrapper into app bundles, or copy quarantine/provenance metadata into generated artifacts.
+- macOS test and staging code must reuse stable external XDG/workbench scratch roots for executable artifacts instead of minting randomized temporary executable paths on every run.
 - Shell scripts may surround the app for install, repair, release, inspection, and compatibility, but they should not keep owning the core interactive runtime once a typed Rust core exists.
 - The migration boundary must be explicit: typed commands, JSON/state schemas, documented XDG roots, release-bundled binaries, and tests that prove the app did not regress to shell-only runtime behavior.
 - For existing apps, migrate by adding a compiled core beside the current backend first, then route new/hot capabilities through it before removing old compatibility paths.
