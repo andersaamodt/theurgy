@@ -16,5 +16,5 @@ esac
 set -eu
 
 repo_dir=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd -P)
-cargo build --quiet --manifest-path "$repo_dir/Cargo.toml" --bin theurgy-runtime
+"$repo_dir/scripts/theurgy-cargo" build --quiet --manifest-path "$repo_dir/Cargo.toml" --bin theurgy-runtime
 exec "$repo_dir/spells/check-theurgy-web-runtime"

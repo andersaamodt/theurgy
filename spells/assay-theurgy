@@ -4,4 +4,4 @@
 set -eu
 
 repo_dir=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd -P)
-exec cargo run --quiet --manifest-path "$repo_dir/Cargo.toml" --bin theurgy-runtime -- assay
+exec "$repo_dir/scripts/theurgy-cargo" run --quiet --manifest-path "$repo_dir/Cargo.toml" --bin theurgy-runtime -- assay
