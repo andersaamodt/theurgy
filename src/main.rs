@@ -1715,41 +1715,43 @@ fn prepare_staged_runtime_binary(path: &Path, target: &str) -> Result<()> {
     if target != "macos" {
         return Ok(());
     }
-    remove_macos_quarantine(path)?;
+    remove_macos_launch_metadata(path)?;
     ensure_macos_staged_binary_signature(path)
 }
 
-fn remove_macos_quarantine(path: &Path) -> Result<()> {
-    let status = Command::new("xattr")
-        .arg("-d")
-        .arg("com.apple.quarantine")
-        .arg(path)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-    match status {
-        Ok(status) if status.success() => Ok(()),
-        Ok(_) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(TheurgyError::new(format!(
-            "could not remove quarantine from {}: {error}",
-            path.display()
-        ))
-        .into()),
+fn remove_macos_launch_metadata(path: &Path) -> Result<()> {
+    for attr in ["com.apple.quarantine", "com.apple.provenance"] {
+        let status = Command::new("xattr")
+            .arg("-d")
+            .arg(attr)
+            .arg(path)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        match status {
+            Ok(status) if status.success() => {}
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(TheurgyError::new(format!(
+                    "could not remove {attr} from {}: {error}",
+                    path.display()
+                ))
+                .into());
+            }
+        }
     }
+    Ok(())
 }
 
 fn ensure_macos_staged_binary_signature(path: &Path) -> Result<()> {
-    if env::var_os("THEURGY_SKIP_MACOS_ADHOC_SIGN").is_some()
-        || env::var_os("THEURGY_MACOS_SIGN_IDENTITY").is_some()
-        || env::var_os("APPLE_DEVELOPER_ID_APP").is_some()
-    {
+    let Some(sign_identity) = macos_staged_binary_sign_identity() else {
         return Ok(());
-    }
+    };
     let status = Command::new("codesign")
         .arg("--force")
         .arg("--sign")
-        .arg("-")
+        .arg(&sign_identity)
         .arg(path)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -1757,7 +1759,7 @@ fn ensure_macos_staged_binary_signature(path: &Path) -> Result<()> {
     match status {
         Ok(status) if status.success() => Ok(()),
         Ok(status) => Err(TheurgyError::new(format!(
-            "ad-hoc codesign failed for {} with status {status}",
+            "codesign failed for {} with identity {sign_identity:?} and status {status}",
             path.display()
         ))
         .into()),
@@ -1768,6 +1770,32 @@ fn ensure_macos_staged_binary_signature(path: &Path) -> Result<()> {
         ))
         .into()),
     }
+}
+
+fn macos_staged_binary_sign_identity() -> Option<String> {
+    macos_staged_binary_sign_identity_from_values(
+        env::var_os("THEURGY_SKIP_MACOS_ADHOC_SIGN").as_deref(),
+        env::var("THEURGY_MACOS_SIGN_IDENTITY").ok().as_deref(),
+        env::var("APPLE_DEVELOPER_ID_APP").ok().as_deref(),
+    )
+    .or_else(|| Some("-".to_string()))
+}
+
+fn macos_staged_binary_sign_identity_from_values(
+    skip: Option<&std::ffi::OsStr>,
+    theurgy_identity: Option<&str>,
+    apple_identity: Option<&str>,
+) -> Option<String> {
+    if skip.is_some() {
+        return None;
+    }
+    for candidate in [theurgy_identity, apple_identity].into_iter().flatten() {
+        let trimmed = candidate.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+    None
 }
 
 fn collect_manifest_binary(command: &[String], binaries: &mut BTreeSet<String>) -> Result<()> {
@@ -2363,6 +2391,38 @@ mod tests {
     fn generated_paths_are_plain_files() {
         let path = Path::new("theurgy.project.toml");
         assert_eq!(path.file_name(), Some(OsStr::new("theurgy.project.toml")));
+    }
+
+    #[test]
+    fn macos_staged_sign_identity_prefers_theurgy_env() {
+        assert_eq!(
+            macos_staged_binary_sign_identity_from_values(
+                None,
+                Some("Developer ID Application: Example"),
+                Some("Apple Identity")
+            ),
+            Some("Developer ID Application: Example".to_string())
+        );
+    }
+
+    #[test]
+    fn macos_staged_sign_identity_uses_apple_env() {
+        assert_eq!(
+            macos_staged_binary_sign_identity_from_values(None, Some("  "), Some("Apple Identity")),
+            Some("Apple Identity".to_string())
+        );
+    }
+
+    #[test]
+    fn macos_staged_sign_identity_skip_disables_signing() {
+        assert_eq!(
+            macos_staged_binary_sign_identity_from_values(
+                Some(OsStr::new("1")),
+                Some("Developer ID Application: Example"),
+                Some("Apple Identity")
+            ),
+            None
+        );
     }
 
     #[test]
