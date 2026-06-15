@@ -1677,9 +1677,13 @@ fn stage_app_runtime_binaries(
         }
     }
 
-    let theurgy_runtime = env::current_exe()
-        .map_err(|error| TheurgyError::new(format!("could not locate theurgy-runtime: {error}")))?;
-    let mut binaries = vec![("theurgy-runtime".to_string(), theurgy_runtime)];
+    let mut binaries = Vec::new();
+    if target_requires_theurgy_runtime_wrapper(target) {
+        let theurgy_runtime = env::current_exe().map_err(|error| {
+            TheurgyError::new(format!("could not locate theurgy-runtime: {error}"))
+        })?;
+        binaries.push(("theurgy-runtime".to_string(), theurgy_runtime));
+    }
     let cargo_debug_dir = cargo_debug_dir(app_dir);
     for binary in app_binaries {
         let binary_path = cargo_debug_dir.join(&binary);
@@ -1709,6 +1713,10 @@ fn stage_app_runtime_binaries(
         }
     }
     Ok(())
+}
+
+fn target_requires_theurgy_runtime_wrapper(target: &str) -> bool {
+    target != "macos"
 }
 
 fn prepare_staged_runtime_binary(path: &Path, target: &str) -> Result<()> {
@@ -2423,6 +2431,12 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn macos_runtime_staging_omits_theurgy_wrapper() {
+        assert!(!target_requires_theurgy_runtime_wrapper("macos"));
+        assert!(target_requires_theurgy_runtime_wrapper("linux"));
     }
 
     #[test]
@@ -3387,21 +3401,29 @@ mod tests {
             Some(1)
         );
         assert_eq!(
+            schema.pointer("/allOf/0/then/properties/requestCommand"),
+            Some(&Value::Bool(false))
+        );
+        assert_eq!(
+            schema.pointer("/allOf/0/then/properties/requestCommandManifest"),
+            Some(&Value::Bool(false))
+        );
+        assert_eq!(
             schema
-                .pointer("/allOf/0/then/properties/requestCommand/const")
+                .pointer("/allOf/1/then/properties/requestCommand/const")
                 .and_then(Value::as_array)
                 .map(|values| values.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
             Some(vec!["theurgy-runtime", "run-request"])
         );
         assert_eq!(
             schema
-                .pointer("/allOf/0/then/required")
+                .pointer("/allOf/1/then/required")
                 .and_then(Value::as_array)
                 .map(|values| values.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
             Some(vec!["requestCommand", "requestCommandManifest"])
         );
         assert_eq!(
-            schema.pointer("/allOf/1/then/properties/requestCommand"),
+            schema.pointer("/allOf/2/then/properties/requestCommand"),
             Some(&Value::Bool(false))
         );
         let top_level_required = schema
@@ -3530,7 +3552,7 @@ mod tests {
         );
         assert_eq!(
             schema
-                .pointer("/allOf/1/then/properties/surfaceSchema/const")
+                .pointer("/allOf/2/then/properties/surfaceSchema/const")
                 .and_then(Value::as_str),
             Some("theurgy-mobile-surface-ir/v1")
         );
@@ -4861,13 +4883,14 @@ mod tests {
         assert!(main_c
             .contains("GtkWidget *subscribe_button = gtk_button_new_with_label(\"Subscribe\")"));
         assert!(main_c.contains("static char *load_operation_status(void)"));
-        assert!(main_c.contains("\"runtime-operation-status\", \"default\", NULL"));
+        assert!(main_c.contains("\\\"kind\\\":\\\"operation-status\\\""));
         assert!(main_c.contains(
             "GtkWidget *operation_button = gtk_button_new_with_label(\"Operation Status\")"
         ));
         assert!(main_c.contains("G_CALLBACK(refresh_operation_status)"));
         assert!(main_c.contains("static char *load_operation_history(void)"));
-        assert!(main_c.contains("\"default\", \"20\", NULL"));
+        assert!(main_c.contains("\\\"kind\\\":\\\"operation-history\\\""));
+        assert!(main_c.contains("\\\"subject\\\":\\\"default\\\",\\\"limit\\\":20"));
         assert!(
             main_c.contains("GtkWidget *history_button = gtk_button_new_with_label(\"History\")")
         );
@@ -4903,8 +4926,8 @@ mod tests {
         assert!(main_c.contains("static char *run_default_action(void)"));
         assert!(main_c.contains("static char *run_runtime_request(const char *request)"));
         assert!(main_c.contains("\"run-request\", request_path, \"--manifest\", manifest"));
-        assert!(main_c.contains("\"schema\":\"theurgy-runtime-action-request/v1\""));
-        assert!(main_c.contains("\"action\":\"refresh_state\",\"params\":%s"));
+        assert!(main_c.contains("theurgy-runtime-action-request/v1"));
+        assert!(main_c.contains("\\\"action\\\":\\\"refresh_state\\\",\\\"params\\\":%s"));
         assert!(!main_c.contains("\"runtime-action\", \"refresh_state\", \"{}\", NULL"));
         assert!(main_c.contains("GtkWidget *action_button = gtk_button_new_with_label(\"Action\")"));
         assert!(main_c.contains("G_CALLBACK(run_action)"));
@@ -4927,7 +4950,7 @@ mod tests {
         )
         .unwrap();
         let publish_main_c = fs::read_to_string(linux_action_root.join("src/main.c")).unwrap();
-        assert!(publish_main_c.contains("\"action\":\"publish_changes\",\"params\":%s"));
+        assert!(publish_main_c.contains("\\\"action\\\":\\\"publish_changes\\\",\\\"params\\\":%s"));
         assert!(publish_main_c.contains("\"{\\\"deployment\\\":\\\"\\\"}\""));
         assert!(!publish_main_c.contains(
             "\"runtime-action\", \"publish_changes\", \"{\\\"deployment\\\":\\\"\\\"}\", NULL"
@@ -5426,12 +5449,9 @@ mod tests {
             &serde_json::json!(["declared-reference-surface"])
         );
         let main_c = fs::read_to_string(out.join("src/main.c")).unwrap();
-        assert!(main_c.contains("\"custom-core\""));
-        assert!(main_c.contains("\"state\""));
-        assert!(main_c.contains("Status: custom-core status"));
-        assert!(main_c.contains("Operation status: custom-core operation-status"));
-        assert!(main_c.contains("Action: custom-core action"));
-        assert!(main_c.contains("History: custom-core history"));
+        assert!(main_c.contains("theurgy-runtime.json"));
+        assert!(main_c.contains("\"run-request\", request_path, \"--manifest\", manifest"));
+        assert!(main_c.contains("theurgy-runtime-action-request/v1"));
         let surface = fs::read_to_string(out.join("theurgy-surface.json")).unwrap();
         assert!(surface.contains("\"role\": \"declared-reference-surface\""));
 
@@ -5942,6 +5962,21 @@ mod tests {
         let runtime = sample_full_runtime_contract();
         compile_native_with_contract(&summary, &surface, &runtime, "macos", &root, false, &[])
             .unwrap();
+
+        let runtime = fs::read_to_string(root.join("theurgy-runtime.json")).unwrap();
+        let runtime_json: Value = serde_json::from_str(&runtime).unwrap();
+        let generated = validate_generated_runtime(&runtime).unwrap();
+        assert_eq!(generated.request_command.as_deref(), None);
+        assert_eq!(generated.request_command_manifest.as_deref(), None);
+        assert!(runtime_json.get("requestCommand").is_none());
+        assert!(runtime_json.get("requestCommandManifest").is_none());
+        assert_eq!(
+            generated.desktop_runtime_binaries,
+            vec![
+                "deployments-core".to_string(),
+                "deployments-daemon".to_string()
+            ]
+        );
 
         let swift = fs::read_to_string(root.join("Sources/App/App.swift")).unwrap();
         assert!(

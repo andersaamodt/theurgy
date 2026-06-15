@@ -50,8 +50,12 @@ pub mod product_runtime {
         ]
     }
 
-    pub fn desktop_runtime_binaries(runtime: &RuntimeBridge) -> Vec<String> {
-        let mut binaries = vec!["theurgy-runtime".to_string()];
+    pub fn desktop_runtime_binaries(target: &str, runtime: &RuntimeBridge) -> Vec<String> {
+        let mut binaries = if target == "linux" {
+            vec!["theurgy-runtime".to_string()]
+        } else {
+            Vec::new()
+        };
         for command in [
             &runtime.state_command,
             &runtime.status_command,
@@ -1395,25 +1399,31 @@ pub mod product_runtime {
             "requestCommandManifest",
             "generated runtime requestCommandManifest",
         )?;
-        if matches!(target.as_str(), "macos" | "linux") {
+        if target == "linux" {
             if request_command.is_empty() {
                 return Err(ContractError::new(
-                    "generated runtime requestCommand required for local-process-json targets",
+                    "generated runtime requestCommand required for linux local-process-json targets",
                 ));
             }
             if request_command != ["theurgy-runtime".to_string(), "run-request".to_string()] {
                 return Err(ContractError::new(
-                    "generated runtime requestCommand must be theurgy-runtime run-request for local-process-json targets",
+                    "generated runtime requestCommand must be theurgy-runtime run-request for linux local-process-json targets",
                 ));
             }
             if request_command_manifest.is_none() {
                 return Err(ContractError::new(
-                    "generated runtime requestCommandManifest required for local-process-json targets",
+                    "generated runtime requestCommandManifest required for linux local-process-json targets",
                 ));
             }
             if request_command_manifest.as_deref() != Some(runtime_manifest.as_str()) {
                 return Err(ContractError::new(
                     "generated runtime requestCommandManifest must match runtimeManifest",
+                ));
+            }
+        } else if target == "macos" {
+            if !request_command.is_empty() || request_command_manifest.is_some() {
+                return Err(ContractError::new(
+                    "generated runtime macos targets must dispatch manifest commands directly instead of requestCommand",
                 ));
             }
         } else if !request_command.is_empty() || request_command_manifest.is_some() {
@@ -1511,7 +1521,11 @@ pub mod product_runtime {
                 &history_command,
                 &daemon_command,
             ];
-            let mut required_binaries = vec!["theurgy-runtime".to_string()];
+            let mut required_binaries = if target == "linux" {
+                vec!["theurgy-runtime".to_string()]
+            } else {
+                Vec::new()
+            };
             for command in runtime_commands {
                 if let Some(binary) = command.first().filter(|binary| bare_runtime_binary(binary)) {
                     if !required_binaries.iter().any(|known| known == binary) {
@@ -2244,7 +2258,7 @@ pub mod product_runtime {
             );
             object.insert(
                 "desktopRuntimeBinaries".to_string(),
-                string_vec_value(&desktop_runtime_binaries(runtime)),
+                string_vec_value(&desktop_runtime_binaries(target, runtime)),
             );
         } else {
             object.insert(
@@ -2332,7 +2346,7 @@ pub mod product_runtime {
             "stateCommand".to_string(),
             string_vec_value(&runtime.state_command),
         );
-        if adapter_runtime_transport(target) == DESKTOP_ADAPTER_TRANSPORT {
+        if target == "linux" {
             object.insert(
                 "requestCommand".to_string(),
                 string_vec_value(&["theurgy-runtime".to_string(), "run-request".to_string()]),
@@ -8195,7 +8209,7 @@ binary = "deployments-core"
   "productPersistenceTruth": "file-first",
   "adapterRuntimeTransport": "local-process-json",
   "desktopRuntimeToolLookup": ["bundle-resources/libexec", "artifact-libexec", "manifest-dir/libexec", "PATH"],
-  "desktopRuntimeBinaries": ["theurgy-runtime", "deployments-core"],
+  "desktopRuntimeBinaries": ["deployments-core"],
   "productBackgroundJobs": [],
   "productBackgroundJobContracts": [],
   "productReleaseTargets": ["macos-app"],
@@ -8219,8 +8233,6 @@ binary = "deployments-core"
   "operationHistoryRequestSchema": "theurgy-operation-history-request/v1",
   "operationStatusSchema": "theurgy-operation-status/v1",
   "operationHistorySchema": "theurgy-operation-history/v1",
-  "requestCommand": ["theurgy-runtime", "run-request"],
-  "requestCommandManifest": "app-blueprint/runtime.manifest.json",
   "stateCommand": ["deployments-core", "runtime-state"],
   "statusCommand": ["deployments-core", "runtime-status"],
   "subscribeStatusCommand": ["deployments-core", "runtime-status"],
@@ -8261,14 +8273,8 @@ binary = "deployments-core"
             summary.adapter_runtime_transport,
             product_runtime::DESKTOP_ADAPTER_TRANSPORT
         );
-        assert_eq!(
-            summary.request_command.as_deref(),
-            Some(&["theurgy-runtime".to_string(), "run-request".to_string()][..])
-        );
-        assert_eq!(
-            summary.request_command_manifest.as_deref(),
-            Some("app-blueprint/runtime.manifest.json")
-        );
+        assert_eq!(summary.request_command.as_deref(), None);
+        assert_eq!(summary.request_command_manifest.as_deref(), None);
         assert_eq!(
             summary.desktop_runtime_tool_lookup,
             vec![
@@ -8280,10 +8286,7 @@ binary = "deployments-core"
         );
         assert_eq!(
             summary.desktop_runtime_binaries,
-            vec![
-                "theurgy-runtime".to_string(),
-                "deployments-core".to_string()
-            ]
+            vec!["deployments-core".to_string()]
         );
         assert_eq!(
             summary.runtime_state_request_schema,
@@ -8317,14 +8320,14 @@ binary = "deployments-core"
         let mut invalid = runtime.clone();
         invalid.as_object_mut().unwrap().insert(
             "requestCommand".to_string(),
-            serde_json::json!(["custom-runtime", "run-request"]),
+            serde_json::json!(["theurgy-runtime", "run-request"]),
         );
         let error = product_runtime::validate_generated_runtime_value(&invalid)
             .unwrap_err()
             .to_string();
         assert_eq!(
             error,
-            "generated runtime requestCommand must be theurgy-runtime run-request for local-process-json targets"
+            "generated runtime macos targets must dispatch manifest commands directly instead of requestCommand"
         );
 
         let mut invalid = runtime.clone();
@@ -8337,14 +8340,14 @@ binary = "deployments-core"
             .to_string();
         assert_eq!(
             error,
-            "generated runtime requestCommandManifest must match runtimeManifest"
+            "generated runtime macos targets must dispatch manifest commands directly instead of requestCommand"
         );
 
         let mut invalid = runtime.clone();
-        invalid.as_object_mut().unwrap().insert(
-            "desktopRuntimeBinaries".to_string(),
-            serde_json::json!(["theurgy-runtime"]),
-        );
+        invalid
+            .as_object_mut()
+            .unwrap()
+            .insert("desktopRuntimeBinaries".to_string(), serde_json::json!([]));
         let error = product_runtime::validate_generated_runtime_value(&invalid)
             .unwrap_err()
             .to_string();
@@ -8766,14 +8769,8 @@ binary = "deployments-core"
             summary.adapter_runtime_transport,
             product_runtime::DESKTOP_ADAPTER_TRANSPORT
         );
-        assert_eq!(
-            summary.request_command.as_deref(),
-            Some(&["theurgy-runtime".to_string(), "run-request".to_string()][..])
-        );
-        assert_eq!(
-            summary.request_command_manifest.as_deref(),
-            Some("app-blueprint/runtime.manifest.json")
-        );
+        assert_eq!(summary.request_command.as_deref(), None);
+        assert_eq!(summary.request_command_manifest.as_deref(), None);
         assert_eq!(
             summary.desktop_runtime_tool_lookup,
             product_runtime::desktop_runtime_tool_lookup("macos")
@@ -8781,7 +8778,6 @@ binary = "deployments-core"
         assert_eq!(
             summary.desktop_runtime_binaries,
             vec![
-                "theurgy-runtime".to_string(),
                 "deployments-core".to_string(),
                 "deployments-daemon".to_string()
             ]

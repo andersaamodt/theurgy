@@ -42,10 +42,10 @@ If `PATH` is omitted, the spell uses `NAME`. The generated desktop project is in
 `theurgy-runtime project-surface PATH --target macos|linux|ios|android` emits a target surface projection.
 `theurgy-runtime compile-native PATH --target macos|linux|ios|android --out OUT_DIR` emits a deterministic native adapter root from Product IR and bundles generated `app-blueprint/product.ir.json`, `app-blueprint/surface.ir.json`, and `app-blueprint/runtime.manifest.json` resources for the adapter runtime contract.
 `theurgy-runtime compile-app APP_DIR --target macos|linux|ios|android --out OUT_DIR` reads `theurgy.project.toml` and compiles from the app's declared Product IR.
-`theurgy-runtime stage-app-runtime APP_DIR --target macos|linux --out OUT_DIR` builds manifest-declared Cargo binaries and stages them with `theurgy-runtime` in desktop artifact `libexec/` locations.
+`theurgy-runtime stage-app-runtime APP_DIR --target macos|linux --out OUT_DIR` builds manifest-declared Cargo binaries and stages them in desktop artifact `libexec/` locations. macOS artifacts stage only declared app runtime binaries; Linux artifacts also stage `theurgy-runtime` while the generated Linux adapter still uses the typed request wrapper.
 `theurgy-runtime inspect-app APP_DIR` validates and summarizes the declared Product IR, target surfaces, runtime bridge commands, compatibility posture, and long-running action coverage.
 
-Generated desktop runtime metadata must point `requestCommand` at `["theurgy-runtime", "run-request"]` and `requestCommandManifest` at the same path as `runtimeManifest`. That keeps macOS and Linux adapters on the typed request protocol instead of target-specific command shortcuts.
+Generated macOS adapters dispatch declared runtime manifest commands directly. Generated Linux desktop runtime metadata still points `requestCommand` at `["theurgy-runtime", "run-request"]` and `requestCommandManifest` at the same path as `runtimeManifest` until the Linux adapter moves to direct dispatch.
 
 When dispatching a runtime manifest, bare command names are resolved next to the manifest, then in sibling `bin/` and `libexec/` directories, then through `PATH`. Packaged desktop adapters should bundle their compiled runtime in one of those manifest-relative locations; `stage-app-runtime` is the standard desktop staging path.
 

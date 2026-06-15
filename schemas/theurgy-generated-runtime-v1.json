@@ -169,7 +169,36 @@
   "allOf": [
     {
       "if": {
-        "properties": { "target": { "enum": ["macos", "linux"] } },
+        "properties": { "target": { "const": "macos" } },
+        "required": ["target"]
+      },
+      "then": {
+        "properties": {
+          "adapterRuntimeTransport": { "const": "local-process-json" },
+          "requestCommand": false,
+          "requestCommandManifest": false,
+          "desktopRuntimeBinaries": {
+            "not": { "contains": { "const": "theurgy-runtime" } }
+          },
+          "desktopRuntimeToolLookup": {
+            "allOf": [
+              { "contains": { "const": "bundle-resources/libexec" } },
+              { "contains": { "const": "artifact-libexec" } }
+            ]
+          },
+          "surfaceSchema": { "const": "theurgy-desktop-surface-ir/v1" },
+          "surfaceTarget": { "enum": ["desktop", "macos", "linux"] },
+          "surfaceMobilePermissions": { "maxItems": 0 },
+          "surfaceMobileBackgroundModes": { "maxItems": 0 },
+          "surfaceMobileOfflineAffordances": { "maxItems": 0 },
+          "surfaceScreens": { "maxItems": 0 },
+          "surfaceScreenContracts": { "maxItems": 0 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "target": { "const": "linux" } },
         "required": ["target"]
       },
       "then": {
