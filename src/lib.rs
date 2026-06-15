@@ -1498,6 +1498,18 @@ pub mod product_runtime {
             &daemon_command,
             "generated runtime daemonCommand",
         )?;
+        if target == "macos" {
+            validate_macos_professional_runtime_commands(
+                &state_command,
+                &status_command,
+                &subscribe_status_command,
+                &operation_status_command,
+                &action_command,
+                &history_command,
+                &daemon_command,
+                "generated runtime",
+            )?;
+        }
         let desktop_runtime_tool_lookup = value_string_array(value, "desktopRuntimeToolLookup")?;
         let desktop_runtime_binaries = value_string_array(value, "desktopRuntimeBinaries")?;
         if matches!(target.as_str(), "macos" | "linux") {
@@ -1845,6 +1857,57 @@ pub mod product_runtime {
             surface_screens: surface_screens.len(),
             surface_screen_contracts: surface_screen_contracts.len(),
         })
+    }
+
+    fn validate_macos_professional_runtime_commands(
+        state_command: &[String],
+        status_command: &[String],
+        subscribe_status_command: &[String],
+        operation_status_command: &[String],
+        action_command: &[String],
+        history_command: &[String],
+        daemon_command: &[String],
+        label: &str,
+    ) -> ContractResult<()> {
+        let mut primary_binary: Option<&str> = None;
+        for (command_label, command) in [
+            ("stateCommand", state_command),
+            ("statusCommand", status_command),
+            ("subscribeStatusCommand", subscribe_status_command),
+            ("operationStatusCommand", operation_status_command),
+            ("actionCommand", action_command),
+            ("historyCommand", history_command),
+        ] {
+            let Some(binary) = command
+                .first()
+                .map(String::as_str)
+                .filter(|binary| !binary.is_empty())
+            else {
+                continue;
+            };
+            if !bare_runtime_binary(binary) {
+                return Err(ContractError::new(format!(
+                    "{label} macos {command_label} must use a bundled bare runtime binary"
+                )));
+            }
+            if let Some(expected) = primary_binary {
+                if binary != expected {
+                    return Err(ContractError::new(format!(
+                        "{label} macos interactive commands must share one primary runtime binary"
+                    )));
+                }
+            } else {
+                primary_binary = Some(binary);
+            }
+        }
+        if let Some(binary) = daemon_command.first().map(String::as_str) {
+            if !bare_runtime_binary(binary) {
+                return Err(ContractError::new(format!(
+                    "{label} macos daemonCommand must use a bundled bare runtime binary"
+                )));
+            }
+        }
+        Ok(())
     }
 
     pub fn validate_product_ir_value(value: &Value) -> ContractResult<ProductIr> {
@@ -5444,11 +5507,6 @@ let surfaceCapabilities = __SURFACE_CAPABILITIES__
 let surfaceRoles = __SURFACE_ROLES__
 let actionContracts = __ACTION_CONTRACTS__
 let defaultActionId = "__DEFAULT_ACTION_ID__"
-let runtimeLaunchSemaphore = DispatchSemaphore(value: 1)
-let runtimeLaunchBackoffSeconds: TimeInterval = 45
-let runtimeLaunchTimeoutSeconds: TimeInterval = 15
-let runtimeLaunchBackoffLock = NSLock()
-var runtimeLaunchBackoffUntil = Date.distantPast
 
 func defaultParamsJson(for action: ProductActionContract) -> String {
   let params = defaultParams(for: action)
@@ -5665,14 +5723,6 @@ func runRuntimeCommand(_ command: [String]) -> String {
   guard let executable = command.first else {
     return "runtime command missing"
   }
-  if runtimeLaunchBackoffActive() {
-    return "Runtime command deferred because macOS launch assessment is under pressure."
-  }
-  guard runtimeLaunchSemaphore.wait(timeout: .now()) == .success else {
-    markRuntimeLaunchPressure()
-    return "Runtime command deferred because another runtime launch is still running."
-  }
-  defer { runtimeLaunchSemaphore.signal() }
   let process = Process()
   process.executableURL = resolveExecutable(executable)
   process.arguments = Array(command.dropFirst())
@@ -5682,17 +5732,7 @@ func runRuntimeCommand(_ command: [String]) -> String {
   process.standardError = error
   do {
     try process.run()
-    let waitGroup = DispatchGroup()
-    waitGroup.enter()
-    DispatchQueue.global(qos: .utility).async {
-      process.waitUntilExit()
-      waitGroup.leave()
-    }
-    if waitGroup.wait(timeout: .now() + runtimeLaunchTimeoutSeconds) == .timedOut {
-      markRuntimeLaunchPressure()
-      process.terminate()
-      return "Runtime command timed out before startup completed; deferred to avoid macOS launch-assessment pressure."
-    }
+    process.waitUntilExit()
     let data = output.fileHandleForReading.readDataToEndOfFile()
     let errorData = error.fileHandleForReading.readDataToEndOfFile()
     if process.terminationStatus != 0 {
@@ -5701,21 +5741,8 @@ func runRuntimeCommand(_ command: [String]) -> String {
     let text = String(data: data, encoding: .utf8) ?? "runtime state loaded"
     return String(text.prefix(4000))
   } catch {
-    markRuntimeLaunchPressure()
     return String(describing: error)
   }
-}
-
-func runtimeLaunchBackoffActive() -> Bool {
-  runtimeLaunchBackoffLock.lock()
-  defer { runtimeLaunchBackoffLock.unlock() }
-  return Date() < runtimeLaunchBackoffUntil
-}
-
-func markRuntimeLaunchPressure() {
-  runtimeLaunchBackoffLock.lock()
-  runtimeLaunchBackoffUntil = Date().addingTimeInterval(runtimeLaunchBackoffSeconds)
-  runtimeLaunchBackoffLock.unlock()
 }
 
 func resolveExecutable(_ name: String) -> URL {
@@ -8358,6 +8385,36 @@ binary = "deployments-core"
 
         let mut invalid = runtime.clone();
         invalid.as_object_mut().unwrap().insert(
+            "statusCommand".to_string(),
+            serde_json::json!(["deployments-status", "runtime-status"]),
+        );
+        invalid.as_object_mut().unwrap().insert(
+            "desktopRuntimeBinaries".to_string(),
+            serde_json::json!(["deployments-core", "deployments-status"]),
+        );
+        let error = product_runtime::validate_generated_runtime_value(&invalid)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            "generated runtime macos interactive commands must share one primary runtime binary"
+        );
+
+        let mut invalid = runtime.clone();
+        invalid.as_object_mut().unwrap().insert(
+            "actionCommand".to_string(),
+            serde_json::json!(["/bin/sh", "runtime-action"]),
+        );
+        let error = product_runtime::validate_generated_runtime_value(&invalid)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            "generated runtime macos actionCommand must use a bundled bare runtime binary"
+        );
+
+        let mut invalid = runtime.clone();
+        invalid.as_object_mut().unwrap().insert(
             "stateCommand".to_string(),
             serde_json::json!(["deployments-core", ""]),
         );
@@ -8933,15 +8990,6 @@ binary = "deployments-core"
                 .contains("return runRuntimeCommand(runtimeStateCommand)")
             && file
                 .contents
-                .contains("let runtimeLaunchSemaphore = DispatchSemaphore(value: 1)")
-            && file
-                .contents
-                .contains("func runtimeLaunchBackoffActive() -> Bool")
-            && file.contents.contains(
-                "Runtime command deferred because macOS launch assessment is under pressure."
-            )
-            && file
-                .contents
                 .contains("func runRuntimeRequest(_ request: [String: Any]) -> String")
             && file
                 .contents
@@ -8951,6 +8999,9 @@ binary = "deployments-core"
             )
             && !file.contents.contains("let runtimeRequestCommand")
             && !file.contents.contains("runtimeRequestManifest")
+            && !file.contents.contains("runtimeLaunchSemaphore")
+            && !file.contents.contains("runtimeLaunchBackoff")
+            && !file.contents.contains("Runtime command deferred")
             && !file
                 .contents
                 .contains("runtimeActionCommand + [action.id, json]")

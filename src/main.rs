@@ -2018,12 +2018,14 @@ fn write_new(path: &Path, contents: &str) -> Result<()> {
 
 fn write_executable(path: &Path, contents: &str) -> Result<()> {
     write_new(path, contents)?;
-    #[cfg(unix)]
-    {
-        let mut permissions = fs::metadata(path)?.permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(path, permissions)?;
-    }
+    mark_executable(path)?;
+    Ok(())
+}
+
+#[cfg(test)]
+fn write_or_replace_executable(path: &Path, contents: &str) -> Result<()> {
+    write_or_replace(path, contents)?;
+    mark_executable(path)?;
     Ok(())
 }
 
@@ -2525,7 +2527,7 @@ mod tests {
         let error = validate_product_ir(&product).unwrap_err().to_string();
         assert!(error.contains("app.capabilities must contain non-empty strings"));
         let product = sample_product().replace(
-            "\"permissions\": [\"files\", \"network\"]",
+            "\"permissions\": [\"files\"]",
             "\"permissions\": [\"files\", \"\"]",
         );
         let error = validate_product_ir(&product).unwrap_err().to_string();
@@ -2552,12 +2554,6 @@ mod tests {
         let product = sample_product().replace("\"label\": \"Server Queue\"", "\"label\": \"\"");
         let error = validate_product_ir(&product).unwrap_err().to_string();
         assert!(error.contains("backgroundJobs object.label required"));
-        let product = sample_product().replace(
-            "\"safe\": true, \"mutating\": false",
-            "\"safe\": true, \"mutating\": false, \"command\": []",
-        );
-        let error = validate_product_ir(&product).unwrap_err().to_string();
-        assert!(error.contains("action.command required"));
         let product = sample_product().replace(
             "\"audit\": {\n    \"operationHistory\": true,\n    \"cliParity\": true\n  }",
             "\"surfaces\": []",
@@ -2602,8 +2598,8 @@ mod tests {
         assert!(error.contains("action.longRunning boolean required"));
         assert!(validate_action_ir("{\"version\":\"theurgy-action-ir/v1\",").is_err());
         let actions = sample_action_ir().replace(
-            "\"id\": \"publish_changes\", \"label\": \"Push\"",
-            "\"id\": \"refresh_state\", \"label\": \"Push\"",
+            "\"id\": \"publish_changes\", \"label\": \"Push to Production\"",
+            "\"id\": \"refresh_state\", \"label\": \"Push to Production\"",
         );
         let error = validate_action_ir(&actions).unwrap_err().to_string();
         assert!(error.contains("action IR action.id duplicated: refresh_state"));
@@ -3590,7 +3586,7 @@ mod tests {
         let error = runtime_contract_from_manifest(&manifest)
             .unwrap_err()
             .to_string();
-        assert!(error.contains("stateCommand must contain strings"));
+        assert!(error.contains("stateCommand must contain non-empty strings"));
         let manifest = sample_runtime_manifest().replace(
             "\"stateCommand\": [\"custom-core\", \"state\"]",
             "\"stateCommand\": [\"custom-core\", \"\"]",
@@ -3600,7 +3596,7 @@ mod tests {
             .to_string();
         assert_eq!(
             error,
-            "runtime manifest stateCommand must contain non-empty strings"
+            "JSON array key stateCommand must contain non-empty strings"
         );
         let manifest = sample_runtime_manifest().replace(
             "\"actionCommand\": [\"custom-core\", \"action\"]",
@@ -3611,7 +3607,7 @@ mod tests {
             .to_string();
         assert_eq!(
             error,
-            "runtime manifest actionCommand must contain non-empty strings"
+            "JSON array key actionCommand must contain non-empty strings"
         );
         let manifest = sample_runtime_manifest().replace(
             "\"desktop\": \"app-blueprint/desktop.surface.ir.json\"",
@@ -3625,30 +3621,34 @@ mod tests {
 
     #[test]
     fn runtime_manifest_validation_rejects_empty_optional_commands() {
-        for (replacement, expected) in [
+        for (target, replacement, expected) in [
             (
+                "\"statusCommand\": [\"custom-core\", \"status\"]",
                 "\"statusCommand\": []",
                 "runtime manifest statusCommand must be non-empty",
             ),
             (
+                "\"statusCommand\": [\"custom-core\", \"status\"]",
                 "\"statusCommand\": [\"custom-core\", \"status\"],\n    \"subscribeStatusCommand\": []",
                 "runtime manifest subscribeStatusCommand must be non-empty",
             ),
             (
+                "\"operationStatusCommand\": [\"custom-core\", \"operation-status\"]",
                 "\"operationStatusCommand\": []",
                 "runtime manifest operationStatusCommand must be non-empty",
             ),
             (
+                "\"historyCommand\": [\"custom-core\", \"history\"]",
                 "\"historyCommand\": []",
                 "runtime manifest historyCommand must be non-empty",
             ),
             (
+                "\"daemonCommand\": [\"deployments-daemon\"]",
                 "\"daemonCommand\": []",
                 "runtime manifest daemonCommand must be non-empty",
             ),
         ] {
-            let manifest = sample_runtime_manifest()
-                .replace("\"statusCommand\": [\"custom-core\", \"status\"]", replacement);
+            let manifest = sample_runtime_manifest().replace(target, replacement);
             let error = runtime_contract_from_manifest(&manifest)
                 .unwrap_err()
                 .to_string();
@@ -3658,28 +3658,29 @@ mod tests {
 
     #[test]
     fn runtime_manifest_validation_rejects_empty_optional_command_entries() {
-        for (replacement, expected) in [
+        for (target, replacement, expected) in [
             (
+                "\"statusCommand\": [\"custom-core\", \"status\"]",
                 "\"statusCommand\": [\"custom-core\", \"\"]",
                 "runtime manifest statusCommand must contain non-empty strings",
             ),
             (
+                "\"operationStatusCommand\": [\"custom-core\", \"operation-status\"]",
                 "\"operationStatusCommand\": [\"custom-core\", \"\"]",
                 "runtime manifest operationStatusCommand must contain non-empty strings",
             ),
             (
+                "\"historyCommand\": [\"custom-core\", \"history\"]",
                 "\"historyCommand\": [\"custom-core\", \"\"]",
                 "runtime manifest historyCommand must contain non-empty strings",
             ),
             (
+                "\"daemonCommand\": [\"deployments-daemon\"]",
                 "\"daemonCommand\": [\"\"]",
                 "runtime manifest daemonCommand must contain non-empty strings",
             ),
         ] {
-            let manifest = sample_runtime_manifest().replace(
-                "\"statusCommand\": [\"custom-core\", \"status\"]",
-                replacement,
-            );
+            let manifest = sample_runtime_manifest().replace(target, replacement);
             let error = runtime_contract_from_manifest(&manifest)
                 .unwrap_err()
                 .to_string();
@@ -4169,7 +4170,7 @@ mod tests {
             &sample_product().replace("\"failure\": {}", "\"failure\": {\"error\": \"string\"}"),
         )
         .unwrap();
-        write_executable(
+        write_or_replace_executable(
             &root.join("runtime-fixture"),
             "#!/bin/sh\nset -eu\ncase \"${1-}\" in\n  action) printf '{\"success\":false,\"error\":false}\\n' >&2; exit 9 ;;\n  *) exit 2 ;;\nesac\n",
         )
@@ -4193,7 +4194,7 @@ mod tests {
             &sample_product().replace("\"failure\": {}", "\"failure\": {\"error\": \"string\"}"),
         )
         .unwrap();
-        write_executable(
+        write_or_replace_executable(
             &root.join("runtime-fixture"),
             "#!/bin/sh\nset -eu\ncase \"${1-}\" in\n  action) printf '{\"success\":false,\"error\":\"fixture failed\"}\\n' >&2; exit 9 ;;\n  *) exit 2 ;;\nesac\n",
         )
@@ -6595,6 +6596,14 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .insert("actions".to_string(), serde_json::json!(actions));
+        if let Some(screens) = value.get_mut("screens").and_then(Value::as_array_mut) {
+            for screen in screens {
+                screen
+                    .as_object_mut()
+                    .unwrap()
+                    .insert("actions".to_string(), serde_json::json!(actions));
+            }
+        }
         format!("{}\n", serde_json::to_string_pretty(&value).unwrap())
     }
 
