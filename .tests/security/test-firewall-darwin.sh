@@ -20,6 +20,7 @@ listener_pid=$!
 sleep 1
 
 sh "$ROOT_DIR/spells/firewall-darwin" --allow-localhost -- nc -z 127.0.0.1 18443
+sh "$ROOT_DIR/spells/firewall-darwin" --allow 192.168.1.159:35363 -- /usr/bin/true
 
 if sh "$ROOT_DIR/spells/firewall-darwin" -- nc -z 127.0.0.1 18443 >/dev/null 2>&1; then
   printf '%s\n' "firewall-darwin allowed localhost traffic without --allow-localhost" >&2
