@@ -2189,7 +2189,6 @@ fn inspect_manifest(manifest: &str) -> Result<ManifestSummary> {
 mod tests {
     use super::*;
     use std::ffi::OsStr;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn validates_safe_project_names() {
@@ -2390,11 +2389,22 @@ mod tests {
     }
 
     fn test_root(label: &str) -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        env::temp_dir().join(format!("theurgy-test-{label}-{nanos}"))
+        let base = env::var_os("THEURGY_TEST_SCRATCH_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                let state_home = env::var_os("XDG_STATE_HOME")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| {
+                        env::var_os("HOME")
+                            .map(PathBuf::from)
+                            .unwrap_or_else(env::temp_dir)
+                            .join(".local/state")
+                    });
+                state_home.join("theurgy/test-scratch")
+            });
+        let root = base.join(label);
+        let _ = fs::remove_dir_all(&root);
+        root
     }
 
     #[test]

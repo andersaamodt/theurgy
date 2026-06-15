@@ -3,7 +3,11 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd -P)
-tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/theurgy-firewall-darwin.XXXXXX")
+state_home=${XDG_STATE_HOME:-${HOME:-/tmp}/.local/state}
+scratch_root=${THEURGY_TEST_SCRATCH_ROOT:-"$state_home/theurgy/test-scratch"}
+tmp_dir="$scratch_root/firewall-darwin"
+rm -rf "$tmp_dir"
+mkdir -p "$tmp_dir"
 trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
 
 help_output=$(sh "$ROOT_DIR/spells/firewall-darwin" --help)

@@ -6917,6 +6917,26 @@ struct TheurgyNativeApp: App {
 #[cfg(test)]
 mod tests {
     use super::product_runtime;
+    use std::path::PathBuf;
+
+    fn test_root(label: &str) -> PathBuf {
+        let base = std::env::var_os("THEURGY_TEST_SCRATCH_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                let state_home = std::env::var_os("XDG_STATE_HOME")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| {
+                        std::env::var_os("HOME")
+                            .map(PathBuf::from)
+                            .unwrap_or_else(std::env::temp_dir)
+                            .join(".local/state")
+                    });
+                state_home.join("theurgy/test-scratch")
+            });
+        let root = base.join(label);
+        let _ = std::fs::remove_dir_all(&root);
+        root
+    }
 
     #[test]
     fn product_runtime_declares_cross_platform_contract_ids() {
@@ -7386,15 +7406,9 @@ binary = "deployments-core"
 
     #[test]
     fn product_runtime_loads_runtime_manifest_from_disk() {
-        let mut path = std::env::temp_dir();
-        path.push(format!(
-            "theurgy-runtime-manifest-{}-{}.json",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
+        let root = test_root("runtime-manifest");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("runtime.manifest.json");
         std::fs::write(
             &path,
             serde_json::json!({
@@ -7413,20 +7427,12 @@ binary = "deployments-core"
         let manifest = product_runtime::load_runtime_manifest(&path).unwrap();
         assert_eq!(manifest.app_id, "deployments");
         assert_eq!(manifest.product_ir, "app-blueprint/product.ir.json");
-        std::fs::remove_file(path).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn product_runtime_loads_runtime_bridge_with_product_actions_from_disk() {
-        let mut root = std::env::temp_dir();
-        root.push(format!(
-            "theurgy-runtime-bridge-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
+        let root = test_root("runtime-bridge");
         std::fs::create_dir_all(&root).unwrap();
         let manifest_path = root.join("runtime.manifest.json");
         let product_path = root.join("product.ir.json");
@@ -8051,15 +8057,7 @@ binary = "deployments-core"
 
     #[test]
     fn product_runtime_loads_app_compile_contract_from_disk() {
-        let mut root = std::env::temp_dir();
-        root.push(format!(
-            "theurgy-app-compile-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
+        let root = test_root("app-compile-contract");
         let blueprint = root.join("app-blueprint");
         std::fs::create_dir_all(&blueprint).unwrap();
         std::fs::write(
