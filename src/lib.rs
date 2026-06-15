@@ -5426,8 +5426,6 @@ let runtimeOperationStatusCommand = __OPERATION_STATUS_COMMAND__
 let runtimeActionCommand = __ACTION_COMMAND__
 let runtimeHistoryCommand = __HISTORY_COMMAND__
 let runtimeDaemonCommand = __DAEMON_COMMAND__
-let runtimeRequestCommand = ["theurgy-runtime", "run-request"]
-let runtimeRequestManifest = "__RUNTIME_MANIFEST__"
 let surfaceCapabilities = __SURFACE_CAPABILITIES__
 let surfaceRoles = __SURFACE_ROLES__
 let actionContracts = __ACTION_CONTRACTS__
@@ -5608,17 +5606,45 @@ func runRuntimeAction(_ action: ProductActionContract) -> String {
 }
 
 func runRuntimeRequest(_ request: [String: Any]) -> String {
-  do {
-    let requestData = try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys])
-    let requestURL = FileManager.default.temporaryDirectory
-      .appendingPathComponent("__APP_ID__-runtime-request-\(UUID().uuidString).json")
-    try requestData.write(to: requestURL, options: [.atomic])
-    defer { try? FileManager.default.removeItem(at: requestURL) }
-    let manifestURL = resolveContractURL(runtimeRequestManifest)
-    return runRuntimeCommand(runtimeRequestCommand + [requestURL.path, "--manifest", manifestURL.path])
-  } catch {
-    return String(describing: error)
+  guard let schema = request["schema"] as? String else {
+    return "runtime request schema required"
   }
+  switch schema {
+  case "theurgy-runtime-state-request/v1":
+    return runRuntimeCommand(runtimeStateCommand)
+  case "theurgy-runtime-status-request/v1":
+    return runRuntimeCommand(runtimeStatusCommand)
+  case "theurgy-runtime-subscribe-status-request/v1":
+    return runRuntimeCommand(runtimeSubscribeStatusCommand)
+  case "theurgy-operation-status-request/v1":
+    let operation = request["operation"] as? String ?? "default"
+    return runRuntimeCommand(runtimeOperationStatusCommand + [operation])
+  case "theurgy-operation-history-request/v1":
+    let subject = request["subject"] as? String ?? "default"
+    let limit: String
+    if let number = request["limit"] as? NSNumber {
+      limit = number.stringValue
+    } else {
+      limit = request["limit"] as? String ?? "20"
+    }
+    return runRuntimeCommand(runtimeHistoryCommand + [subject, limit])
+  case "theurgy-runtime-action-request/v1":
+    guard let action = request["action"] as? String else {
+      return "runtime action request action required"
+    }
+    let params = request["params"] ?? [String: Any]()
+    return runRuntimeCommand(runtimeActionCommand + [action, jsonString(params)])
+  default:
+    return "unsupported runtime request schema: \(schema)"
+  }
+}
+
+func jsonString(_ value: Any) -> String {
+  guard JSONSerialization.isValidJSONObject(value),
+        let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) else {
+    return "{}"
+  }
+  return String(data: data, encoding: .utf8) ?? "{}"
 }
 
 func runRuntimeCommand(_ command: [String]) -> String {
@@ -5676,16 +5702,6 @@ func markRuntimeLaunchPressure() {
   runtimeLaunchBackoffLock.lock()
   runtimeLaunchBackoffUntil = Date().addingTimeInterval(runtimeLaunchBackoffSeconds)
   runtimeLaunchBackoffLock.unlock()
-}
-
-func resolveContractURL(_ name: String) -> URL {
-  let fileManager = FileManager.default
-  let candidates = [
-    Bundle.main.resourceURL?.appendingPathComponent(name),
-    Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent(name),
-    URL(fileURLWithPath: name)
-  ].compactMap { $0 }
-  return candidates.first(where: { fileManager.isReadableFile(atPath: $0.path) }) ?? candidates.last!
 }
 
 func resolveExecutable(_ name: String) -> URL {
@@ -8918,7 +8934,7 @@ binary = "deployments-core"
             && file.contents.contains("let runtimeStateCommand")
             && file
                 .contents
-                .contains("let runtimeRequestCommand = [\"theurgy-runtime\", \"run-request\"]")
+                .contains("return runRuntimeCommand(runtimeStateCommand)")
             && file
                 .contents
                 .contains("let runtimeLaunchSemaphore = DispatchSemaphore(value: 1)")
@@ -8935,8 +8951,10 @@ binary = "deployments-core"
                 .contents
                 .contains("\"schema\": \"theurgy-runtime-action-request/v1\"")
             && file.contents.contains(
-                "runtimeRequestCommand + [requestURL.path, \"--manifest\", manifestURL.path]"
+                "return runRuntimeCommand(runtimeActionCommand + [action, jsonString(params)])"
             )
+            && !file.contents.contains("let runtimeRequestCommand")
+            && !file.contents.contains("runtimeRequestManifest")
             && !file
                 .contents
                 .contains("runtimeActionCommand + [action.id, json]")

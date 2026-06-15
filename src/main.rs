@@ -5970,23 +5970,22 @@ mod tests {
         assert!(swift.contains("params[key] = defaultParamValue(for: descriptor)"));
         assert!(swift.contains("struct ProductActionContract"));
         assert!(swift.contains("let actionContracts = [ProductActionContract"));
-        assert!(
-            swift.contains("let runtimeRequestCommand = [\"theurgy-runtime\", \"run-request\"]")
-        );
-        assert!(swift.contains("let runtimeRequestManifest = \"runtime.manifest.json\""));
         assert!(swift.contains("func runRuntimeRequest(_ request: [String: Any]) -> String"));
         assert!(swift.contains("\"schema\": \"theurgy-runtime-action-request/v1\""));
         assert!(swift.contains("\"schema\": \"theurgy-runtime-state-request/v1\""));
+        assert!(swift.contains("return runRuntimeCommand(runtimeStateCommand)"));
         assert!(swift.contains(
-            "runtimeRequestCommand + [requestURL.path, \"--manifest\", manifestURL.path]"
+            "return runRuntimeCommand(runtimeActionCommand + [action, jsonString(params)])"
         ));
+        assert!(!swift.contains("let runtimeRequestCommand"));
+        assert!(!swift.contains("runtimeRequestManifest"));
         assert!(!swift
             .contains("func command(for action: ProductActionContract, json: String) -> [String]"));
         assert!(!swift.contains("runtimeActionCommand + [action.id, json]"));
         assert!(swift.contains("ForEach(actionContracts, id: \\.id)"));
         assert!(swift.contains("runRuntimeAction(action)"));
-        assert!(!swift.contains("runRuntimeCommand(runtimeSubscribeStatusCommand)"));
-        assert!(!swift.contains("runRuntimeCommand(runtimeOperationStatusCommand + [\"default\"])"));
+        assert!(swift.contains("runRuntimeCommand(runtimeSubscribeStatusCommand)"));
+        assert!(swift.contains("runRuntimeCommand(runtimeOperationStatusCommand + [operation])"));
         assert!(!swift.contains("command(for: action, json: defaultParamsJson(for: action))"));
         assert!(swift.contains("inputShape: [\"deployment\": \"string\"]"));
         assert!(swift.contains("outputShape: [\"params\": \"object\"]"));
