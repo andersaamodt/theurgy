@@ -15,3 +15,4 @@
 - For wizardry-native desktop migrations, preserve the shared native schema/generator and make Rust the compiled control plane underneath it instead of replacing the app with a one-platform rewrite.
 - Keep shell out of hot interactive paths once a typed Rust runtime exists; leave shell to the surrounding wizardry lifecycle.
 - Require release artifacts and tests to prove the compiled core is actually bundled for every supported desktop target.
+- Generated macOS apps should feel like normal professional apps: one clean bundle, direct runtime dispatch, explicit signing behavior, and no avoidable Gatekeeper assessment fanout.

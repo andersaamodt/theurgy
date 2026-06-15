@@ -7,6 +7,7 @@
 - Read `docs/architecture.md` before changing runtime boundaries.
 - Read `docs/web-runtime-harness.md` before changing enterprise web runtime adapters.
 - Read `docs/platform-quarantine.md` before adding Apple, macOS, native desktop, signing, bundle, or platform-adapter machinery.
+- macOS generated apps should be one professional app bundle, plus a daemon only when an independent lifecycle is required; do not reintroduce generic runtime wrappers or multi-executable hot paths.
 - Keep app verification, notarization, store review, TestFlight, App Store, Google Play, and special app-publish keys in theurgy rather than pure wizardry or wizardry-apps.
 - Read `docs/databases.md` before introducing database-backed behavior.
 
@@ -25,6 +26,8 @@
 - Move hot, stateful, graph-shaped, latency-sensitive, or platform-integrated behavior into a compiled Rust control plane.
 - Keep generated native hosts as platform adapters when they are already the right place for AppKit, SwiftUI, GTK, permissions, menus, windows, or lifecycle glue.
 - The normal desktop artifact should launch one solid compiled app executable. Separate daemons and helpers are appropriate only when they have an independent lifecycle.
+- On macOS, generated adapters should dispatch declared runtime contracts directly or through a deliberately staged app-owned binary; avoid app -> generic wrapper -> helper subprocess chains that multiply Gatekeeper assessment work.
+- macOS staging must not auto-discover arbitrary local signing identities, stage theurgy's generic wrapper into app bundles, or copy quarantine/provenance metadata into generated artifacts.
 - Shell scripts may surround the app for install, repair, release, inspection, and compatibility, but they should not keep owning the core interactive runtime once a typed Rust core exists.
 - The migration boundary must be explicit: typed commands, JSON/state schemas, documented XDG roots, release-bundled binaries, and tests that prove the app did not regress to shell-only runtime behavior.
 - For existing apps, migrate by adding a compiled core beside the current backend first, then route new/hot capabilities through it before removing old compatibility paths.
