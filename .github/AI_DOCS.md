@@ -9,6 +9,7 @@
 - Read `docs/platform-quarantine.md` before adding Apple, macOS, native desktop, signing, bundle, or platform-adapter machinery.
 - macOS generated apps should be one professional app bundle, plus a daemon only when an independent lifecycle is required; do not reintroduce generic runtime wrappers, launch-pressure backoff gates, or multi-executable interactive hot paths.
 - Keep app verification, notarization, store review, TestFlight, App Store, Google Play, and special app-publish keys in theurgy rather than pure wizardry or wizardry-apps.
+- Keep host-native firewall, sandbox, and network-caging backends in theurgy rather than pure wizardry or wizardry-apps.
 - Read `docs/databases.md` before introducing database-backed behavior.
 
 ## Canonical Position

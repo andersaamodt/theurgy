@@ -1,0 +1,125 @@
+#!/bin/sh
+
+# Run one command inside a macOS sandbox-exec network cage.
+# The profile denies network by default, then re-allows explicit endpoints.
+
+case "${1-}" in
+--help|--usage|-h)
+  cat <<'USAGE'
+Usage: firewall-darwin [--allow-localhost] [--allow IPV4[:PORT]]... -- COMMAND [ARGS...]
+
+Runs one command inside a macOS sandbox-exec network cage.
+USAGE
+  exit 0
+  ;;
+esac
+
+set -eu
+
+require_tool() {
+  command -v "$1" >/dev/null 2>&1 || {
+    printf '%s\n' "firewall-darwin: required tool not found: $1" >&2
+    exit 1
+  }
+}
+
+validate_endpoint() {
+  endpoint=${1-}
+  [ -n "$endpoint" ] || {
+    printf '%s\n' "firewall-darwin: endpoint is required" >&2
+    exit 2
+  }
+
+  case "$endpoint" in
+    *"$(
+      printf '\n'
+    )"*)
+      printf '%s\n' "firewall-darwin: endpoint must not contain line breaks" >&2
+      exit 2
+      ;;
+  esac
+
+  case "$endpoint" in
+    [0-9]*.[0-9]*.[0-9]*.[0-9]*)
+      return 0
+      ;;
+    [0-9]*.[0-9]*.[0-9]*.[0-9]*:[0-9]*)
+      port=${endpoint##*:}
+      case "$port" in
+        ''|*[!0-9]*)
+          printf '%s\n' "firewall-darwin: invalid endpoint '$endpoint'" >&2
+          exit 2
+          ;;
+      esac
+      return 0
+      ;;
+    *)
+      printf '%s\n' "firewall-darwin: endpoint must be IPV4 or IPV4:PORT" >&2
+      exit 2
+      ;;
+  esac
+}
+
+require_tool sandbox-exec
+
+allow_localhost=0
+allowlist='
+'
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --allow-localhost)
+      allow_localhost=1
+      shift
+      ;;
+    --allow)
+      [ "${2-}" ] || {
+        printf '%s\n' "firewall-darwin: --allow requires a value" >&2
+        exit 2
+      }
+      validate_endpoint "$2"
+      allowlist=$allowlist$2'
+'
+      shift 2
+      ;;
+    --)
+      shift
+      break
+      ;;
+    *)
+      printf '%s\n' "firewall-darwin: unknown option '$1'" >&2
+      exit 2
+      ;;
+  esac
+done
+
+[ "$#" -gt 0 ] || {
+  printf '%s\n' "firewall-darwin: COMMAND is required" >&2
+  exit 2
+}
+
+profile_file=$(mktemp "${TMPDIR:-/tmp}/theurgy-firewall-darwin.XXXXXX")
+trap 'rm -f "$profile_file"' EXIT HUP INT TERM
+
+{
+  printf '%s\n' '(version 1)'
+  printf '%s\n' '(allow default)'
+  printf '%s\n' '(deny network-outbound)'
+  printf '%s\n' '(deny network-inbound)'
+
+  if [ "$allow_localhost" -eq 1 ]; then
+    printf '%s\n' '(allow network-outbound (remote ip "localhost:*"))'
+    printf '%s\n' '(allow network-inbound (local ip "localhost:*"))'
+  fi
+
+  old_ifs=${IFS}
+  IFS='
+'
+  for endpoint in $allowlist; do
+    [ -n "$endpoint" ] || continue
+    printf '%s\n' "(allow network-outbound (remote ip \"$endpoint\"))"
+  done
+  IFS=$old_ifs
+} >"$profile_file"
+
+exec sandbox-exec -f "$profile_file" "$@"

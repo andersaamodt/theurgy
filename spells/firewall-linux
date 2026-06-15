@@ -1,0 +1,19 @@
+#!/bin/sh
+
+# Placeholder for a Linux network cage backend.
+
+case "${1-}" in
+--help|--usage|-h)
+  cat <<'USAGE'
+Usage: firewall-linux [--allow-localhost] [--allow IPV4[:PORT]]... -- COMMAND [ARGS...]
+
+Linux backend placeholder for the firewall spell.
+USAGE
+  exit 0
+  ;;
+esac
+
+set -eu
+
+printf '%s\n' "firewall-linux: Linux backend not implemented yet" >&2
+exit 1

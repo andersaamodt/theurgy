@@ -96,6 +96,7 @@ Theurgy is the quarantine layer for parts of professional app development that d
 - macOS bundle structure
 - code signing and notarization workflows
 - app verification, app-store review/policing workflows, and special publish keys
+- host-native firewall, sandbox, and network-caging backends
 - Swift, SwiftUI, Xcode-shaped project output, and Apple lifecycle conventions
 - GTK, platform windowing, desktop IPC, and app lifecycle adapters
 - Rust build products, lockfiles, and toolchain metadata
@@ -126,6 +127,7 @@ Theurgy makes these compromises against pure shell-first wizardry. Keep this tab
 | Platform-specific adapters | Native quality requires platform-owned behavior for windows, menus, IPC, and app lifecycle. | Necessary |
 | Apple-language and closed-platform accommodation | Professional macOS support may require Swift, SwiftUI, bundle metadata, signing, and notarization. | Forced external; quarantine aggressively |
 | App verification and publish-key accommodation | App distribution may require signing keys, review gates, verification metadata, and platform policing workflows. | Forced external |
+| Host-native firewall and sandbox backends | Verifiable per-command network cages depend on host-specific mechanisms such as sandbox-exec, pf, nftables, or iptables. | Necessary |
 | Longer edit-run loop | Compiled code can be slower to iterate on than a spell. | Undesired; keep prototyping in wizardry |
 | Optional databases | Some workloads need transactions, query acceleration, replication, or frequent concurrent writes. | Conditional; files remain default truth |
 | Derived indexes and caches | Enterprise sites need fast lookup and rendering paths. | Settled |

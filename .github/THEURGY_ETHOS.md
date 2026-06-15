@@ -16,3 +16,4 @@
 - Keep shell out of hot interactive paths once a typed Rust runtime exists; leave shell to the surrounding wizardry lifecycle.
 - Require release artifacts and tests to prove the compiled core is actually bundled for every supported desktop target.
 - Generated macOS apps should feel like normal professional apps: one clean bundle, direct runtime dispatch, explicit signing behavior, and no avoidable Gatekeeper assessment fanout.
+- Host-specific firewall and sandbox enforcement belongs here behind clear spell boundaries so Wizardry can offer simple verbs without pretending the host machinery is portable.
