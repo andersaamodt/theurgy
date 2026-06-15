@@ -31,9 +31,8 @@ validate_endpoint() {
   }
 
   case "$endpoint" in
-    *"$(
-      printf '\n'
-    )"*)
+    *'
+'*)
       printf '%s\n' "firewall-darwin: endpoint must not contain line breaks" >&2
       exit 2
       ;;
