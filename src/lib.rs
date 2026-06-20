@@ -4496,33 +4496,32 @@ int main(int argc, char **argv) {
     }
 
     fn linux_desktop_surface_layout(surface: &SurfaceIr) -> String {
-        if surface_has_roles(
-            surface,
-            &[
-                "left-list-detail",
-                "server-deployment-listbox",
-                "deployment-detail-pane",
-            ],
-        ) {
-            [
-                "  GtkWidget *pane = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);",
-                "  GtkWidget *navigation = gtk_list_box_new();",
-                "  GtkWidget *navigation_label = gtk_label_new(\"server-deployment-listbox\");",
-                "  GtkWidget *detail = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);",
-                "  GtkWidget *detail_label = gtk_label_new(\"deployment-detail-pane\");",
-                "  gtk_widget_set_size_request(navigation, 280, -1);",
-                "  gtk_label_set_xalign(GTK_LABEL(navigation_label), 0.0);",
-                "  gtk_label_set_xalign(GTK_LABEL(detail_label), 0.0);",
-                "  gtk_list_box_append(GTK_LIST_BOX(navigation), navigation_label);",
-                "  gtk_box_append(GTK_BOX(detail), detail_label);",
-                "  gtk_box_append(GTK_BOX(detail), contract);",
-                "  gtk_box_append(GTK_BOX(detail), button_box);",
-                "  gtk_box_append(GTK_BOX(detail), label);",
-                "  gtk_paned_set_start_child(GTK_PANED(pane), navigation);",
-                "  gtk_paned_set_end_child(GTK_PANED(pane), detail);",
-                "  gtk_paned_set_resize_start_child(GTK_PANED(pane), FALSE);",
-                "  gtk_paned_set_resize_end_child(GTK_PANED(pane), TRUE);",
-                "  gtk_box_append(GTK_BOX(box), pane);",
+        if let Some((list_role, detail_role)) = left_list_detail_roles(surface) {
+            vec![
+                "  GtkWidget *pane = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);".to_string(),
+                "  GtkWidget *navigation = gtk_list_box_new();".to_string(),
+                format!(
+                    "  GtkWidget *navigation_label = gtk_label_new(\"{}\");",
+                    c_escape(&list_role)
+                ),
+                "  GtkWidget *detail = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);".to_string(),
+                format!(
+                    "  GtkWidget *detail_label = gtk_label_new(\"{}\");",
+                    c_escape(&detail_role)
+                ),
+                "  gtk_widget_set_size_request(navigation, 280, -1);".to_string(),
+                "  gtk_label_set_xalign(GTK_LABEL(navigation_label), 0.0);".to_string(),
+                "  gtk_label_set_xalign(GTK_LABEL(detail_label), 0.0);".to_string(),
+                "  gtk_list_box_append(GTK_LIST_BOX(navigation), navigation_label);".to_string(),
+                "  gtk_box_append(GTK_BOX(detail), detail_label);".to_string(),
+                "  gtk_box_append(GTK_BOX(detail), contract);".to_string(),
+                "  gtk_box_append(GTK_BOX(detail), button_box);".to_string(),
+                "  gtk_box_append(GTK_BOX(detail), label);".to_string(),
+                "  gtk_paned_set_start_child(GTK_PANED(pane), navigation);".to_string(),
+                "  gtk_paned_set_end_child(GTK_PANED(pane), detail);".to_string(),
+                "  gtk_paned_set_resize_start_child(GTK_PANED(pane), FALSE);".to_string(),
+                "  gtk_paned_set_resize_end_child(GTK_PANED(pane), TRUE);".to_string(),
+                "  gtk_box_append(GTK_BOX(box), pane);".to_string(),
             ]
             .join("\n")
         } else {
@@ -4535,10 +4534,53 @@ int main(int argc, char **argv) {
         }
     }
 
-    fn surface_has_roles(surface: &SurfaceIr, roles: &[&str]) -> bool {
-        roles
+    fn left_list_detail_roles(surface: &SurfaceIr) -> Option<(String, String)> {
+        if !surface
+            .roles
             .iter()
-            .all(|role| surface.roles.iter().any(|candidate| candidate == role))
+            .any(|candidate| candidate == "left-list-detail")
+        {
+            return None;
+        }
+        let non_layout_roles = surface
+            .roles
+            .iter()
+            .filter(|role| {
+                role.as_str() != "left-list-detail" && role.as_str() != "native-product-root"
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if non_layout_roles.len() < 2 {
+            return None;
+        }
+        let list_role = non_layout_roles
+            .iter()
+            .find(|role| {
+                role.contains("sidebar")
+                    || role.contains("list")
+                    || role.contains("listbox")
+                    || role.contains("navigation")
+            })
+            .cloned()
+            .unwrap_or_else(|| non_layout_roles[0].clone());
+        let detail_role = non_layout_roles
+            .iter()
+            .find(|role| {
+                role.as_str() != list_role.as_str()
+                    && (role.contains("detail")
+                        || role.contains("pane")
+                        || role.contains("editor")
+                        || role.contains("inspector"))
+            })
+            .cloned()
+            .unwrap_or_else(|| {
+                non_layout_roles
+                    .iter()
+                    .find(|role| role.as_str() != list_role.as_str())
+                    .cloned()
+                    .unwrap_or_else(|| "detail".to_string())
+            });
+        Some((list_role, detail_role))
     }
 
     fn c_argv_tail_literal(values: &[String]) -> String {
@@ -5473,6 +5515,8 @@ __MOBILE_WORKFLOW_TEXT__
             .first()
             .map(|contract| contract.id.clone())
             .unwrap_or_default();
+        let (list_role, detail_role) = left_list_detail_roles(surface)
+            .unwrap_or_else(|| ("list".to_string(), "detail".to_string()));
         let surface_body = macos_desktop_surface_body(surface);
         let template = r#"// Generated by theurgy-runtime compile-native.
 // Runtime: theurgy-runtime.json
@@ -5649,7 +5693,7 @@ __SURFACE_BODY__
   var operationsSplitView: some View {
     HSplitView {
       List {
-        Text("server-deployment-listbox")
+        Text("__LIST_ROLE__")
           .font(.headline)
         ForEach(actionContracts, id: \.id) { action in
           Text(action.label)
@@ -5658,7 +5702,7 @@ __SURFACE_BODY__
       .frame(minWidth: 280)
 
       VStack(alignment: .leading, spacing: 12) {
-        Text("deployment-detail-pane")
+        Text("__DETAIL_ROLE__")
           .font(.headline)
         contractSummary
       }
@@ -5812,18 +5856,13 @@ struct TheurgyNativeApp: App {
                 &swift_string_array_literal(&surface.roles),
             )
             .replace("__DEFAULT_ACTION_ID__", &swift_escape(&default_action_id))
+            .replace("__LIST_ROLE__", &swift_escape(&list_role))
+            .replace("__DETAIL_ROLE__", &swift_escape(&detail_role))
             .replace("__SURFACE_BODY__", &surface_body)
     }
 
     fn macos_desktop_surface_body(surface: &SurfaceIr) -> String {
-        if surface_has_roles(
-            surface,
-            &[
-                "left-list-detail",
-                "server-deployment-listbox",
-                "deployment-detail-pane",
-            ],
-        ) {
+        if left_list_detail_roles(surface).is_some() {
             [
                 "    operationsSplitView",
                 "      .frame(minWidth: 960, minHeight: 640)",
@@ -9011,8 +9050,11 @@ binary = "deployments-core"
             .find(|file| file.path == "Sources/App/App.swift")
             .map(|file| file.contents.as_str())
             .unwrap();
-        assert!(macos_source.contains("    contractSummary\n      .frame(minWidth: 960"));
-        assert!(!macos_source.contains("    operationsSplitView\n      .frame(minWidth: 960"));
+        assert!(macos_source.contains("    operationsSplitView\n      .frame(minWidth: 960"));
+        assert!(macos_source.contains("product-navigation"));
+        assert!(macos_source.contains("product-detail"));
+        assert!(!macos_source.contains("server-deployment-listbox"));
+        assert!(!macos_source.contains("deployment-detail-pane"));
         let compiled = product_runtime::native_compile_files(
             &product,
             &surface,
@@ -9072,7 +9114,11 @@ binary = "deployments-core"
         assert!(!linux_source.contains("__APP_RESOURCE_ID__"));
         assert!(!linux_source.contains("__APP_GAPPLICATION_ID__"));
         assert!(!linux_source.contains("\"runtime-action\", \"refresh_state\", \"{}\", NULL"));
-        assert!(!linux_source.contains("gtk_paned_new(GTK_ORIENTATION_HORIZONTAL)"));
+        assert!(linux_source.contains("gtk_paned_new(GTK_ORIENTATION_HORIZONTAL)"));
+        assert!(linux_source.contains("product-navigation"));
+        assert!(linux_source.contains("product-detail"));
+        assert!(!linux_source.contains("server-deployment-listbox"));
+        assert!(!linux_source.contains("deployment-detail-pane"));
         let mut operations_surface = linux_surface.clone();
         operations_surface.roles = vec![
             "deployment-detail-pane".to_string(),
@@ -9103,6 +9149,34 @@ binary = "deployments-core"
             "let surfaceRoles = [\"deployment-detail-pane\", \"left-list-detail\", \"server-deployment-listbox\"]"
         ));
         assert!(macos_source.contains("Surface roles: \\(surfaceRoles.joined(separator: \", \"))"));
+        let mut card_surface = linux_surface.clone();
+        card_surface.roles = vec![
+            "card-and-session-detail".to_string(),
+            "card-library-sidebar".to_string(),
+            "left-list-detail".to_string(),
+        ];
+        let files = product_runtime::linux_adapter_files(&product, &card_surface, &runtime);
+        let linux_source = files
+            .iter()
+            .find(|file| file.path == "src/main.c")
+            .map(|file| file.contents.as_str())
+            .unwrap();
+        assert!(linux_source.contains("gtk_paned_new(GTK_ORIENTATION_HORIZONTAL)"));
+        assert!(linux_source.contains("card-library-sidebar"));
+        assert!(linux_source.contains("card-and-session-detail"));
+        assert!(!linux_source.contains("server-deployment-listbox"));
+        assert!(!linux_source.contains("deployment-detail-pane"));
+        let files = product_runtime::macos_adapter_files(&product, &card_surface, &runtime);
+        let macos_source = files
+            .iter()
+            .find(|file| file.path == "Sources/App/App.swift")
+            .map(|file| file.contents.as_str())
+            .unwrap();
+        assert!(macos_source.contains("HSplitView"));
+        assert!(macos_source.contains("card-library-sidebar"));
+        assert!(macos_source.contains("card-and-session-detail"));
+        assert!(!macos_source.contains("server-deployment-listbox"));
+        assert!(!macos_source.contains("deployment-detail-pane"));
         let ios_surface = product_runtime::project_surface_from_product(&product, "ios").unwrap();
         let ios_surface = product_runtime::validate_surface_ir_value(&ios_surface).unwrap();
         let files = product_runtime::ios_adapter_files(&product, &ios_surface, &runtime);
