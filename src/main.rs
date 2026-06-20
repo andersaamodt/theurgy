@@ -2518,6 +2518,8 @@ mod tests {
         let adapter = include_str!("../tools/release/sign-and-notarize-macos.sh");
         assert!(adapter.contains("xcrun stapler staple \"$app_bundle\""));
         assert!(adapter.contains("xcrun stapler validate \"$app_bundle\""));
+        assert!(adapter.contains("--keychain \"$keychain\" --sign \"$APPLE_DEVELOPER_ID_APP\""));
+        assert!(!adapter.contains("security list-keychains -d user -s \"$keychain\""));
         assert!(adapter.contains("codesign --verify --deep --strict --verbose=2 \"$app_bundle\""));
         assert!(adapter.contains("spctl --assess --type execute --verbose=4 \"$app_bundle\""));
         assert!(

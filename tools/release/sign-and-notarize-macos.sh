@@ -108,11 +108,10 @@ printf '%s' "$APPLE_NOTARY_PRIVATE_KEY_BASE64" | openssl base64 -d -A > "$tmp_ke
 security create-keychain -p "$keychain_password" "$keychain"
 security set-keychain-settings -lut 21600 "$keychain"
 security unlock-keychain -p "$keychain_password" "$keychain"
-security list-keychains -d user -s "$keychain"
 security import "$p12_file" -k "$keychain" -P "$APPLE_P12_PASSWORD" -A
 security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain"
 
-codesign --force --deep --options runtime --timestamp --sign "$APPLE_DEVELOPER_ID_APP" "$app_bundle"
+codesign --force --deep --options runtime --timestamp --keychain "$keychain" --sign "$APPLE_DEVELOPER_ID_APP" "$app_bundle"
 
 xcrun notarytool submit "$app_bundle" \
   --key "$tmp_key" \
