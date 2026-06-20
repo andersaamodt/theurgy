@@ -8,7 +8,7 @@ websites that outgrow shell-first request handling.
 - Keep Web Wizardry and Headquarters in charge of install, publish, preview,
   checks, and maintenance.
 - Keep canonical site truth in plain files such as `site.conf`, source content,
-  and `.sitedata/<site>/`.
+  and app-owned user-local state roots outside the source checkout.
 - Move hot request paths into Rust once repeated shell process fan-out becomes
   slow, unreliable, or hard to debug.
 - Integrate existing free software instead of inventing basic infrastructure.

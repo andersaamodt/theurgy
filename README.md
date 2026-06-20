@@ -155,4 +155,4 @@ Theurgy makes these compromises against pure shell-first wizardry. Keep this tab
 
 ## Storage
 
-Theurgy project source belongs in the project checkout. Runtime state, caches, logs, and build products belong outside the checkout or in ignored paths. Generated project skeletons include local ignore rules for `target/`, `.theurgy-state/`, and logs.
+Theurgy project source belongs in the project checkout. Runtime state, caches, logs, and build products belong outside the checkout. Generated project skeletons ignore build products such as `target/`, but they must not normalize app-instance state directories inside the source tree.

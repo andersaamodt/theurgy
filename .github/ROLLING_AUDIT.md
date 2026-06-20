@@ -27,19 +27,20 @@
 
 ## Findings
 
-### 1. Generated project defaults still normalize repo-local runtime-state directories
-- Severity: high
+### 1. Generated project defaults now keep runtime state outside source checkouts
+- Severity: resolved
 - Why it matters:
   - Current Wizardry-family standards push durable and runtime state out of the source checkout by default.
-  - Theurgy-generated projects still normalize checkout-local state paths such as `.theurgy-state/` and `.sitedata/<site>`, which weakens that standard at the scaffold layer.
+  - Theurgy-generated projects set habits for future native and enterprise-web work, so scaffold defaults need to teach the strict rule.
 - Evidence:
-  - generated `.gitignore` includes repo-local runtime state: `src/main.rs:1911-1914`
-  - generated web manifest sets `canonical_state = ".sitedata/<site>"`: `src/main.rs:2026-2029`
-  - generated AI docs only say to keep runtime state out of Git, not out of the checkout: `src/main.rs:2032-2035`
-  - README storage section still allows ignored in-checkout runtime state: `README.md:154-156`
+  - generated `.gitignore` ignores build products and local noise, but no longer includes `.theurgy-state/`: `src/main.rs`
+  - generated web manifests now set `canonical_state = "~/.local/state/{name}/site"`: `src/main.rs`
+  - generated AI docs say runtime state, caches, logs, and build products belong outside the checkout: `src/main.rs`
+  - README storage guidance now rejects normalized app-instance state directories inside source trees: `README.md`
+  - web runtime harness docs now describe app-owned user-local state roots outside the source checkout: `docs/web-runtime-harness.md`
 - Assessment:
-  - The repo understands the problem well enough to ignore these paths.
-  - The scaffold defaults still teach a weaker habit than the current Wizardry direction.
+  - Resolved for current scaffold defaults.
+  - This is now a concrete example for future scaffolding standards: ignored repo-local state is not good enough when an external app-owned state root is practical.
 
 ### 2. User-edited project contracts default to TOML and JSON instead of the preferred YAML-plus-Markdown family
 - Severity: medium
@@ -81,11 +82,14 @@
 - The current problem is that generated defaults and some docs are weaker than that philosophy, not that the philosophy is missing.
 
 ## Suggested Next Moves
-1. Change generated Theurgy project defaults so runtime state lives outside the checkout by default, preferably in explicit user-local state roots.
-2. Decide which Theurgy contracts should remain JSON for ABI reasons and which human-owned project contracts should move toward YAML-oriented text.
-3. Make `sh scripts/theurgy-cargo test` green again before treating the runtime/compiler contract layer as stable.
+1. Decide which Theurgy contracts should remain JSON for ABI reasons and which human-owned project contracts should move toward YAML-oriented text.
+2. Make `sh scripts/theurgy-cargo test` green again before treating the runtime/compiler contract layer as stable.
 
 ## Validation Notes
 - `spells/assay-theurgy` passed in this audit.
 - `sh scripts/theurgy-cargo test` failed with 11 `theurgy-runtime` test failures.
+- Focused generated-project regression checks now pass:
+  - `sh scripts/theurgy-cargo test creates_desktop_project_without_overwrite`
+  - `sh scripts/theurgy-cargo test creates_website_project`
+  - generated website smoke check confirmed no `.sitedata` directory and an external `~/.local/state/<name>/site` default
 - This round was a repo-and-contract audit, not a generated-project smoke-build pass.

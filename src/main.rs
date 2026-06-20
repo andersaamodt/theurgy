@@ -1946,7 +1946,7 @@ fn create_project(kind: ProjectKind, name: &str, path: &Path) -> Result<()> {
 
     write_new(
         &path.join(".gitignore"),
-        "/target/\n/.theurgy-state/\n*.log\n*.tmp\n.DS_Store\n",
+        "/target/\n*.log\n*.tmp\n.DS_Store\n",
     )?;
     write_new(&path.join("LICENSE"), AGPL_NOTICE)?;
     write_new(&path.join("WIZARDRY_ADDENDUM.md"), WIZARDRY_ADDENDUM)?;
@@ -2063,13 +2063,13 @@ fn manifest(kind: ProjectKind, name: &str) -> String {
 
 fn web_manifest(name: &str) -> String {
     format!(
-        "name = \"{name}\"\ntrack = \"enterprise-web\"\nruntime = \"theurgy-web\"\ntruth = \"file-first\"\ncanonical_state = \".sitedata/<site>\"\nfront_doors = [\"nginx\", \"lighttpd\"]\nadapters = [\"http\", \"fastcgi\", \"cgi-compat\"]\nrouter = \"axum\"\nserialization = \"serde\"\ntemplates = \"tera\"\nsearch = \"tantivy\"\nzola_core_runtime = false\nphase = \"contract-and-adapter\"\n"
+        "name = \"{name}\"\ntrack = \"enterprise-web\"\nruntime = \"theurgy-web\"\ntruth = \"file-first\"\ncanonical_state = \"~/.local/state/{name}/site\"\nfront_doors = [\"nginx\", \"lighttpd\"]\nadapters = [\"http\", \"fastcgi\", \"cgi-compat\"]\nrouter = \"axum\"\nserialization = \"serde\"\ntemplates = \"tera\"\nsearch = \"tantivy\"\nzola_core_runtime = false\nphase = \"contract-and-adapter\"\n"
     )
 }
 
 fn generated_ai_docs(kind: ProjectKind) -> String {
     format!(
-        "# Generated Theurgy Project\n\n- Track: `{}`.\n- Keep durable truth in source files unless a documented database need exists.\n- Keep runtime state and build products out of Git.\n- Do not add shell fragments for user-controlled execution paths.\n- Preserve CLI parity for GUI behavior.\n- For enterprise web projects, use `theurgy.web.toml` as the runtime contract and keep wizardry shell out of hot request paths once a typed handler exists.\n",
+        "# Generated Theurgy Project\n\n- Track: `{}`.\n- Keep durable truth in source files unless a documented database need exists.\n- Keep runtime state, caches, logs, and build products outside the checkout.\n- Do not add shell fragments for user-controlled execution paths.\n- Preserve CLI parity for GUI behavior.\n- For enterprise web projects, use `theurgy.web.toml` as the runtime contract and keep wizardry shell out of hot request paths once a typed handler exists.\n",
         kind.as_str()
     )
 }
@@ -2347,6 +2347,9 @@ mod tests {
         create_project(ProjectKind::Desktop, "demo-desktop", &root).unwrap();
         assert!(root.join("theurgy.project.toml").exists());
         assert!(root.join("src/main.rs").exists());
+        let ignore = fs::read_to_string(root.join(".gitignore")).unwrap();
+        assert!(ignore.contains("/target/"));
+        assert!(!ignore.contains(".theurgy-state"));
         assert!(create_project(ProjectKind::Desktop, "demo-desktop", &root).is_err());
         fs::remove_dir_all(root).unwrap();
     }
@@ -2361,6 +2364,8 @@ mod tests {
         let manifest = fs::read_to_string(root.join("theurgy.project.toml")).unwrap();
         assert!(manifest.contains("kind = \"website\""));
         let web_manifest = fs::read_to_string(root.join("theurgy.web.toml")).unwrap();
+        assert!(web_manifest.contains("canonical_state = \"~/.local/state/demo-website/site\""));
+        assert!(!web_manifest.contains(".sitedata"));
         assert!(web_manifest.contains("router = \"axum\""));
         assert!(web_manifest.contains("search = \"tantivy\""));
         assert!(web_manifest.contains("zola_core_runtime = false"));
