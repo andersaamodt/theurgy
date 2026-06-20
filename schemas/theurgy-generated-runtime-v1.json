@@ -44,6 +44,8 @@
     "productPersistenceRootContracts",
     "productBackgroundJobContracts",
     "productReleaseTargetContracts",
+    "productAuditKeys",
+    "productAuditContracts",
     "surfaceActions",
     "surfaceCapabilities",
     "surfaceActionContracts",
@@ -145,6 +147,10 @@
       "minItems": 1
     },
     "productAuditKeys": { "$ref": "#/$defs/stringList" },
+    "productAuditContracts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/auditContract" }
+    },
     "surface": { "type": "string", "minLength": 1 },
     "surfaceSchema": {
       "enum": ["theurgy-desktop-surface-ir/v1", "theurgy-mobile-surface-ir/v1"]
@@ -324,6 +330,15 @@
         "target": { "enum": ["macos", "linux", "ios", "android"] },
         "surface": { "enum": ["desktop", "mobile"] },
         "artifact": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "auditContract": {
+      "type": "object",
+      "required": ["id", "value"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "value": true
       },
       "additionalProperties": false
     },

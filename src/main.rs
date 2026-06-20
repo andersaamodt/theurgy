@@ -3437,6 +3437,18 @@ mod tests {
         );
         assert_eq!(
             schema
+                .pointer("/properties/productAuditContracts/items/$ref")
+                .and_then(Value::as_str),
+            Some("#/$defs/auditContract")
+        );
+        assert_eq!(
+            schema
+                .pointer("/$defs/auditContract/properties/id/minLength")
+                .and_then(Value::as_u64),
+            Some(1)
+        );
+        assert_eq!(
+            schema
                 .pointer("/properties/productDomainObjectContracts/items/$ref")
                 .and_then(Value::as_str),
             Some("#/$defs/domainObjectContract")
@@ -3516,6 +3528,12 @@ mod tests {
         assert!(top_level_required
             .iter()
             .any(|value| value.as_str() == Some("productReleaseTargetContracts")));
+        assert!(top_level_required
+            .iter()
+            .any(|value| value.as_str() == Some("productAuditContracts")));
+        assert!(top_level_required
+            .iter()
+            .any(|value| value.as_str() == Some("productAuditKeys")));
         assert!(top_level_required
             .iter()
             .any(|value| value.as_str() == Some("productDomainObjectContracts")));

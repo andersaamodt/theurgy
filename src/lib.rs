@@ -313,6 +313,7 @@ pub mod product_runtime {
         pub background_job_ids: Vec<String>,
         pub release_targets: Vec<ReleaseTarget>,
         pub audit_keys: Vec<String>,
+        pub audit_contracts: Vec<(String, Value)>,
         pub action_contracts: Vec<ProductActionContract>,
         pub action_ids: Vec<String>,
         pub actions: usize,
@@ -1577,6 +1578,22 @@ pub mod product_runtime {
         ] {
             optional_string_array(value, key, &format!("generated runtime {key}"))?;
         }
+        let product_audit_keys = value_string_array(value, "productAuditKeys")?;
+        let audit_contracts = value_array(value, "productAuditContracts")?;
+        if audit_contracts.len() != product_audit_keys.len() {
+            return Err(ContractError::new(
+                "generated runtime productAuditContracts must match productAuditKeys length",
+            ));
+        }
+        let mut audit_contract_ids = Vec::new();
+        for contract in audit_contracts {
+            audit_contract_ids.push(validate_generated_audit_contract(contract)?);
+        }
+        if audit_contract_ids != product_audit_keys {
+            return Err(ContractError::new(
+                "generated runtime productAuditContracts order must match productAuditKeys",
+            ));
+        }
         let product_domain_objects = value_string_array(value, "productDomainObjects")?;
         let domain_object_contracts = value_array(value, "productDomainObjectContracts")?;
         if domain_object_contracts.len() != product_domain_objects.len() {
@@ -1982,7 +1999,11 @@ pub mod product_runtime {
             "product IR releaseTargets",
             &targets,
         )?;
-        let audit_keys = optional_object_keys(value, "audit")?;
+        let audit_contracts = optional_object_contracts(value, "audit")?;
+        let audit_keys = audit_contracts
+            .iter()
+            .map(|(key, _value)| key.clone())
+            .collect();
         Ok(ProductIr {
             app_id,
             app_name,
@@ -2004,6 +2025,7 @@ pub mod product_runtime {
             background_job_ids,
             release_targets,
             audit_keys,
+            audit_contracts,
             action_contracts,
             actions: action_values.len(),
             action_ids,
@@ -2360,6 +2382,10 @@ pub mod product_runtime {
         object.insert(
             "productAuditKeys".to_string(),
             string_vec_value(&product.audit_keys),
+        );
+        object.insert(
+            "productAuditContracts".to_string(),
+            audit_contracts_value(&product.audit_contracts),
         );
         object.insert(
             "protocol".to_string(),
@@ -3960,6 +3986,20 @@ pub mod product_runtime {
                         "artifact".to_string(),
                         Value::String(release_target.artifact.clone()),
                     );
+                    Value::Object(object)
+                })
+                .collect(),
+        )
+    }
+
+    fn audit_contracts_value(contracts: &[(String, Value)]) -> Value {
+        Value::Array(
+            contracts
+                .iter()
+                .map(|(id, value)| {
+                    let mut object = serde_json::Map::new();
+                    object.insert("id".to_string(), Value::String(id.clone()));
+                    object.insert("value".to_string(), value.clone());
                     Value::Object(object)
                 })
                 .collect(),
@@ -6184,6 +6224,18 @@ struct TheurgyNativeApp: App {
         Ok(id)
     }
 
+    fn validate_generated_audit_contract(contract: &Value) -> ContractResult<String> {
+        let id = value_string(contract, "id")
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| ContractError::new("generated runtime audit contract id invalid"))?;
+        if contract.get("value").is_none() {
+            return Err(ContractError::new(
+                "generated runtime audit contract value required",
+            ));
+        }
+        Ok(id)
+    }
+
     fn validate_generated_persistence_root_contract(contract: &Value) -> ContractResult<String> {
         let id = value_string(contract, "id")
             .filter(|id| valid_action_id(id))
@@ -6855,7 +6907,7 @@ struct TheurgyNativeApp: App {
             .ok_or_else(|| ContractError::new(format!("{label} required")))
     }
 
-    fn optional_object_keys(value: &Value, key: &str) -> ContractResult<Vec<String>> {
+    fn optional_object_contracts(value: &Value, key: &str) -> ContractResult<Vec<(String, Value)>> {
         let Some(raw) = value.get(key) else {
             return Ok(Vec::new());
         };
@@ -6864,9 +6916,12 @@ struct TheurgyNativeApp: App {
                 "product IR {key} must be an object"
             )));
         };
-        let mut keys = object.keys().cloned().collect::<Vec<_>>();
-        keys.sort();
-        Ok(keys)
+        let mut contracts = object
+            .iter()
+            .map(|(entry_key, entry_value)| (entry_key.clone(), entry_value.clone()))
+            .collect::<Vec<_>>();
+        contracts.sort_by(|left, right| left.0.cmp(&right.0));
+        Ok(contracts)
     }
 
     fn object_shape(value: &Value, label: &str) -> ContractResult<BTreeMap<String, String>> {
@@ -7736,6 +7791,16 @@ binary = "deployments-core"
             ]
         );
         assert_eq!(product.audit_keys, vec!["cliParity", "operationHistory"]);
+        assert_eq!(
+            product.audit_contracts,
+            vec![
+                ("cliParity".to_string(), serde_json::Value::Bool(true)),
+                (
+                    "operationHistory".to_string(),
+                    serde_json::Value::Bool(true)
+                )
+            ]
+        );
 
         let missing_mobile_capability = serde_json::json!({
             "version": product_runtime::PRODUCT_IR_SCHEMA,
@@ -8286,6 +8351,10 @@ binary = "deployments-core"
   "targetReleaseTarget": "macos-app",
   "targetReleaseArtifact": "generated/macos",
   "productAuditKeys": ["cliParity"],
+  "productAuditContracts": [{
+    "id": "cliParity",
+    "value": true
+  }],
   "protocol": "theurgy-runtime-action/v1",
   "runtimeStateRequestSchema": "theurgy-runtime-state-request/v1",
   "runtimeStatusRequestSchema": "theurgy-runtime-status-request/v1",
