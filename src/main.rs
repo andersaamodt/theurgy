@@ -612,7 +612,13 @@ fn command_stage_app_runtime(args: &[String]) -> Result<()> {
         return Err(TheurgyError::new("stage-app-runtime only supports macos and linux").into());
     }
     let contract = product_runtime::load_app_compile_contract(app_dir, target)?;
-    stage_app_runtime_binaries(app_dir, out_dir, target, &contract.runtime)?;
+    stage_app_runtime_binaries(
+        app_dir,
+        &contract.project_manifest.source_root,
+        out_dir,
+        target,
+        &contract.runtime,
+    )?;
     println!("status=ok");
     println!("app={}", app_dir.display());
     println!("target={target}");
@@ -1634,6 +1640,7 @@ fn write_app_contract_resources(
 
 fn stage_app_runtime_binaries(
     app_dir: &Path,
+    source_root: &str,
     out_dir: &Path,
     target: &str,
     runtime: &RuntimeContract,
@@ -1647,23 +1654,37 @@ fn stage_app_runtime_binaries(
     collect_manifest_binary(&runtime.history_command, &mut app_binaries)?;
     collect_manifest_binary(&runtime.daemon_command, &mut app_binaries)?;
 
-    let cargo_manifest = app_dir.join("Cargo.toml");
-    if !cargo_manifest.is_file() {
-        return Err(TheurgyError::new(format!(
-            "stage-app-runtime requires Cargo.toml at {}",
-            cargo_manifest.display()
-        ))
-        .into());
+    let mut binaries = Vec::new();
+    if target_requires_theurgy_runtime_wrapper(target) {
+        let theurgy_runtime = env::current_exe().map_err(|error| {
+            TheurgyError::new(format!("could not locate theurgy-runtime: {error}"))
+        })?;
+        binaries.push(("theurgy-runtime".to_string(), theurgy_runtime));
     }
-    let cargo_target_dir = cargo_target_dir(app_dir);
-    fs::create_dir_all(&cargo_target_dir)?;
-    for binary in &app_binaries {
+    let cargo_manifest = app_dir.join("Cargo.toml");
+    let cargo_debug_dir = cargo_debug_dir(app_dir);
+    for binary in app_binaries {
+        if let Some(source_executable) =
+            resolve_app_runtime_executable(app_dir, source_root, &binary)
+        {
+            binaries.push((binary, source_executable));
+            continue;
+        }
+        if !cargo_manifest.is_file() {
+            return Err(TheurgyError::new(format!(
+                "stage-app-runtime could not find executable source runtime {binary} and requires Cargo.toml at {} to build it",
+                cargo_manifest.display()
+            ))
+            .into());
+        }
+        let cargo_target_dir = cargo_target_dir(app_dir);
+        fs::create_dir_all(&cargo_target_dir)?;
         let status = Command::new("cargo")
             .arg("build")
             .arg("--manifest-path")
             .arg(&cargo_manifest)
             .arg("--bin")
-            .arg(binary)
+            .arg(&binary)
             .env("CARGO_TARGET_DIR", &cargo_target_dir)
             .status()
             .map_err(|error| {
@@ -1675,17 +1696,6 @@ fn stage_app_runtime_binaries(
             ))
             .into());
         }
-    }
-
-    let mut binaries = Vec::new();
-    if target_requires_theurgy_runtime_wrapper(target) {
-        let theurgy_runtime = env::current_exe().map_err(|error| {
-            TheurgyError::new(format!("could not locate theurgy-runtime: {error}"))
-        })?;
-        binaries.push(("theurgy-runtime".to_string(), theurgy_runtime));
-    }
-    let cargo_debug_dir = cargo_debug_dir(app_dir);
-    for binary in app_binaries {
         let binary_path = cargo_debug_dir.join(&binary);
         if !binary_path.is_file() {
             return Err(TheurgyError::new(format!(
@@ -1713,6 +1723,23 @@ fn stage_app_runtime_binaries(
         }
     }
     Ok(())
+}
+
+fn resolve_app_runtime_executable(
+    app_dir: &Path,
+    source_root: &str,
+    binary: &str,
+) -> Option<PathBuf> {
+    for candidate in [
+        app_dir.join(source_root).join(binary),
+        app_dir.join("app-blueprint").join(binary),
+        app_dir.join(binary),
+    ] {
+        if is_executable_file(&candidate) {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 fn target_requires_theurgy_runtime_wrapper(target: &str) -> bool {
@@ -5626,6 +5653,120 @@ mod tests {
         assert!(error.contains("runtime manifest productIr does not match"));
 
         fs::remove_dir_all(app).unwrap();
+    }
+
+    #[test]
+    fn stage_app_runtime_stages_source_executable_runtime_for_macos() {
+        let app = test_root("stage-source-runtime-macos");
+        let out = test_root("stage-source-runtime-macos-out");
+        fs::create_dir_all(app.join("app-blueprint")).unwrap();
+        write_or_replace(
+            &app.join("theurgy.project.toml"),
+            "name = \"deployments\"\nkind = \"desktop\"\nsource_root = \"app-blueprint\"\nproduct_ir = \"app-blueprint/product.ir.json\"\ndesktop_surface_ir = \"app-blueprint/desktop.surface.ir.json\"\nruntime_manifest = \"app-blueprint/runtime.manifest.json\"\n",
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/product.ir.json"),
+            &sample_product(),
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/runtime.manifest.json"),
+            &sample_runtime_manifest(),
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/desktop.surface.ir.json"),
+            &sample_desktop_surface(),
+        )
+        .unwrap();
+        write_executable(
+            &app.join("app-blueprint/custom-core"),
+            "#!/bin/sh\nprintf '%s\\n' custom-core\n",
+        )
+        .unwrap();
+        write_executable(
+            &app.join("app-blueprint/deployments-daemon"),
+            "#!/bin/sh\nprintf '%s\\n' deployments-daemon\n",
+        )
+        .unwrap();
+
+        command_stage_app_runtime(&[
+            app.display().to_string(),
+            "--target".to_string(),
+            "macos".to_string(),
+            "--out".to_string(),
+            out.display().to_string(),
+        ])
+        .unwrap();
+
+        assert!(out.join("libexec/custom-core").is_file());
+        assert!(out.join("libexec/deployments-daemon").is_file());
+        assert!(out
+            .join("Sources/App/Resources/libexec/custom-core")
+            .is_file());
+        assert!(out
+            .join("Sources/App/Resources/libexec/deployments-daemon")
+            .is_file());
+        assert!(!out.join("libexec/theurgy-runtime").exists());
+        assert!(is_executable_file(&out.join("libexec/custom-core")));
+
+        fs::remove_dir_all(app).unwrap();
+        fs::remove_dir_all(out).unwrap();
+    }
+
+    #[test]
+    fn stage_app_runtime_stages_source_executable_runtime_for_linux() {
+        let app = test_root("stage-source-runtime-linux");
+        let out = test_root("stage-source-runtime-linux-out");
+        fs::create_dir_all(app.join("app-blueprint")).unwrap();
+        write_or_replace(
+            &app.join("theurgy.project.toml"),
+            "name = \"deployments\"\nkind = \"desktop\"\nsource_root = \"app-blueprint\"\nproduct_ir = \"app-blueprint/product.ir.json\"\ndesktop_surface_ir = \"app-blueprint/desktop.surface.ir.json\"\nruntime_manifest = \"app-blueprint/runtime.manifest.json\"\n",
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/product.ir.json"),
+            &sample_product(),
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/runtime.manifest.json"),
+            &sample_runtime_manifest(),
+        )
+        .unwrap();
+        write_or_replace(
+            &app.join("app-blueprint/desktop.surface.ir.json"),
+            &sample_desktop_surface(),
+        )
+        .unwrap();
+        write_executable(
+            &app.join("app-blueprint/custom-core"),
+            "#!/bin/sh\nprintf '%s\\n' custom-core\n",
+        )
+        .unwrap();
+        write_executable(
+            &app.join("app-blueprint/deployments-daemon"),
+            "#!/bin/sh\nprintf '%s\\n' deployments-daemon\n",
+        )
+        .unwrap();
+
+        command_stage_app_runtime(&[
+            app.display().to_string(),
+            "--target".to_string(),
+            "linux".to_string(),
+            "--out".to_string(),
+            out.display().to_string(),
+        ])
+        .unwrap();
+
+        assert!(out.join("libexec/custom-core").is_file());
+        assert!(out.join("libexec/deployments-daemon").is_file());
+        assert!(out.join("libexec/theurgy-runtime").is_file());
+        assert!(is_executable_file(&out.join("libexec/custom-core")));
+
+        fs::remove_dir_all(app).unwrap();
+        fs::remove_dir_all(out).unwrap();
     }
 
     #[test]

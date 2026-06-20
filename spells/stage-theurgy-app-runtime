@@ -1,0 +1,16 @@
+#!/bin/sh
+# Stage a Theurgy app runtime into a native adapter root.
+
+case "${1-}" in
+--help|--usage|-h)
+  cat <<'USAGE'
+Usage: stage-theurgy-app-runtime APP_DIR --target macos|linux --out OUT_DIR
+USAGE
+  exit 0
+  ;;
+esac
+
+set -eu
+
+repo_dir=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd -P)
+exec "$repo_dir/scripts/theurgy-cargo" run --quiet --manifest-path "$repo_dir/Cargo.toml" --bin theurgy-runtime -- stage-app-runtime "$@"
