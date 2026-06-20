@@ -121,5 +121,9 @@ xcrun notarytool submit "$app_bundle" \
   --wait
 
 xcrun stapler staple "$app_bundle"
+xcrun stapler validate "$app_bundle"
+
+codesign --verify --deep --strict --verbose=2 "$app_bundle"
+spctl --assess --type execute --verbose=4 "$app_bundle"
 
 printf '%s\n' "sign-and-notarize-macos: notarized $app_bundle"

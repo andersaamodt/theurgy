@@ -2514,6 +2514,23 @@ mod tests {
     }
 
     #[test]
+    fn macos_signing_adapter_verifies_notarized_bundle() {
+        let adapter = include_str!("../tools/release/sign-and-notarize-macos.sh");
+        assert!(adapter.contains("xcrun stapler staple \"$app_bundle\""));
+        assert!(adapter.contains("xcrun stapler validate \"$app_bundle\""));
+        assert!(adapter.contains("codesign --verify --deep --strict --verbose=2 \"$app_bundle\""));
+        assert!(adapter.contains("spctl --assess --type execute --verbose=4 \"$app_bundle\""));
+        assert!(
+            adapter.find("xcrun stapler staple \"$app_bundle\"")
+                < adapter.find("xcrun stapler validate \"$app_bundle\"")
+        );
+        assert!(
+            adapter.find("xcrun stapler validate \"$app_bundle\"")
+                < adapter.find("sign-and-notarize-macos: notarized $app_bundle")
+        );
+    }
+
+    #[test]
     fn macos_runtime_staging_omits_theurgy_wrapper() {
         assert!(!target_requires_theurgy_runtime_wrapper("macos"));
         assert!(target_requires_theurgy_runtime_wrapper("linux"));
