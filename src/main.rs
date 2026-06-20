@@ -1709,6 +1709,7 @@ fn stage_app_runtime_binaries(
 
     for libexec_dir in runtime_libexec_dirs(out_dir, target)? {
         fs::create_dir_all(&libexec_dir)?;
+        stage_runtime_support_files(app_dir, source_root, &libexec_dir)?;
         for (name, source) in &binaries {
             let destination = libexec_dir.join(name);
             fs::copy(source, &destination).map_err(|error| {
@@ -1720,6 +1721,41 @@ fn stage_app_runtime_binaries(
             })?;
             mark_executable(&destination)?;
             prepare_staged_runtime_binary(&destination, target)?;
+        }
+    }
+    Ok(())
+}
+
+fn stage_runtime_support_files(
+    app_dir: &Path,
+    source_root: &str,
+    libexec_dir: &Path,
+) -> Result<()> {
+    let support_dir = app_dir.join(source_root).join("libexec");
+    if !support_dir.is_dir() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(&support_dir).map_err(|error| {
+        TheurgyError::new(format!(
+            "could not read runtime support directory {}: {error}",
+            support_dir.display()
+        ))
+    })? {
+        let entry = entry?;
+        let source = entry.path();
+        if !source.is_file() {
+            continue;
+        }
+        let destination = libexec_dir.join(entry.file_name());
+        fs::copy(&source, &destination).map_err(|error| {
+            TheurgyError::new(format!(
+                "could not copy runtime support file {} to {}: {error}",
+                source.display(),
+                destination.display()
+            ))
+        })?;
+        if is_executable_file(&source) {
+            mark_executable(&destination)?;
         }
     }
     Ok(())
@@ -5690,6 +5726,12 @@ mod tests {
             "#!/bin/sh\nprintf '%s\\n' deployments-daemon\n",
         )
         .unwrap();
+        fs::create_dir_all(app.join("app-blueprint/libexec")).unwrap();
+        write_executable(
+            &app.join("app-blueprint/libexec/runtime-helper"),
+            "#!/bin/sh\nprintf '%s\\n' runtime-helper\n",
+        )
+        .unwrap();
 
         command_stage_app_runtime(&[
             app.display().to_string(),
@@ -5710,6 +5752,10 @@ mod tests {
             .is_file());
         assert!(!out.join("libexec/theurgy-runtime").exists());
         assert!(is_executable_file(&out.join("libexec/custom-core")));
+        assert!(is_executable_file(&out.join("libexec/runtime-helper")));
+        assert!(is_executable_file(
+            &out.join("Sources/App/Resources/libexec/runtime-helper")
+        ));
 
         fs::remove_dir_all(app).unwrap();
         fs::remove_dir_all(out).unwrap();
@@ -5750,6 +5796,12 @@ mod tests {
             "#!/bin/sh\nprintf '%s\\n' deployments-daemon\n",
         )
         .unwrap();
+        fs::create_dir_all(app.join("app-blueprint/libexec")).unwrap();
+        write_executable(
+            &app.join("app-blueprint/libexec/runtime-helper"),
+            "#!/bin/sh\nprintf '%s\\n' runtime-helper\n",
+        )
+        .unwrap();
 
         command_stage_app_runtime(&[
             app.display().to_string(),
@@ -5764,6 +5816,7 @@ mod tests {
         assert!(out.join("libexec/deployments-daemon").is_file());
         assert!(out.join("libexec/theurgy-runtime").is_file());
         assert!(is_executable_file(&out.join("libexec/custom-core")));
+        assert!(is_executable_file(&out.join("libexec/runtime-helper")));
 
         fs::remove_dir_all(app).unwrap();
         fs::remove_dir_all(out).unwrap();
