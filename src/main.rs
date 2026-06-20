@@ -2516,20 +2516,38 @@ mod tests {
     #[test]
     fn macos_signing_adapter_verifies_notarized_bundle() {
         let adapter = include_str!("../tools/release/sign-and-notarize-macos.sh");
-        assert!(adapter.contains("xcrun stapler staple \"$app_bundle\""));
-        assert!(adapter.contains("xcrun stapler validate \"$app_bundle\""));
-        assert!(adapter.contains("--keychain \"$keychain\" --sign \"$APPLE_DEVELOPER_ID_APP\""));
+        let codesign_sign =
+            "codesign --force --deep --options runtime --timestamp --keychain \"$keychain\" --sign \"$APPLE_DEVELOPER_ID_APP\" \"$app_bundle\"";
+        let notary_submit = "xcrun notarytool submit \"$app_bundle\"";
+        let staple = "xcrun stapler staple \"$app_bundle\"";
+        let validate_staple = "xcrun stapler validate \"$app_bundle\"";
+        let verify_signature = "codesign --verify --deep --strict --verbose=2 \"$app_bundle\"";
+        let assess_gatekeeper = "spctl --assess --type execute --verbose=4 \"$app_bundle\"";
+        let success = "sign-and-notarize-macos: notarized $app_bundle";
+
+        assert!(adapter.contains(codesign_sign));
+        assert!(adapter.contains(notary_submit));
+        assert!(adapter.contains("--wait"));
+        assert!(adapter.contains(staple));
+        assert!(adapter.contains(validate_staple));
         assert!(!adapter.contains("security list-keychains -d user -s \"$keychain\""));
-        assert!(adapter.contains("codesign --verify --deep --strict --verbose=2 \"$app_bundle\""));
-        assert!(adapter.contains("spctl --assess --type execute --verbose=4 \"$app_bundle\""));
-        assert!(
-            adapter.find("xcrun stapler staple \"$app_bundle\"")
-                < adapter.find("xcrun stapler validate \"$app_bundle\"")
-        );
-        assert!(
-            adapter.find("xcrun stapler validate \"$app_bundle\"")
-                < adapter.find("sign-and-notarize-macos: notarized $app_bundle")
-        );
+        assert!(adapter.contains(verify_signature));
+        assert!(adapter.contains(assess_gatekeeper));
+
+        let codesign_sign_index = adapter.find(codesign_sign).unwrap();
+        let notary_submit_index = adapter.find(notary_submit).unwrap();
+        let staple_index = adapter.find(staple).unwrap();
+        let validate_staple_index = adapter.find(validate_staple).unwrap();
+        let verify_signature_index = adapter.find(verify_signature).unwrap();
+        let assess_gatekeeper_index = adapter.find(assess_gatekeeper).unwrap();
+        let success_index = adapter.find(success).unwrap();
+
+        assert!(codesign_sign_index < notary_submit_index);
+        assert!(notary_submit_index < staple_index);
+        assert!(staple_index < validate_staple_index);
+        assert!(validate_staple_index < verify_signature_index);
+        assert!(verify_signature_index < assess_gatekeeper_index);
+        assert!(assess_gatekeeper_index < success_index);
     }
 
     #[test]
