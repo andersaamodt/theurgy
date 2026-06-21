@@ -44,3 +44,4 @@ Theurgy owns repeatable proof patterns that touch closed or host-specific mobile
 - Capture UI state after failures as well as successes; failed handoff screenshots are reusable quarantine knowledge.
 - Keep evidence in `${TMPDIR:-/tmp}` or an explicit external evidence directory.
 - Make proof gates opt-in or operator-confirmed by default, because mobile devices, signers, and browser prompts are live local state.
+- Install Playwright-managed browser binaries through `spells/install-theurgy-browser-proof-runtime` so desktop browser target checks stay repeatable and quarantined outside app repositories; do not use Homebrew for this dependency.

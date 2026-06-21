@@ -1,0 +1,65 @@
+#!/bin/sh
+# Install Playwright-managed browser binaries for browser proof harnesses.
+
+case "${1-}" in
+--help|--usage|-h)
+  cat <<'USAGE'
+Usage: install-theurgy-browser-proof-runtime [browser...]
+
+Installs Playwright-managed browser binaries used by Theurgy/Pieplate browser
+proof harnesses. Defaults to chromium firefox webkit.
+
+Environment:
+  THEURGY_PLAYWRIGHT_NODE       Node executable to use, default: node
+  THEURGY_PLAYWRIGHT_NODE_PATH  Extra NODE_PATH for an existing Playwright package
+  THEURGY_PLAYWRIGHT_CLI        Explicit path to playwright/cli.js
+
+This spell does not use Homebrew. Browser binaries are installed through
+Playwright's own installer into Playwright's user-local cache.
+USAGE
+  exit 0
+  ;;
+esac
+
+set -eu
+PATH=/usr/bin:/bin:/usr/sbin:/sbin${PATH:+:$PATH}
+
+node_bin=${THEURGY_PLAYWRIGHT_NODE:-node}
+node_path=${THEURGY_PLAYWRIGHT_NODE_PATH:-}
+playwright_cli=${THEURGY_PLAYWRIGHT_CLI:-}
+
+if ! command -v "$node_bin" >/dev/null 2>&1; then
+  printf '%s\n' "install-theurgy-browser-proof-runtime: missing Node executable: $node_bin" >&2
+  exit 1
+fi
+
+if [ -z "$playwright_cli" ]; then
+  playwright_cli=$(
+    NODE_PATH=$node_path "$node_bin" -e "
+const path = require('path');
+try {
+  const pkg = require.resolve('playwright/package.json');
+  console.log(path.join(path.dirname(pkg), 'cli.js'));
+} catch (error) {
+  process.exit(1);
+}
+" 2>/dev/null || true
+  )
+fi
+
+if [ -z "$playwright_cli" ] || [ ! -f "$playwright_cli" ]; then
+  printf '%s\n' 'install-theurgy-browser-proof-runtime: could not find playwright/cli.js; set THEURGY_PLAYWRIGHT_NODE_PATH or THEURGY_PLAYWRIGHT_CLI' >&2
+  exit 1
+fi
+
+if [ "$#" -eq 0 ]; then
+  set -- chromium firefox webkit
+fi
+
+printf 'Installing Playwright browser proof runtime:'
+for browser in "$@"; do
+  printf ' %s' "$browser"
+done
+printf '\n'
+
+NODE_PATH=$node_path "$node_bin" "$playwright_cli" install "$@"

@@ -35,6 +35,7 @@ Run:
 ```sh
 spells/assay-theurgy
 spells/check-theurgy-web-runtime
+spells/install-theurgy-browser-proof-runtime
 spells/capture-theurgy-cgi-context
 spells/conjure-native-desktop sample-desktop
 spells/conjure-enterprise-website sample-website
@@ -98,6 +99,7 @@ Theurgy is the quarantine layer for parts of professional app development that d
 - app verification, app-store review/policing workflows, and special publish keys
 - host-native firewall, sandbox, and network-caging backends
 - mobile browser proof machinery, including iOS Simulator, Safari extension activation, adb cages, and external-protocol handoff diagnostics
+- Playwright-managed browser proof runtime installation for closed-source browser target checks
 - Swift, SwiftUI, Xcode-shaped project output, and Apple lifecycle conventions
 - GTK, platform windowing, desktop IPC, and app lifecycle adapters
 - Rust build products, lockfiles, and toolchain metadata

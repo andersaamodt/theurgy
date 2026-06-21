@@ -12,6 +12,7 @@
 - Keep app verification, notarization, store review, TestFlight, App Store, Google Play, and special app-publish keys in theurgy rather than pure wizardry or wizardry-apps.
 - Keep host-native firewall, sandbox, and network-caging backends in theurgy rather than pure wizardry or wizardry-apps.
 - Keep reusable mobile/browser proof machinery in theurgy when it touches closed-source browser behavior, Xcode Simulator, Safari extension activation, adb cages, or app/signer handoff diagnostics.
+- Use `spells/install-theurgy-browser-proof-runtime` for Playwright-managed browser binaries; do not install browser proof dependencies through Homebrew or ad hoc project-local caches.
 - Read `docs/databases.md` before introducing database-backed behavior.
 
 ## Canonical Position
