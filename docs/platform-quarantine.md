@@ -27,6 +27,18 @@ Apple-specific machinery belongs in theurgy adapters, not in pure wizardry:
 
 Theurgy may generate or manage these files, but the durable project truth should remain a plain theurgy manifest plus ordinary source files.
 
+## Mobile Browser Proofs
+
+Closed-source mobile browser and simulator proof machinery belongs in theurgy even when the app under test is a normal enterprise website:
+
+- Xcode Simulator browser launch and screenshot evidence
+- iOS Safari extension enablement, origin permissions, and content-script injection diagnostics
+- Android adb proof helpers, especially caged `firewalled-adb` wireless-debug paths
+- mobile browser external-protocol handoff diagnostics
+- Nostr signer proof vocabulary that separates signer resolution, browser dispatch, signer approval, and site-connected success
+
+See `docs/mobile-browser-proof-quarantine.md` for the reusable proof pattern. App-specific auth logic stays in the app; the repeatable closed-source proof scaffolding and lessons live here.
+
 ## App Publishing
 
 App publishing machinery belongs in theurgy when it touches store review, platform verification, notarization, signing credentials, App Store Connect, TestFlight, Google Play, or equivalent platform-policing systems.

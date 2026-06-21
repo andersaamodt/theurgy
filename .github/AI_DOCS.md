@@ -7,9 +7,11 @@
 - Read `docs/architecture.md` before changing runtime boundaries.
 - Read `docs/web-runtime-harness.md` before changing enterprise web runtime adapters.
 - Read `docs/platform-quarantine.md` before adding Apple, macOS, native desktop, signing, bundle, or platform-adapter machinery.
+- Read `docs/mobile-browser-proof-quarantine.md` before adding or debugging iOS Simulator, Safari extension, Android adb, mobile browser external-protocol, Nostr signer, or screenshot-evidence proof helpers.
 - macOS generated apps should be one professional app bundle, plus a daemon only when an independent lifecycle is required; do not reintroduce generic runtime wrappers, launch-pressure backoff gates, or multi-executable interactive hot paths.
 - Keep app verification, notarization, store review, TestFlight, App Store, Google Play, and special app-publish keys in theurgy rather than pure wizardry or wizardry-apps.
 - Keep host-native firewall, sandbox, and network-caging backends in theurgy rather than pure wizardry or wizardry-apps.
+- Keep reusable mobile/browser proof machinery in theurgy when it touches closed-source browser behavior, Xcode Simulator, Safari extension activation, adb cages, or app/signer handoff diagnostics.
 - Read `docs/databases.md` before introducing database-backed behavior.
 
 ## Canonical Position

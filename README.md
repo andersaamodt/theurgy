@@ -97,6 +97,7 @@ Theurgy is the quarantine layer for parts of professional app development that d
 - code signing and notarization workflows
 - app verification, app-store review/policing workflows, and special publish keys
 - host-native firewall, sandbox, and network-caging backends
+- mobile browser proof machinery, including iOS Simulator, Safari extension activation, adb cages, and external-protocol handoff diagnostics
 - Swift, SwiftUI, Xcode-shaped project output, and Apple lifecycle conventions
 - GTK, platform windowing, desktop IPC, and app lifecycle adapters
 - Rust build products, lockfiles, and toolchain metadata
@@ -146,6 +147,7 @@ Theurgy makes these compromises against pure shell-first wizardry. Keep this tab
 - `src/` contains the Rust runtime and scaffold engine.
 - `docs/` contains architecture decisions.
 - `docs/platform-quarantine.md` defines where Apple and platform-specific machinery belongs.
+- `docs/mobile-browser-proof-quarantine.md` defines reusable closed-source mobile browser, simulator, adb, and signer proof patterns.
 - `docs/app-publish-secrets.md` documents protected app publishing credentials quarantined in theurgy.
 - `tools/release/` contains quarantined app verification, signing, notarization, TestFlight, App Store, and Play Store release adapters.
 - `.tests/release/` contains coverage for quarantined app-publishing release adapters.
