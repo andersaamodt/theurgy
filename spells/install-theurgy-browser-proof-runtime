@@ -13,9 +13,14 @@ Environment:
   THEURGY_PLAYWRIGHT_NODE       Node executable to use, default: node
   THEURGY_PLAYWRIGHT_NODE_PATH  Extra NODE_PATH for an existing Playwright package
   THEURGY_PLAYWRIGHT_CLI        Explicit path to playwright/cli.js
+  THEURGY_BROWSER_PROOF_RUNTIME_DIR
+                                User-local runtime root for the Playwright package
+  THEURGY_PLAYWRIGHT_PACKAGE    Package spec to install when Playwright is absent
 
 This spell does not use Homebrew. Browser binaries are installed through
-Playwright's own installer into Playwright's user-local cache.
+Playwright's own installer into Playwright's user-local cache. If Playwright is
+not already available, the package is installed under Theurgy's user-local state
+root rather than any app repository.
 USAGE
   exit 0
   ;;
@@ -27,6 +32,10 @@ PATH=/usr/bin:/bin:/usr/sbin:/sbin${PATH:+:$PATH}
 node_bin=${THEURGY_PLAYWRIGHT_NODE:-node}
 node_path=${THEURGY_PLAYWRIGHT_NODE_PATH:-}
 playwright_cli=${THEURGY_PLAYWRIGHT_CLI:-}
+state_home=${XDG_STATE_HOME:-${HOME:-/tmp}/.local/state}
+runtime_dir=${THEURGY_BROWSER_PROOF_RUNTIME_DIR:-$state_home/theurgy/browser-proof-runtime}
+runtime_node_path=$runtime_dir/node_modules
+playwright_package=${THEURGY_PLAYWRIGHT_PACKAGE:-playwright}
 
 if ! command -v "$node_bin" >/dev/null 2>&1; then
   printf '%s\n' "install-theurgy-browser-proof-runtime: missing Node executable: $node_bin" >&2
@@ -34,6 +43,37 @@ if ! command -v "$node_bin" >/dev/null 2>&1; then
 fi
 
 if [ -z "$playwright_cli" ]; then
+  if [ -n "$node_path" ]; then
+    search_node_path=$runtime_node_path:$node_path
+  else
+    search_node_path=$runtime_node_path
+  fi
+  playwright_cli=$(
+    NODE_PATH=$search_node_path "$node_bin" -e "
+const path = require('path');
+try {
+  const pkg = require.resolve('playwright/package.json');
+  console.log(path.join(path.dirname(pkg), 'cli.js'));
+} catch (error) {
+  process.exit(1);
+}
+" 2>/dev/null || true
+  )
+fi
+
+if [ -z "$playwright_cli" ] || [ ! -f "$playwright_cli" ]; then
+  if ! command -v npm >/dev/null 2>&1; then
+    printf '%s\n' 'install-theurgy-browser-proof-runtime: npm is needed to install the quarantined Playwright package.' >&2
+    exit 1
+  fi
+  mkdir -p "$runtime_dir"
+  printf '%s\n' "Installing Playwright package into $runtime_dir"
+  npm install --prefix "$runtime_dir" --no-audit --no-fund "$playwright_package"
+  if [ -n "$node_path" ]; then
+    node_path="$runtime_dir/node_modules:$node_path"
+  else
+    node_path="$runtime_dir/node_modules"
+  fi
   playwright_cli=$(
     NODE_PATH=$node_path "$node_bin" -e "
 const path = require('path');
@@ -48,7 +88,7 @@ try {
 fi
 
 if [ -z "$playwright_cli" ] || [ ! -f "$playwright_cli" ]; then
-  printf '%s\n' 'install-theurgy-browser-proof-runtime: could not find playwright/cli.js; set THEURGY_PLAYWRIGHT_NODE_PATH or THEURGY_PLAYWRIGHT_CLI' >&2
+  printf '%s\n' 'install-theurgy-browser-proof-runtime: could not find playwright/cli.js after installing the quarantined package.' >&2
   exit 1
 fi
 
