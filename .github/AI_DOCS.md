@@ -21,6 +21,9 @@
 - The enterprise web runtime harness integrates existing free software components through explicit Wizardry contracts; do not introduce a full static-site generator or CMS as the Gazeta/Desk-class runtime core.
 - The Product IR/native compiler track is opt-in; do not make existing shell-first wizardry-apps require theurgy to build or run.
 - Keep plain files as durable truth unless a documented transaction or scale requirement justifies more.
+- Prefer typed Rust enums, newtypes, typestates, and boundary records when they
+  can make authority, lifecycle, lane, proof, cache-key, or projection category
+  mistakes unrepresentable.
 - Keep Wizardry-facing names lowercase unless quoting a formal project name.
 - Generated blank projects use AGPL-3.0-or-later plus Wizardry Addendum.
 - Theurgy repository code is OWL 3.1 unless a file explicitly says otherwise.

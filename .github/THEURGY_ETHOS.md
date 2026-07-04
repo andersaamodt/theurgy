@@ -4,6 +4,9 @@
 - Expose user workflows as well-named spells, not a catch-all command with subcommands.
 - Minimize arguments; default paths should follow the project name when that is clear.
 - Move repeated, latency-sensitive, or graph-shaped work into integrated Rust.
+- Use Rust types to preclude categorical errors categorically: authorities,
+  lanes, lifecycle states, proofs, cache keys, and boundary envelopes should be
+  distinct types when that makes wrong combinations impossible to compile.
 - Do not paper over performance problems with one-off exceptions.
 - Keep the user-facing workflow convenient without hiding source files, Git history, or state paths.
 - Prefer file-first truth, deterministic indexes, and explicit build artifacts.
